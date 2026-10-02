@@ -26,7 +26,7 @@ export function renderLogic(ctx) {
     <ol class="flow">
       <li><b>出馬表を読む</b><span>前4走の走破タイム・着順・着差・上がり・通過順・騎手・馬場など</span></li>
       <li><b>ファクターを計算</b><span>スピード指数や適性など9項目</span></li>
-      <li><b>AI指数にまとめる</b><span>重み付けして1つの能力スコアに</span></li>
+      <li><b>能力スコアにまとめる</b><span>重み付けして1つに（AI指数はオッズを使わない評価）</span></li>
       <li><b>シミュレーション</b><span>揺らぎを加えて何万回も走らせる</span></li>
       <li><b>期待値で買い目を選ぶ</b><span>確率 × オッズで判断</span></li>
     </ol>

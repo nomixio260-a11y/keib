@@ -204,14 +204,19 @@ export function predictRace(race, settings = {}) {
   const market = marketModel(rows.map((r) => r.marketProb), sims, seed);
   const placeCount = placeCountOf(n);
 
-  const sMean = mean(rows.map((r) => r.score));
+  // AI指数：オッズを使わない「AI単独」の重みで見た能力（勝率は今の重み付けで計算）
+  const aiCoef = coefficients(PRESETS.ai.weights);
+  rows.forEach((r) => {
+    r.aiScore = FACTORS.reduce((acc, f) => acc + (f.key === 'market' ? 0 : aiCoef[f.key] * r.z[f.key]), 0);
+  });
+  const aiMean = mean(rows.map((r) => r.aiScore));
   rows.forEach((r, i) => {
     r.i = i;
     r.pWin = sim.win[i];
     r.pTop2 = sim.top2[i];
     r.pTop3 = sim.top3[i];
     r.posDist = Array.from(sim.posDist.subarray(i * n, i * n + n));
-    r.index = 50 + (10 * (r.score - sMean)) / INDEX_SCALE;
+    r.index = 50 + (10 * (r.aiScore - aiMean)) / INDEX_SCALE;
     r.odds = r.entry.odds > 1 ? r.entry.odds : null;
     r.ev = r.odds ? r.pWin * r.odds : null;
     const pPlace = placeCount === 3 ? r.pTop3 : r.pTop2;
@@ -228,6 +233,11 @@ export function predictRace(race, settings = {}) {
   order.forEach((r, k) => {
     r.rank = k + 1;
   });
+  [...rows]
+    .sort((a, b) => b.aiScore - a.aiScore)
+    .forEach((r, k) => {
+      r.aiRank = k + 1;
+    });
 
   return {
     race,

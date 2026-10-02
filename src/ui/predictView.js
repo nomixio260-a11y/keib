@@ -159,7 +159,7 @@ function detailPanel(entry, row, pred, ctx) {
     : '<p class="muted d-comment">出走取消のため予想から外しています。</p>';
   const analysis = row
     ? `<div class="d-block">
-        <h4 class="d-h">評価の内訳 <small>AI指数への寄与</small></h4>
+        <h4 class="d-h">評価の内訳 <small>能力スコアへの寄与（今の重み付け）</small></h4>
         ${contribBars(row, factors, maxAbs)}
       </div>
       <div class="d-block">
@@ -182,7 +182,7 @@ function detailPanel(entry, row, pred, ctx) {
         <div><dt>馬体重</dt><dd class="num">${esc(bw)}</dd></div>
         ${entry.placeMin > 1 ? `<div><dt>複勝オッズ</dt><dd class="num">${odds(entry.placeMin)}〜${odds(entry.placeMax)}</dd></div>` : ''}
         <div><dt>騎手成績</dt><dd class="num">${j ? `勝率 ${pct(j.winRate)}・複勝率 ${pct(j.top3Rate)}${j.starts ? `（${j.starts}騎乗）` : ''}` : '—'}</dd></div>
-        ${row ? `<div><dt>AI指数</dt><dd class="num">${fixed(row.index)}（${row.rank}位）</dd></div><div><dt>脚質</dt><dd>${esc(row.style.style)}</dd></div><div><dt>スピード指数</dt><dd class="num">最高 ${row.stats.bestSi != null ? row.stats.bestSi.toFixed(0) : '—'}・前走 ${row.stats.lastSi != null ? row.stats.lastSi.toFixed(0) : '—'}</dd></div>` : ''}
+        ${row ? `<div><dt>AI指数</dt><dd class="num">${fixed(row.index)}（${row.aiRank}位・勝率は${row.rank}位）</dd></div><div><dt>脚質</dt><dd>${esc(row.style.style)}</dd></div><div><dt>スピード指数</dt><dd class="num">最高 ${row.stats.bestSi != null ? row.stats.bestSi.toFixed(0) : '—'}・前走 ${row.stats.lastSi != null ? row.stats.lastSi.toFixed(0) : '—'}</dd></div>` : ''}
       </dl>
     </div>
   </div>`;
@@ -239,14 +239,14 @@ export function renderCardTable(pred, ctx) {
   return `<div class="card-tools">
       <div class="seg" role="group" aria-label="並び順">
         <span class="seg-label">並び順</span>
-        ${sortBtn('number', '馬番')}${sortBtn('ai', 'AI評価')}${hasResult ? sortBtn('finish', '着順') : ''}
+        ${sortBtn('number', '馬番')}${sortBtn('ai', '勝率順')}${hasResult ? sortBtn('finish', '着順') : ''}
       </div>
       <p class="card-hint">${pred.noOdds ? '単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。' : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
     </div>
     <div class="table-scroll card-scroll"><table class="card${hasResult ? ' has-fin' : ''}">
     <thead><tr>
       ${hasResult ? '<th class="c-fin" title="確定着順">着</th>' : ''}<th class="c-mark" title="印">印</th><th class="c-frame" title="枠番">枠</th><th class="c-num">馬番</th><th class="c-horse">馬名</th><th class="c-style">脚質</th>
-      <th class="c-index" title="レース内の偏差値（平均50）">AI指数</th><th class="c-win">勝率</th><th class="c-top3">複勝率</th><th class="c-odds">単勝</th><th class="c-ev" title="勝率 × 単勝オッズ。1.0を超えると理論上プラス">期待値</th><th class="c-toggle"><span class="sr-only">詳細</span></th>
+      <th class="c-index" title="オッズを使わない AI単独の評価をレース内の偏差値にしたもの（平均50）。勝率は今の重み付け（既定は総合）で計算">AI指数</th><th class="c-win">勝率</th><th class="c-top3">複勝率</th><th class="c-odds">単勝</th><th class="c-ev" title="勝率 × 単勝オッズ。1.0を超えると理論上プラス">期待値</th><th class="c-toggle"><span class="sr-only">詳細</span></th>
     </tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
