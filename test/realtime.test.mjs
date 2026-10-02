@@ -229,3 +229,21 @@ test('実際の複勝オッズがあれば下限で期待値を計算する', as
   const plain = predictRace(makeRace({ seed: 8 }), { sims: 2000 });
   assert.equal(priceTicket({ type: 'place', idx: [0] }, plain, 0.5).estimated, true);
 });
+
+test('オッズの推移を記録する（同じ時刻は重ねない）', async () => {
+  const os = await import('node:os');
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { appendOddsSnapshot, readJson } = await import('../src/collector/store.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'keib-odds-'));
+  const race = { id: '202605040211', date: '2026-10-04', course: '東京', raceNo: 11, oddsAt: '2026-10-04T05:00:00Z', entries: [{ number: 1, odds: 3.2, placeMin: 1.3, placeMax: 1.6 }, { number: 2, odds: null }] };
+  assert.equal(await appendOddsSnapshot(race, dir), true);
+  assert.equal(await appendOddsSnapshot(race, dir), false);
+  assert.equal(await appendOddsSnapshot({ ...race, oddsAt: '2026-10-04T05:10:00Z', entries: [{ number: 1, odds: 2.9 }] }, dir), true);
+  const doc = await readJson(path.join(dir, '2026', '202605040211.json'));
+  assert.equal(doc.snapshots.length, 2);
+  assert.deepEqual(doc.snapshots[0].win, { 1: 3.2 });
+  assert.deepEqual(doc.snapshots[0].place, { 1: [1.3, 1.6] });
+  assert.deepEqual(doc.snapshots[1].win, { 1: 2.9 });
+  await fs.rm(dir, { recursive: true, force: true });
+});

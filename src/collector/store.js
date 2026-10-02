@@ -10,6 +10,7 @@ export const DATA_DIR = process.env.KEIB_DATA_DIR || path.join(ROOT, 'data');
 export const HISTORY_DIR = path.join(DATA_DIR, 'history');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const BUNDLE_FILE = path.join(DATA_DIR, 'bundle.json');
+export const ODDS_DIR = path.join(DATA_DIR, 'odds');
 
 /** data/history の全レース記録（日付順） */
 export async function loadHistory(dir = HISTORY_DIR) {
@@ -43,4 +44,23 @@ export async function readJson(file) {
 export async function writeJson(file, data) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(data));
+}
+
+/**
+ * オッズの推移を記録する（data/odds/{年}/{レースID}.json）。
+ * 発売中のオッズは時間とともに動き、締切直前の動きには情報があると言われる。
+ * 学習に使えるのは記録をためてからなので、今は集めるだけ（リアルタイム版で動かしている間に貯まる）。
+ */
+export async function appendOddsSnapshot(race, dir = ODDS_DIR) {
+  if (!race?.id || !race.oddsAt || !race.entries?.some((e) => e.odds > 1)) return false;
+  const file = path.join(dir, String(race.date || '').slice(0, 4) || 'unknown', `${race.id}.json`);
+  const doc = (await readJson(file)) || { id: race.id, date: race.date, course: race.course, raceNo: race.raceNo, startTime: race.startTime, snapshots: [] };
+  if (doc.snapshots.at(-1)?.at === race.oddsAt) return false;
+  doc.snapshots.push({
+    at: race.oddsAt,
+    win: Object.fromEntries(race.entries.filter((e) => e.odds > 1).map((e) => [e.number, e.odds])),
+    place: Object.fromEntries(race.entries.filter((e) => e.placeMin > 1).map((e) => [e.number, [e.placeMin, e.placeMax]])),
+  });
+  await writeJson(file, doc);
+  return true;
 }

@@ -107,8 +107,9 @@ export function cardTtl(race, now) {
 /**
  * JRAから最新の出馬表・オッズと、発走後のレースの結果を取ってきてバンドルを更新する。
  * onRecord：結果が確定したレースの記録（data/history と同じ形）を受け取る
+ * onOdds：新しく取得したオッズ（出馬表）を受け取る（オッズの推移の記録用）
  */
-export async function refreshLive(client, bundle, { now = Date.now(), log = () => {}, onRecord = null } = {}) {
+export async function refreshLive(client, bundle, { now = Date.now(), log = () => {}, onRecord = null, onOdds = null } = {}) {
   let cards = 0;
   let results = 0;
   const meetings = await listCardMeetings(client);
@@ -146,8 +147,10 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
         race.oddsAt = new Date(client.fetchedAt?.(link.cardCname) ?? now).toISOString();
         race.status = 'card';
         // キャッシュから読んだだけ（中身が同じ）なら更新に数えない
-        if (!known || known.oddsAt !== race.oddsAt) cards++;
+        const fresh = !known || known.oddsAt !== race.oddsAt;
+        if (fresh) cards++;
         upsertRace(bundle, race);
+        if (fresh && onOdds) await onOdds(race);
       } catch (e) {
         log(`出馬表の取得に失敗 ${link.raceId}: ${e.message}`);
       }

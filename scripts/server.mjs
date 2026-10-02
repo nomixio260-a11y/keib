@@ -13,7 +13,7 @@ import path from 'node:path';
 import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
 
 const PORT = Number(process.env.PORT || 8080);
@@ -56,6 +56,7 @@ async function refresh() {
       onRecord: async (rec) => {
         if (await saveRecord(rec)) records.push(rec);
       },
+      onOdds: (race) => appendOddsSnapshot(race),
     });
     pruneBundle(bundle, { keepPast: KEEP_PAST });
     if (results) attachDayVariants(bundle, records, REAL_STATS);

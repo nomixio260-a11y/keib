@@ -13,7 +13,7 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
 
 const args = process.argv.slice(2);
@@ -54,6 +54,7 @@ if (!flag('offline')) {
   const { cards, results } = await refreshLive(client, bundle, {
     log,
     onRecord: records.length ? (rec) => saveRecord(rec) : null,
+    onOdds: records.length ? (race) => appendOddsSnapshot(race) : null,
   });
   log(`JRA：出馬表 ${cards}件・結果 ${results}件（通信 ${client.stats().requests}回）`);
 } else bundle.generatedAt = new Date().toISOString();
