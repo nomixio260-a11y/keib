@@ -162,7 +162,7 @@ test/          テスト（入力は手で書いた最小限のデータ）
 **2026-10-02 23:20 JST 更新**
 
 - **完了**：1年分（3,450レース）の収集 → 実データでの校正 → 学習に使っていない 7〜9月 864レースでの検証 → Artifact 公開。GitHub Actions で自動更新して GitHub Pages で公開する仕組み（`pages.yml`）と、Actions 上でリアルタイム版を Cloudflare Tunnel で一時公開する仕組み（`live.yml`）を追加。自信度ごとの◎の実績を画面に表示。
-- **いまの状態**：このブランチ（`ccr-5f5023aa-ovwgr9`）で Pages ワークフローを手動実行して動作確認中。**予定実行（schedule）は既定ブランチ（main）のワークフローしか動かない**ので、main に取り込むまでは自動更新は始まらない。Claude のルーティン（Artifact の更新）は費用がかかるため無効にした。
+- **いまの状態**：このブランチ（`ccr-5f5023aa-ovwgr9`）で Pages ワークフローを手動実行したところ、**JRA からの取り込み（63秒）・テスト・ビルドは成功**したが、GitHub Pages がまだ有効になっていないため公開の手前で止まった（`Create Pages site failed: Resource not accessible by integration`。ワークフローの権限では有効にできない）。**リポジトリの Settings → Pages → Source を「GitHub Actions」にして、Actions → Pages → Run workflow を再実行すれば公開される。** また、**予定実行（schedule）は既定ブランチ（main）のワークフローしか動かない**ので、main に取り込むまでは自動更新は始まらない。Claude のルーティン（Artifact の更新）は費用がかかるため無効にした。
 - **次にやること（候補）**：
   1. このブランチを main に取り込む（PR）→ Pages の schedule が動き出す。Settings → Pages の Source が「GitHub Actions」になっているか確認
   2. 週末の自動更新で結果が入り、◎の成績が開催日ごとに出るかを Pages で確認（10/3・10/4）
@@ -351,6 +351,7 @@ data/history/{年}/{レースID}.json … 過去の結果＋確定オッズ（�
 - 候補の特徴量：乗り替わり（jchg）・過去走の人気（ppop）・スピード指数の最高値と前走（smax・slast）。`npm run experiment` で比べてから本体に入れる。
 - 公開してはいけないもの：`data/`、`dist/data.json`、実データを埋め込んだ `dist/*.html`（Artifact は非公開で共有する）。
 - ルーティン（`trig_01CVLwcTdR1ieZxhbXh2H3Gj`、いまは無効）はブランチ `ccr-5f5023aa-ovwgr9` を使っている。有効に戻すなら、main にマージしたあとで指示文のブランチ名も変える。
-- Pages の `schedule` は既定ブランチでしか動かない。ブランチで試すときは **Actions → Pages → Run workflow** でブランチを選ぶ。
+- Pages の `schedule` は既定ブランチでしか動かない。ブランチで試すときは **Actions → Pages → Run workflow** でブランチを選ぶ。`live.yml` のような新しいワークフローは、既定ブランチにファイルが入るまで Run workflow の一覧に出ない。
+- GitHub Pages を有効にするのはワークフローの権限（GITHUB_TOKEN）ではできない（`configure-pages` の `enablement: true` は `Resource not accessible by integration` で失敗）。Settings → Pages で1回だけ手で設定する。
 - Live ワークフローの trycloudflare の URL は毎回変わり、誰でも開ける。終了時に `dist/live.json` を消して公開し直すので案内は消える（Pages 側の更新も `until` を過ぎた案内は載せない）。
 

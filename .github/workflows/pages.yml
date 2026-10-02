@@ -71,9 +71,23 @@ jobs:
           '
           ls -la dist
       - uses: actions/configure-pages@v5
+        id: pages
         if: steps.data.outputs.updated == 'true'
+        continue-on-error: true
         with:
           enablement: true
+      - name: GitHub Pages が有効でないときの案内
+        if: steps.pages.outcome == 'failure'
+        run: |
+          {
+            echo "## GitHub Pages がまだ有効になっていません"
+            echo
+            echo "リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にしてから、もう一度 **Run workflow** を実行してください（最初の1回だけ）。"
+            echo
+            echo "JRA からのデータ取り込みとビルドは成功しています。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::GitHub Pages が有効になっていません。Settings → Pages → Source を「GitHub Actions」にしてから再実行してください。"
+          exit 1
       - uses: actions/upload-pages-artifact@v3
         if: steps.data.outputs.updated == 'true'
         with:
