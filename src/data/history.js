@@ -67,6 +67,8 @@ export function preRaceCard(record, index, { maxPast = MAX_PAST } = {}) {
       bodyWeightDiff: r.bodyWeightDiff,
       odds: r.odds,
       popularity: r.popularity,
+      placeMin: r.placeMin ?? null,
+      placeMax: r.placeMax ?? null,
       scratched: r.finish === 0 && /取消|除外/.test(r.status || ''),
       past: hist.map((h) => runFromRecord(h.rec, h.runner)),
     };

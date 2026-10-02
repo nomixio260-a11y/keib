@@ -6,11 +6,13 @@
 //   DROP=pace,draw node scripts/experiment.mjs          … ファクターを外して比較
 //   EXTRA=jchg,ppop,smax,slast node scripts/experiment.mjs … 候補の特徴量を足して比較
 //   --no-variant                                        … 開催日ごとの馬場差なしで比較
+//   LAMBDA=100 node scripts/experiment.mjs              … 人気以外の係数を0に寄せる正則化の強さ
 //
 // 候補の特徴量（このファイルの extras）：
 //   jchg  … 騎手の乗り替わり（今回の騎手と前走の騎手の複勝率の差）
 //   ppop  … 過去走の人気（市場の過去の評価）
 //   smax  … 同じ芝ダでの最高スピード指数、slast … 前走のスピード指数
+//   mplace … 複勝オッズ（単勝とは別の投票）から見た評価
 // 出力の winLL は勝ち馬の対数尤度（大きいほど良い）、top1 は最上位の馬が勝った割合。
 import { loadHistory } from '../src/collector/store.js';
 import { statsForEngine, usable, PERIODS } from './calibrate.mjs';
@@ -51,8 +53,11 @@ function ll(data, keys, beta, stages = 3) {
   }
   return { winLL: s / data.length, top1: top1 / data.length };
 }
+// 正則化の強さ（人気以外のファクターを0に引き寄せる）。大きいほどオッズ寄りになる
+const LAMBDA = Number(process.env.LAMBDA || 1);
 function fit(data, keys) {
   const F = keys.length;
+  const lam = keys.map((k) => (k === 'market' ? 1 : LAMBDA));
   let beta = new Array(F).fill(0.1);
   for (let it = 0; it < 30; it++) {
     const g = new Array(F).fill(0);
@@ -81,8 +86,8 @@ function fit(data, keys) {
       });
     }
     for (let f = 0; f < F; f++) {
-      g[f] -= 2 * beta[f];
-      H[f][f] -= 2;
+      g[f] -= 2 * lam[f] * beta[f];
+      H[f][f] -= 2 * lam[f];
     }
     const step = solve(H.map((row) => row.map((v) => -v)), g);
     beta = beta.map((b, f) => b + step[f]);
@@ -114,15 +119,18 @@ function extras(row) {
   const wadj = e.weight > 0 ? -2 * (e.weight - 55) : 0;
   const smax = sis.length ? Math.max(...sis) + wadj : null;
   const slast = row.an?.[0]?.si != null ? row.an[0].si + wadj : null;
-  return { jchg, ppop: w ? s / w : null, smax, slast };
+  // 複勝オッズ（別の投票の市場）の評価：中央値の逆数の対数
+  const pm = e.placeMin > 0 && e.placeMax > 0 ? (e.placeMin + e.placeMax) / 2 : null;
+  const mplace = pm ? -Math.log(pm) : null;
+  return { jchg, ppop: w ? s / w : null, smax, slast, mplace };
 }
 const build = (recs) =>
   recs.map((rec) => {
     const card = preRaceCard(rec, index);
     const s = scoreRace(card, { stats });
     const ex = s.rows.map(extras);
-    const UNIT = { jchg: 0.1, ppop: 0.8, smax: 8, slast: 8 };
-    const MISS = { jchg: 0, ppop: -0.5, smax: -0.6, slast: -0.6 };
+    const UNIT = { jchg: 0.1, ppop: 0.8, smax: 8, slast: 8, mplace: 1 };
+    const MISS = { jchg: 0, ppop: -0.5, smax: -0.6, slast: -0.6, mplace: -1 };
     for (const key of Object.keys(UNIT)) {
       const vals = ex.map((x) => x[key]).filter((v) => v != null);
       const m = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
@@ -141,7 +149,9 @@ const baseKeys = FACTORS.map((f) => f.key).filter((k) => k !== 'market');
 const drop = (process.env.DROP || '').split(',').filter(Boolean);
 const ai = baseKeys.filter((k) => !drop.includes(k));
 const extra = (process.env.EXTRA || '').split(',').filter(Boolean);
-for (const [name, keys] of [['market', ['market']], ['AI', [...ai, ...extra]], ['AI+market', [...ai, ...extra, 'market']]]) {
+const combos = [['market', ['market']], ['AI', [...ai, ...extra]], ['AI+market', [...ai, ...extra, 'market']]];
+if (extra.includes('mplace')) combos.push(['market+place', ['market', 'mplace']]);
+for (const [name, keys] of combos) {
   const beta = fit(fitSet, keys);
   const r = ll(testSet, keys, beta);
   const rf = ll(fitSet, keys, beta);
