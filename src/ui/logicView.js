@@ -1,7 +1,7 @@
 // ロジック画面：予想の仕組みの説明
 
 import { PAYOUT_RATE, BET_LABEL } from '../engine/constants.js';
-import { FACTORS, NOISE_BASE, PRESETS, DEFAULT_PRESET } from '../engine/model.js';
+import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor } from '../engine/model.js';
 import { CALIBRATION } from '../engine/calibration.js';
 import { REAL_STATS } from '../engine/realStats.js';
 import { esc } from './format.js';
@@ -53,7 +53,7 @@ export function renderLogic(ctx) {
       </section>
       <section class="logic-sec">
         <h2>4. モンテカルロ・シミュレーション</h2>
-        <p>各馬の当日の走りを「能力スコア + 正規分布の揺らぎ」として、設定した回数（既定2万回）レースを走らせます。揺らぎの大きさは、過去走の成績が安定している馬ほど小さく、出走数が少ない馬・初めての芝ダートの馬ほど大きくしています（基準 ${esc(NOISE_BASE)}）。着順の集計から勝率・連対率・複勝率、そして馬連や三連単などすべての組み合わせの確率がまとめて出ます。</p>
+        <p>重みを推定したのと同じプラケット・ルース（多項ロジット）モデルで、1着から順に着順を引いてレースを設定した回数（既定2万回）走らせます。1着になる確率は「exp(能力スコア ÷ 温度)」に比例し、2着・3着は残りの馬で同じように決めます。着順ごとの温度（紛れの大きさ）も実際のレースで推定していて、2着・3着は1着より紛れが大きく出ます（いまの設定では ${tempsFor(state.weights, state.noise).map((t) => t.toFixed(2)).join(' / ')}）。着順の集計から勝率・連対率・複勝率、そして馬連や三連単などすべての組み合わせの確率がまとめて出ます。</p>
       </section>
       <section class="logic-sec">
         <h2>5. 期待値と推定オッズ</h2>

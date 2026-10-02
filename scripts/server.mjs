@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createJraClient } from '../src/collector/client.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, jstParts } from '../src/collector/bundle.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
 import { loadHistory, saveRecord, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
@@ -42,6 +42,7 @@ async function initial() {
   const prev = await readJson(BUNDLE_FILE);
   if (prev) mergeBundle(bundle, prev);
   attachDayVariants(bundle, records, REAL_STATS);
+  compactBundle(bundle);
   body = JSON.stringify({ ...bundle, live: true });
 }
 
@@ -58,6 +59,7 @@ async function refresh() {
     });
     pruneBundle(bundle, { keepPast: KEEP_PAST });
     if (results) attachDayVariants(bundle, records, REAL_STATS);
+    compactBundle(bundle);
     body = JSON.stringify({ ...bundle, live: true });
     lastError = null;
     if (cards || results) {

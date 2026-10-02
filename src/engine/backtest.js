@@ -59,8 +59,8 @@ export const BT_STRATEGIES = [
   },
   {
     key: 'ai',
-    label: 'AI推奨（バランス・1R千円）',
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'balance', blend: settings?.blend }).tickets,
+    label: 'AI推奨（的中重視・単複・1R千円）',
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, blend: settings?.blend }).tickets,
   },
   {
     key: 'fav',

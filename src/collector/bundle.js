@@ -234,6 +234,15 @@ export function mergeBundle(bundle, previous) {
   return bundle;
 }
 
+// 画面でもエンジンでも使わない過去走の項目（data.json を小さくするため落とす）
+const PAST_DROP = ['raceId', 'number', 'status', 'bodyWeight', 'winner'];
+
+/** 画面に渡す前に、使わない項目を落とす */
+export function compactBundle(bundle) {
+  for (const d of bundle.days) for (const r of d.races) for (const e of r.entries) for (const p of e.past || []) for (const k of PAST_DROP) delete p[k];
+  return bundle;
+}
+
 /** 古い開催日を落とす（結果のある日は keepPast 日分、これからの日はすべて残す） */
 export function pruneBundle(bundle, { keepPast = 4, today = jstParts().date } = {}) {
   const past = bundle.days.filter((d) => d.date < today).map((d) => d.date);

@@ -11,7 +11,7 @@
 import path from 'node:path';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { createJraClient } from '../src/collector/client.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, jstParts } from '../src/collector/bundle.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
 import { loadHistory, saveRecord, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
@@ -60,6 +60,7 @@ if (!flag('offline')) {
 
 pruneBundle(bundle, { keepPast, today });
 attachDayVariants(bundle, records, REAL_STATS, { today });
+compactBundle(bundle);
 await writeJson(out, bundle);
 const races = bundle.days.reduce((a, d) => a + d.races.length, 0);
 log(`書き出しました：${path.relative(ROOT, out)}（${bundle.days.length}日・${races}レース）`);

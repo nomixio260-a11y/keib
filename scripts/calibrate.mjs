@@ -5,7 +5,7 @@
 //
 // 1. 学習開始より前のレースで統計（基準タイム・上がり・枠順・騎手）を作る
 // 2. 学習期間の各レースについて「その時点の出馬表（前4走）」を作り、1〜3着の順番を最もよく説明する係数を推定
-//    （プラケット・ルース尤度）。重要度からウェイトの既定値を決め、シミュレーションの揺らぎも選ぶ
+//    （プラケット・ルース尤度）。重要度からウェイトの既定値を決め、着順ごとの温度（紛れの大きさ）も推定する
 // 3. 全期間の統計を src/engine/realStats.js、係数を src/engine/calibration.js に書き出す
 //
 // 検証（学習に使っていない直近のレース）は npm run evaluate で行う。
@@ -15,8 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeStats, computeDayVariants, jockeyRates, indexHistory, preRaceCard } from '../src/data/history.js';
 import { loadHistory, DATA_DIR } from '../src/collector/store.js';
-import { FACTORS, NOISE_BASE, scoreRace } from '../src/engine/model.js';
-import { simulate } from '../src/engine/simulate.js';
+import { FACTORS, scoreRace } from '../src/engine/model.js';
 import { mean, stdev } from '../src/engine/util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -168,19 +167,35 @@ function fitNonNeg(data, keys) {
   }
 }
 
-/** 勝ち馬の対数尤度が最も高くなる揺らぎの倍率 */
-function searchNoise(sample, scoresOf, label) {
-  let best = { c: 1.2, ll: -Infinity };
-  for (const c of [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.6, 1.8, 2.0]) {
+/**
+ * 着順ごとの温度（1着・2着・3着以下）。プラケット・ルースモデルで、その着順の対数尤度が
+ * 最も高くなる値を解析的に探す（シミュレーション不要）。2着・3着は紛れが大きいので温度が高めに出る。
+ */
+function fitTemps(data, scoresOf, label) {
+  const scores = data.map(scoresOf);
+  const stageLL = (k, T) => {
     let ll = 0;
-    sample.forEach((d, k) => {
-      const sim = simulate(scoresOf(d), d.u.map((v) => v * c), { sims: 2000, seed: 1234 + k });
-      ll += Math.log(Math.max(sim.win[d.order[0]], 1 / 4000));
+    data.forEach((d, j) => {
+      const sc = scores[j];
+      if (d.order.length <= k) return;
+      const done = new Set(d.order.slice(0, k));
+      const ids = sc.map((_, i) => i).filter((i) => !done.has(i));
+      const mx = Math.max(...ids.map((i) => sc[i] / T));
+      const Z = ids.reduce((a, i) => a + Math.exp(sc[i] / T - mx), 0);
+      ll += sc[d.order[k]] / T - mx - Math.log(Z);
     });
-    log(`  ${label} 倍率 ${c.toFixed(2)}  勝ち馬の対数尤度 ${(ll / sample.length).toFixed(4)}`);
-    if (ll > best.ll) best = { c, ll };
-  }
-  return best;
+    return ll;
+  };
+  const temps = [0, 1, 2].map((k) => {
+    let best = { t: 1, ll: -Infinity };
+    for (let t = 0.5; t <= 2.0001; t += 0.02) {
+      const ll = stageLL(k, t);
+      if (ll > best.ll) best = { t: +t.toFixed(2), ll };
+    }
+    log(`  ${label} ${k + 1}着の温度 ${best.t}（対数尤度/レース ${(best.ll / data.length).toFixed(4)}、温度1なら ${(stageLL(k, 1) / data.length).toFixed(4)}）`);
+    return best.t;
+  });
+  return temps;
 }
 
 async function main() {
@@ -206,7 +221,6 @@ async function main() {
     const idxOf = new Map(s.rows.map((r, i) => [r.entry.number, i]));
     return {
       z: s.rows.map((r) => r.z),
-      u: s.rows.map((r) => r.sigma / NOISE_BASE),
       order: card.result.map((num) => idxOf.get(num)).filter((v) => v != null),
     };
   });
@@ -242,11 +256,12 @@ async function main() {
   const totalScore = scoreWith(totalCoef);
   const indexScale = mean(data.map((d) => stdev(aiScore(d))));
 
-  log('揺らぎの大きさを探索中');
-  const sample = data.slice(-600);
-  const bestAi = searchNoise(sample, aiScore, 'AIのみ');
-  const bestTotal = searchNoise(sample, totalScore, '総合');
-  log('採用', bestAi.c, bestTotal.c);
+  log('着順ごとの温度を推定中');
+  const tempsAi = fitTemps(data, aiScore, 'AI単独');
+  const tempsTotal = fitTemps(data, totalScore, '総合');
+  // 市場（単勝オッズだけ）の構造：馬連・三連複などの「推定オッズ」を、予想と同じ形のモデルで作るため
+  const marketBeta = mktOnly.beta[0];
+  const tempsMarket = fitTemps(data, (d) => d.z.map((z) => marketBeta * z.market), '人気のみ');
   // 学習期間の対数尤度が高いほうを既定にする
   const defaultPreset = fitLL.total > fitLL.ai ? 'balance' : 'ai';
 
@@ -254,9 +269,9 @@ async function main() {
     coef: Object.fromEntries(Object.entries(coef).map(([k, v]) => [k, +v.toFixed(4)])),
     ref,
     combinedWeights,
-    combinedNoise: +(bestTotal.c / bestAi.c).toFixed(2),
+    temps: { ai: tempsAi, total: tempsTotal, market: tempsMarket },
+    marketBeta: +marketBeta.toFixed(4),
     defaultPreset,
-    noiseBase: bestAi.c,
     indexScale: +indexScale.toFixed(4),
     trainedOn: data.length,
     fitLL,

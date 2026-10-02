@@ -5,7 +5,7 @@
 
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
-import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS } from './engine/bets.js';
+import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
 import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
@@ -62,8 +62,8 @@ const state = {
   noise: (sameCal && Number(saved.noise)) || DEFAULT_NOISE,
   sims: [5000, 20000, 50000].includes(saved.sims) ? saved.sims : 20000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
-  strategy: STRATEGIES[saved.strategy] ? saved.strategy : 'balance',
-  betTypes: Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...BET_TYPES],
+  strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
+  betTypes: sameCal && Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...DEFAULT_TYPES],
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   blend: BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : DEFAULT_BLEND,
   expanded: {},

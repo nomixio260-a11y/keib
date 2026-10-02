@@ -2,7 +2,7 @@
 
 import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS, PRESETS } from '../engine/model.js';
-import { BLEND_OPTIONS, STRATEGIES, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { BLEND_OPTIONS, STRATEGIES, ESTIMATED_TYPES, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
@@ -308,6 +308,7 @@ export function renderBetsPanel(pred, rec, ctx) {
     <div class="seg strat-seg" role="group" aria-label="買い方">${strategies}</div>
     <p class="panel-note">${esc(STRATEGIES[state.strategy].desc)}</p>
     <div class="chips-row" role="group" aria-label="券種">${types}</div>
+    ${state.betTypes.some((t) => ESTIMATED_TYPES.includes(t)) ? '<p class="panel-note bet-caution">馬連・ワイド・馬単・三連複・三連単のオッズは単勝オッズからの推定です。実データの検証では、これらを期待値で選ぶと実際の払戻が見込みを大きく下回りました（人気薄の組み合わせほど実際の配当は低め）。参考程度にしてください。</p>' : ''}
     <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>

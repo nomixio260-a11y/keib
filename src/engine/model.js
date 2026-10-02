@@ -1,10 +1,10 @@
 // 予想モデル本体：ファクターを合成して能力スコアを出し、モンテカルロで確率に変換する。
 
 import { computeRaceFactors } from './factors.js';
-import { simulate, comboProbs } from './simulate.js';
-import { harville, estimateOdds, fitNormalStrengths } from './market.js';
+import { simulatePL, comboProbs } from './simulate.js';
+import { harville, estimateOdds } from './market.js';
 import { hashString } from './rng.js';
-import { clamp, mean, stdev } from './util.js';
+import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
 
 /**
@@ -47,7 +47,7 @@ export const PRESETS = {
   balance: {
     label: '総合',
     weights: TOTAL_WEIGHTS,
-    noise: CALIBRATION.combinedNoise ?? 1,
+    noise: 1,
     desc: 'AIの評価と単勝オッズを、実際のレースで最もよく当たる割合で組み合わせます。着順の予想はこれが一番正確です。',
   },
   ai: {
@@ -66,23 +66,22 @@ export const DEFAULT_NOISE = PRESETS[DEFAULT_PRESET].noise;
 /** 校正のたびに変わる目印（保存した重みが古い校正のものか見分ける） */
 export const CALIBRATION_ID = `${CALIBRATION.source || ''}|${CALIBRATION.trainedOn}|${CALIBRATION.period?.fit || ''}`;
 
-// シミュレーションの揺らぎ（スコア1あたり）と AI指数の目盛り
-export const NOISE_BASE = CALIBRATION.noiseBase;
+// 着順ごとの温度（1着・2着・3着以下）。重みと一緒に実データで推定（scripts/calibrate.mjs）。
+// 総合（人気の重みが大きい）と AI単独では尺度が違うので、人気の重みの割合で間をとる
+const TEMPS_AI = CALIBRATION.temps?.ai || [1, 1, 1];
+const TEMPS_TOTAL = CALIBRATION.temps?.total || TEMPS_AI;
+const MARKET_FULL = Math.max(1, CALIBRATION.combinedWeights?.market || 100);
+export function tempsFor(weights = DEFAULT_WEIGHTS, noise = 1) {
+  const share = clamp((Number(weights.market) || 0) / MARKET_FULL, 0, 1);
+  return TEMPS_AI.map((t, k) => (t + (TEMPS_TOTAL[k] - t) * share) * noise);
+}
+// AI指数の目盛り
 export const INDEX_SCALE = CALIBRATION.indexScale;
 
 export const DEFAULT_SETTINGS = { weights: DEFAULT_WEIGHTS, noise: DEFAULT_NOISE, sims: 20000 };
 
 /** 頭数ごとの複勝の払戻対象（8頭以上:3着まで、5〜7頭:2着まで、4頭以下:発売なし） */
 export const placeCountOf = (n) => (n >= 8 ? 3 : n >= 5 ? 2 : 0);
-
-function uncertainty(r) {
-  const n = r.stats.runs;
-  let u = 1 + 0.1 * Math.max(0, 3 - n);
-  const sis = r.an.filter((a) => a.si != null).map((a) => a.si);
-  if (sis.length >= 3) u *= clamp(0.85 + stdev(sis) / 30, 0.85, 1.2);
-  if (n > 0 && r.apt.sameSurf === 0) u *= 1.08;
-  return u;
-}
 
 export function coefficients(weights = DEFAULT_WEIGHTS) {
   return Object.fromEntries(FACTORS.map((f) => [f.key, (f.coef * (Number(weights[f.key]) || 0)) / f.ref]));
@@ -102,16 +101,19 @@ function standardize(rows) {
 }
 
 /**
- * 市場（単勝オッズ）から見た各券種の確率。
- * 単勝の確率を再現する正規モデルを当てはめてシミュレーションし、
- * 出現の少ない組み合わせは割引ハーヴィル式で補う。
+ * 市場（単勝オッズ）から見た各券種の確率。馬連・三連複などの「推定オッズ」と、期待値に混ぜる確率に使う。
+ * 予想と同じプラケット・ルースの形（人気だけで当てはめた係数と着順ごとの温度）でシミュレーションし、
+ * 出現の少ない組み合わせは割引ハーヴィル式で補う。形をそろえておかないと、モデルの違いだけで
+ * 「期待値が高い」ように見える組み合わせが出てしまう（実データの検証で確認）。
  */
+const MARKET_BETA = CALIBRATION.marketBeta ?? 1;
+const TEMPS_MARKET = CALIBRATION.temps?.market || [1, 1, 1];
 export function marketModel(q, sims = 20000, seed = 7) {
   const n = q.length;
   const h = harville(q);
   if (n < 2) return h;
-  const mu = fitNormalStrengths(q);
-  const sim = simulate(mu, new Array(n).fill(1), { sims, seed: (seed ^ 0x5bd1e995) >>> 0 });
+  const scores = q.map((v) => MARKET_BETA * Math.log(Math.max(v, 1e-6)));
+  const sim = simulatePL(scores, { sims, seed: (seed ^ 0x5bd1e995) >>> 0, temps: TEMPS_MARKET });
   const c = comboProbs(sim);
   const enough = 3 / sims;
   const pick = (mc, hv) => mc.map((v, k) => (v >= enough ? v : hv[k]));
@@ -147,7 +149,6 @@ export function scoreRace(race, settings = {}) {
       s += c;
     }
     r.score = s;
-    r.sigma = NOISE_BASE * uncertainty(r) * (settings.noise ?? 1);
   }
   return { ...fx, rows, coefs };
 }
@@ -194,10 +195,10 @@ export function predictRace(race, settings = {}) {
   // 単勝オッズがまだ出ていない（前日発売の前など）
   const noOdds = !rows.some((r) => r.entry.odds > 1);
   const seed = hashString(`${race.id}|${sims}`);
-  const sim = simulate(
+  const temps = tempsFor(settings.weights || DEFAULT_WEIGHTS, settings.noise ?? 1);
+  const sim = simulatePL(
     rows.map((r) => r.score),
-    rows.map((r) => r.sigma),
-    { sims, seed },
+    { sims, seed, temps },
   );
   const combos = comboProbs(sim);
   const market = marketModel(rows.map((r) => r.marketProb), sims, seed);
@@ -238,6 +239,7 @@ export function predictRace(race, settings = {}) {
     market,
     placeCount,
     noOdds,
+    temps,
     pace: scored.pace,
     straightBias: scored.straightBias,
     drawBias: scored.drawBias,

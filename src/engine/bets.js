@@ -205,6 +205,18 @@ export function allocate(tickets, budget, mode) {
 /** 期待値の計算でオッズ（市場）の確率を混ぜる既定の割合 */
 export const DEFAULT_BLEND = 0.5;
 
+/**
+ * 既定の買い方：的中重視 × 単勝・複勝。
+ * 実データの検証（学習に使っていない864レース）で、オッズが実際にわかる単勝・複勝は
+ * 期待回収率と実際の回収率がほぼ一致した（的中重視：期待87% → 実際92%）。
+ * 馬連〜三連単はオッズを単勝から推定するしかなく、期待値で選ぶと実際の払戻が見込みを大きく下回った
+ * （バランス：期待112% → 実際43%）ので、初期状態では使わない。
+ */
+export const DEFAULT_STRATEGY = 'hit';
+export const DEFAULT_TYPES = ['win', 'place'];
+/** オッズを推定するしかない券種（複勝は実際のオッズがないときだけ推定） */
+export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'];
+
 export const BLEND_OPTIONS = [
   { value: 0, label: '混ぜない（AIのみ）' },
   { value: 0.3, label: '30%' },
@@ -212,7 +224,7 @@ export const BLEND_OPTIONS = [
   { value: 0.7, label: '70%' },
 ];
 
-export function recommendBets(pred, { budget = 3000, strategy = 'balance', types = BET_TYPES, blend = DEFAULT_BLEND } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend = DEFAULT_BLEND } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   // オッズが出るまでは期待値を計算できない
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };

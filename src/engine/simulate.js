@@ -1,7 +1,9 @@
 // モンテカルロ・レースシミュレーション
 //
-// 各馬の当日のパフォーマンスを「能力スコア + 正規分布の揺らぎ」として何万回も走らせ、
-// 着順の分布から勝率・連対率・複勝率と各券種の的中確率を求める。
+// simulatePL：重みを推定したのと同じプラケット・ルース（多項ロジット）モデルで、1着から順に着順を引いていく。
+//   1着は exp(スコア/T1)、2着は残りの馬で exp(スコア/T2)、3着以下は exp(スコア/T3) に比例する確率。
+//   着順ごとの温度 T は実際のレースで推定（2着・3着は1着より紛れが大きい）。予想に使う。
+// simulate：能力スコア + 正規分布の揺らぎ。単勝オッズから市場の券種別の確率を作るのに使う。
 
 import { createRng } from './rng.js';
 
@@ -30,6 +32,52 @@ export function simulate(strengths, sigmas, { sims = 20000, seed = 1 } = {}) {
     top[base] = order[0];
     if (n > 1) top[base + 1] = order[1];
     if (n > 2) top[base + 2] = order[2];
+  }
+
+  const posDist = new Float64Array(n * n);
+  const win = new Float64Array(n);
+  const top2 = new Float64Array(n);
+  const top3 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    for (let r = 0; r < n; r++) posDist[i * n + r] = posCount[i * n + r] / sims;
+    win[i] = posDist[i * n];
+    top2[i] = win[i] + (n > 1 ? posDist[i * n + 1] : 0);
+    top3[i] = top2[i] + (n > 2 ? posDist[i * n + 2] : 0);
+  }
+  return { n, sims, posDist, win, top2, top3, samples: top };
+}
+
+/**
+ * プラケット・ルースモデルで着順を引く。temps = [1着, 2着, 3着以下] の温度（大きいほど紛れる）。
+ * 返り値は simulate と同じ形（着順分布・勝率・連対率・複勝率・上位3頭のサンプル）。
+ */
+export function simulatePL(scores, { sims = 20000, seed = 1, temps = [1, 1, 1] } = {}) {
+  const n = scores.length;
+  const rng = createRng(seed);
+  const mx = Math.max(...scores);
+  const w = [0, 1, 2].map((k) => Float64Array.from(scores, (v) => Math.exp((v - mx) / Math.max(0.05, temps[k] ?? 1))));
+  const used = new Uint8Array(n);
+  const posCount = new Float64Array(n * n);
+  const top = new Int16Array(sims * 3).fill(-1);
+
+  for (let s = 0; s < sims; s++) {
+    used.fill(0);
+    for (let r = 0; r < n; r++) {
+      const wk = w[r < 2 ? r : 2];
+      let total = 0;
+      for (let i = 0; i < n; i++) if (!used[i]) total += wk[i];
+      let u = rng.next() * total;
+      let pick = -1;
+      for (let i = 0; i < n; i++) {
+        if (used[i]) continue;
+        pick = i;
+        u -= wk[i];
+        if (u <= 0) break;
+      }
+      used[pick] = 1;
+      posCount[pick * n + r]++;
+      if (r < 3) top[s * 3 + r] = pick;
+    }
   }
 
   const posDist = new Float64Array(n * n);
