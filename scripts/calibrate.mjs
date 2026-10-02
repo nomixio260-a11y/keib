@@ -14,7 +14,8 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeStats, computeDayVariants, jockeyRates, indexHistory, preRaceCard } from '../src/data/history.js';
-import { loadHistory, DATA_DIR } from '../src/collector/store.js';
+import { conditionRates } from '../src/data/rates.js';
+import { loadHistory, DATA_DIR, loadHorseInfo } from '../src/collector/store.js';
 import { FACTORS, scoreRace } from '../src/engine/model.js';
 import { mean, stdev } from '../src/engine/util.js';
 
@@ -34,8 +35,15 @@ const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`,
  * 統計オブジェクト（エンジンが使う形）。
  * variantRecords：開催日ごとの馬場差を出すレース（各日の値はその日の結果だけで決まるので、全期間を渡してよい）
  */
+let HORSE_INFO = null;
+/** 血統（data/horses）を一度だけ読む。なければ空 */
+export async function horseInfoOnce() {
+  if (!HORSE_INFO) HORSE_INFO = await loadHorseInfo();
+  return HORSE_INFO;
+}
 export function statsForEngine(records, variantRecords = records) {
   const s = computeStats(records);
+  const cond = conditionRates(records, { horseInfo: HORSE_INFO });
   const jr = jockeyRates(s.jockeys);
   const tr = jockeyRates(s.trainers);
   // 基準タイムの全体式 a × (d/1200)^b を芝・ダート別に当てはめ
@@ -88,6 +96,7 @@ export function statsForEngine(records, variantRecords = records) {
         .map(([k, v]) => [k, { starts: v.starts, winRate: round3(v.winRate), top3Rate: round3(v.top3Rate) }]),
     ),
     trainerAverage: { winRate: round3(tr.average.winRate), top3Rate: round3(tr.average.top3Rate) },
+    ...cond,
   };
 }
 
@@ -206,6 +215,8 @@ async function main() {
     process.exit(1);
   }
   log(`${all.length}レース（${all[0].date}〜${all[all.length - 1].date}）`);
+  const hi = await horseInfoOnce();
+  if (hi.size) log(`血統のある馬：${hi.size}頭`);
   const index = indexHistory(all);
   const statsTrain = statsForEngine(
     all.filter((r) => r.date < PERIODS.calStart),

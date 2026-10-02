@@ -446,3 +446,54 @@ export function parseExoticOdds(html) {
   return { type, odds, range, count: Object.keys(odds).length };
 }
 
+
+/**
+ * 競走馬情報ページ（pw01dud…）：血統・生年月日・調教師と、出走履歴（日付・競馬場・レースID・着順など）。
+ * 返り値 { name, sex, sire, dam, damSire, damDam, birth: 'YYYY-MM-DD', trainer, owner, breeder, runs: [{ date, course, raceId, raceName, finish, popularity, fieldSize, ... }] }
+ */
+export function parseHorsePage(html) {
+  const root = parse(String(html));
+  const out = { name: '', sex: '', sire: '', dam: '', damSire: '', damDam: '', birth: null, trainer: '', owner: '', breeder: '', runs: [] };
+  const h = root.querySelectorAll('h1, h2, h3').map((e) => clean(e.text)).find((t) => /競走馬情報/.test(t)) || '';
+  // 見出し「競走馬情報 タマモビスケット Tamamo Biscuit（JPN） 抹消年月日 …」→ 馬名（最初の英字より前）
+  out.name = (clean(h.replace(/競走馬情報/, '')).match(/^[^A-Za-z(（]+/) || [''])[0].trim();
+  for (const dl of root.querySelectorAll('.profile dl')) {
+    const k = clean(dl.querySelector('dt')?.text || '');
+    const v = clean(dl.querySelector('dd')?.text || '').replace(/産駒$/, '').trim();
+    if (k === '父') out.sire = v;
+    else if (k === '母') out.dam = v;
+    else if (k === '母の父') out.damSire = v;
+    else if (k === '母の母') out.damDam = v;
+    else if (k === '性別') out.sex = v;
+    else if (k === '調教師名') out.trainer = v.replace(/[（(].*$/, '').trim();
+    else if (k === '馬主名') out.owner = v;
+    else if (k === '生産牧場') out.breeder = v;
+    else if (k === '生年月日') out.birth = parseJpDate(v);
+  }
+  for (const tr of root.querySelectorAll('table tbody tr')) {
+    const tds = tr.querySelectorAll('td');
+    if (tds.length < 14 || !tds[0].classList?.contains('date')) continue;
+    const txt = tds.map((td) => clean(td.text));
+    const key = raceKeyFromCname(tds[2].querySelector('a')?.getAttribute('href') || '');
+    const dm = txt[3].match(/(芝|ダ|障)(\d{3,4})/);
+    out.runs.push({
+      date: parseJpDate(txt[0]),
+      course: txt[1],
+      raceId: key?.raceId || null,
+      raceName: txt[2],
+      surface: dm ? dm[1] : null,
+      distance: dm ? Number(dm[2]) : null,
+      going: txt[4] || null,
+      fieldSize: toInt(txt[5]),
+      popularity: toInt(txt[6]),
+      finish: /^\d+$/.test(txt[7]) ? Number(txt[7]) : 0,
+      status: /^\d+$/.test(txt[7]) ? '' : txt[7],
+      jockey: txt[8],
+      weight: toFloat(txt[9]),
+      bodyWeight: toInt(txt[10]),
+      time: parseRaceTime(txt[11]),
+      winner: txt[13],
+    });
+  }
+  return out;
+}

@@ -92,3 +92,20 @@ export async function loadHorseSnapshots() {
   const { careerFromRow } = await import('../engine/features.js');
   return { asOf: doc.asOf, size: Object.keys(doc.horses).length, get: (id) => careerFromRow(doc.horses[id]) };
 }
+
+/** data/horses/{馬ID}.json（scripts/collect-horses.mjs が集めた血統・生年月日）→ Map(馬ID → { sire, damSire, birth, ... }) */
+export async function loadHorseInfo() {
+  const dir = path.join(DATA_DIR, 'horses');
+  const map = new Map();
+  if (!existsSync(dir)) return map;
+  for (const f of await readdir(dir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const h = JSON.parse(await readFile(path.join(dir, f), 'utf8'));
+      if (h?.id) map.set(h.id, { sire: h.sire || '', damSire: h.damSire || '', birth: h.birth || null, sex: h.sex || '' });
+    } catch {
+      /* 壊れたファイルは飛ばす */
+    }
+  }
+  return map;
+}

@@ -9,7 +9,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadHistory, statsForEngine, usable, PERIODS } from './calibrate.mjs';
+import { loadHistory, statsForEngine, usable, PERIODS, horseInfoOnce } from './calibrate.mjs';
 import { attachFinalExoticOdds } from '../src/collector/store.js';
 import { indexHistory, preRaceCard, attachCareer } from '../src/data/history.js';
 import { GBDT_READY } from '../src/engine/gbdt.js';
@@ -21,6 +21,7 @@ const pct = (v) => `${(v * 100).toFixed(1)}%`;
 
 const all = await loadHistory();
 const index = indexHistory(all);
+const horseInfo = await horseInfoOnce();
 const stats = statsForEngine(
   all.filter((r) => r.date < PERIODS.testStart),
   all,

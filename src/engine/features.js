@@ -71,10 +71,14 @@ export const FEATURE_NAMES = [
   'n4', 'lastFin', 'lastMargin', 'meanPos', 'wins4', 'top3_4', 'siBest4', 'siBest4Rel', 'siBest4Rank', 'siLast4', 'siMean4', 'siTrend', 'daysSince', 'classDelta', 'lastClass', 'distDelta', 'sameSurf4', 'sameCourse4', 'lastPop', 'lastBeatenFav', 'jockeyChange', 'earlyPos', 'styleKnown', 'closingBest', 'lastL3Rank', 'lastFieldSize', 'lastOddsLog', 'weightDelta', 'jWinDelta', 'siLast4Rel',
   // 通算（データベース）
   'cKnown', 'cStarts', 'cWinRate', 'cTop3Rate', 'cSiBest', 'cSiMean', 'cPosMean', 'cBestClass', 'cEloKnown', 'cElo', 'cEloRel',
-  // 騎手・厩舎
-  'jWin', 'jTop3', 'jStarts', 'tWin', 'tTop3',
+  // 騎手・厩舎（全体と、競馬場・芝ダ・コンビの条件つき）
+  'jWin', 'jTop3', 'jStarts', 'tWin', 'tTop3', 'jWinCourse', 'tWinSurf', 'pairWin', 'pairStarts',
+  // 今日の相手との対戦成績（前4走で同じレースに出た相手に先着したか。人気の高い相手ほど重く）
+  'h2h', 'h2hN',
+  // 血統：父・母の父の芝ダ別の成績（出馬表の父・母の父と、統計の表から）
+  'sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'damSireWinSurf',
   // レースの条件
-  'n', 'isTurf', 'dist', 'gradeLevel', 'heavy', 'straight', 'drawInner',
+  'n', 'isTurf', 'dist', 'gradeLevel', 'heavy', 'straight', 'drawInner', 'handicap', 'qFav', 'qEntropy',
 ];
 
 const F = Object.fromEntries(FEATURE_NAMES.map((k, i) => [k, i]));
@@ -129,6 +133,34 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
   const sb = straightBias(race.course, race.surface, race.distance);
   const db = stats.draw?.[`${race.course}|${race.surface}|${race.distance}`] ?? drawBias(race.course, race.surface, race.distance) * 0.5;
   const heavy = race.going === '重' || race.going === '不良' ? 1 : 0;
+  const handicap = /ハンデ/.test(`${race.weightRule || ''}${race.rule || ''}${race.name || ''}`) ? 1 : 0;
+  // 市場の形：1番人気の確率と、人気の散らばり（エントロピー）
+  const qn = rows.map((r) => r.marketProb / qSum);
+  const qFav = Math.max(...qn);
+  const qEntropy = -qn.reduce((a, q) => a + (q > 0 ? q * Math.log(q) : 0), 0);
+  // 対戦成績：前走までで同じレースに出た今日の相手に先着したか（相手の人気で重み付け）
+  const finOf = rows.map((r) => new Map(r.runs.filter((q) => q.raceId).map((q) => [q.raceId, q.finish])));
+  const h2h = rows.map((r, i) => {
+    let s = 0;
+    let w = 0;
+    let cnt = 0;
+    for (let j = 0; j < rows.length; j++) {
+      if (j === i) continue;
+      for (const [rid, fi] of finOf[i]) {
+        const fj = finOf[j].get(rid);
+        if (fj == null || !(fi > 0) || !(fj > 0)) continue;
+        s += (fi < fj ? 1 : -1) * qn[j];
+        w += qn[j];
+        cnt++;
+      }
+    }
+    return { v: w ? s / w : 0, n: cnt };
+  });
+  const jc = stats.jockeyCourse || {};
+  const ts = stats.trainerSurface || {};
+  const pr = stats.pair || {};
+  const ss = stats.sireSurface || {};
+  const ds = stats.damSireSurface || {};
 
   // 対戦成績の評価（レーティング）：わかっている馬の中での相対値。わからない馬は平均より少し下とみなす
   const careers = rows.map((r) => careerOf(r.entry));
@@ -226,6 +258,20 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
     const t = tk[e.trainer];
     set('tWin', t?.winRate ?? tAvg.winRate);
     set('tTop3', t?.top3Rate ?? tAvg.top3Rate);
+    set('jWinCourse', jc[`${e.jockey}|${race.course}`]?.winRate ?? j?.winRate ?? jAvg.winRate);
+    set('tWinSurf', ts[`${e.trainer}|${race.surface}`]?.winRate ?? t?.winRate ?? tAvg.winRate);
+    const pair = pr[`${e.jockey}|${e.trainer}`];
+    set('pairWin', pair?.winRate ?? j?.winRate ?? jAvg.winRate);
+    set('pairStarts', Math.log1p(pair?.starts ?? 0));
+    set('h2h', h2h[i].v);
+    set('h2hN', h2h[i].n);
+    const sire = e.sire ? ss[`${e.sire}|${race.surface}`] : null;
+    const dsire = e.damSire ? ds[`${e.damSire}|${race.surface}`] : null;
+    set('sireKnown', sire ? 1 : 0);
+    set('sireWinSurf', sire?.winRate ?? jAvg.winRate);
+    set('sireTop3Surf', sire?.top3Rate ?? jAvg.top3Rate);
+    set('sireStarts', Math.log1p(sire?.starts ?? 0));
+    set('damSireWinSurf', dsire?.winRate ?? jAvg.winRate);
     set('n', n);
     set('isTurf', race.surface === '芝' ? 1 : 0);
     set('dist', (race.distance || 1600) / 1000);
@@ -233,6 +279,9 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
     set('heavy', heavy);
     set('straight', sb);
     set('drawInner', db * r.inner);
+    set('handicap', handicap);
+    set('qFav', qFav);
+    set('qEntropy', qEntropy);
     return { entry: e, number: e.number, x, marketProb: r.marketProb, row: r };
   });
   return { rows: out, names: FEATURE_NAMES, pace: fx.pace };

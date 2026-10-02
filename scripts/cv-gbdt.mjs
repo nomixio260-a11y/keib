@@ -68,6 +68,10 @@ for (const cfg of configs) {
   const params = { ...DEFAULT_PARAMS, rounds: MAX_ROUNDS, patience: Number(process.env.PATIENCE || 100), ...cfg };
   delete params.drop;
   delete params.only;
+  delete params.beta;
+  // beta：出発点を beta × log(市場確率) にする（人気薄の過大評価の補正を出発点に入れる試み）
+  const beta = cfg.beta ?? 1;
+  for (const s of splits) for (const d of [s.fit, s.valid]) for (let i = 0; i < d.n; i++) d.base[i] = d.base0[i] * beta;
   const curves = splits.map((s, k) => trainBoost({ fit: s.fit, valids: [s.valid], thresholds: s.thresholds, feats, params, seed: 1000 + k }).curve);
   // ラウンドごとの平均（早く止まった分割は最後の値を引き継ぐ）
   const R = Math.max(...curves.map((c) => c.length));

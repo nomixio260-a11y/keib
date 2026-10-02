@@ -6,7 +6,7 @@
 
 export const BINS = 64;
 
-export const DEFAULT_PARAMS = { rounds: 600, depth: 3, lr: 0.04, lambda: 5, minH: 3, colsample: 0.7, subsample: 0.8, patience: 80, topk: 1, stageWeight: 0.5 };
+export const DEFAULT_PARAMS = { rounds: 600, depth: 3, lr: 0.04, lambda: 5, minH: 3, colsample: 0.7, subsample: 0.8, patience: 80, topk: 1, stageWeight: 0.5, halfLife: 0 };
 
 /** 行をレースごとにまとめ、日付順に並べる */
 export function groupRaces(rows) {
@@ -23,21 +23,24 @@ export function flatten(races, Fn, { baseIndex = -1 } = {}) {
   const finish = new Int16Array(n);
   const bwHidden = new Uint8Array(n);
   const base = new Float64Array(n);
+  const day = new Int32Array(n);
   const start = new Int32Array(races.length + 1);
   let k = 0;
   races.forEach((rs, ri) => {
     start[ri] = k;
+    const dn = Math.floor(Date.parse(`${rs[0].date}T00:00:00Z`) / 86400000) || 0;
     for (const r of rs) {
       for (let f = 0; f < Fn; f++) X[k * Fn + f] = r.x[f];
       y[k] = r.y;
       finish[k] = r.finish || 0;
       bwHidden[k] = r.bwHidden || 0;
       base[k] = baseIndex >= 0 ? r.x[baseIndex] : 0;
+      day[k] = dn;
       k++;
     }
   });
   start[races.length] = k;
-  return { n, X, y, finish, bwHidden, base, start, races, Fn };
+  return { n, X, y, finish, bwHidden, base, base0: Float64Array.from(base), day, start, races, Fn };
 }
 
 /** ビンの境界（学習データの分位点） */
@@ -108,7 +111,7 @@ export function softmax(d, margin, p) {
  * 1着はレース全体のソフトマックス、2着は1着を除いた残りの中のソフトマックス、…と続ける（線形モデルの PL 当てはめと同じ形）。
  * 1着だけ（topk=1）より1レースから学べる情報が増える。後ろの段階の重みは stageWeight^段階
  */
-export function plGradients(d, margin, g, h, topk = 1, stageWeight = 0.5) {
+export function plGradients(d, margin, g, h, topk = 1, stageWeight = 0.5, rowWeight = null) {
   g.fill(0);
   h.fill(0);
   const tmp = new Float64Array(32);
@@ -130,10 +133,11 @@ export function plGradients(d, margin, g, h, topk = 1, stageWeight = 0.5) {
         tmp[i - a] = f > s || f === 0 ? Math.exp(margin[i] - mx) : 0;
         Z += tmp[i - a];
       }
-      const w = Math.pow(stageWeight, s);
+      const ws = Math.pow(stageWeight, s);
       for (let i = a; i < bnd; i++) {
         if (!tmp[i - a]) continue;
         const p = tmp[i - a] / Z;
+        const w = rowWeight ? ws * rowWeight[i] : ws;
         g[i] += w * (p - (i === target ? 1 : 0));
         h[i] += w * Math.max(p * (1 - p), 1e-6);
       }
@@ -233,9 +237,17 @@ export function trainBoost({ fit, valids = [], thresholds, feats, params = DEFAU
   const h = new Float64Array(fit.n);
   const trees = [];
   const curve = [];
+  // 最近のレースほど重く（halfLife 日で半分）。市場の効率やオッズの癖はゆっくり変わるため
+  let rowWeight = null;
+  if (P.halfLife > 0) {
+    let maxDay = 0;
+    for (let i = 0; i < fit.n; i++) if (fit.day[i] > maxDay) maxDay = fit.day[i];
+    rowWeight = new Float64Array(fit.n);
+    for (let i = 0; i < fit.n; i++) rowWeight[i] = Math.pow(0.5, (maxDay - fit.day[i]) / P.halfLife);
+  }
   let best = { round: 0, ll: valids.length ? softmax(valids[0], mV[0], pV[0]).ll : -Infinity };
   for (let round = 1; round <= P.rounds; round++) {
-    plGradients(fit, mFit, g, h, P.topk, P.stageWeight);
+    plGradients(fit, mFit, g, h, P.topk, P.stageWeight, rowWeight);
     // レース単位で行をサンプリング、特徴量もサンプリング
     const idx = [];
     for (let ri = 0; ri < fit.races.length; ri++) if (rnd() < P.subsample) for (let i = fit.start[ri]; i < fit.start[ri + 1]; i++) idx.push(i);

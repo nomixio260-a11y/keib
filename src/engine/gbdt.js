@@ -34,7 +34,7 @@ export function gbdtScores(race, opts = {}) {
   const fx = raceFeatures(race, opts);
   const rows = fx.rows.map((r) => {
     const adj = treeSum(r.x);
-    return { ...r, adj, score: (GBDT_MODEL.base === 'logq' ? r.x[iLogq] : 0) + adj };
+    return { ...r, adj, score: (GBDT_MODEL.base === 'logq' ? (GBDT_MODEL.baseScale || 1) * r.x[iLogq] : 0) + adj };
   });
   return { rows, pace: fx.pace, temps: GBDT_MODEL.temps || [1, 1, 1] };
 }

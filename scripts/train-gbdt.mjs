@@ -22,6 +22,7 @@ const NO_MARKET = process.env.NO_MARKET === '1';
 const FIXED_ROUNDS = Number(process.env.FIXED_ROUNDS || 0);
 const BAGS = Math.max(1, Number(process.env.BAGS || 1));
 const SEED = Number(process.env.SEED || 12345);
+const BETA = Number(process.env.BETA || 1);
 const params = {
   ...DEFAULT_PARAMS,
   rounds: Number(process.env.ROUNDS || (FIXED_ROUNDS || DEFAULT_PARAMS.rounds)),
@@ -34,6 +35,7 @@ const params = {
   patience: FIXED_ROUNDS ? 0 : DEFAULT_PARAMS.patience,
   topk: Number(process.env.TOPK || DEFAULT_PARAMS.topk),
   stageWeight: Number(process.env.STAGE_W || DEFAULT_PARAMS.stageWeight),
+  halfLife: Number(process.env.HALF_LIFE || DEFAULT_PARAMS.halfLife),
 };
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -59,6 +61,7 @@ const thresholds = makeThresholds(fit);
 binize(fit, thresholds);
 const valid = validRaces.length ? binize(flatten(validRaces, Fn, { baseIndex }), thresholds) : null;
 const test = binize(flatten(testRaces, Fn, { baseIndex }), thresholds);
+if (BETA !== 1) for (const d of [fit, valid, test]) if (d) for (let i = 0; i < d.n; i++) d.base[i] = d.base0[i] * BETA;
 
 const base0 = { fit: evalTrees([], fit), valid: valid ? evalTrees([], valid) : null, test: evalTrees([], test) };
 log(`出発点（${NO_MARKET ? '一様' : '市場のみ'}）：学習 ${base0.fit.ll.toFixed(4)}${valid ? ` 判定 ${base0.valid.ll.toFixed(4)}` : ''} 検証 ${base0.test.ll.toFixed(4)} top1 ${(base0.test.top1 * 100).toFixed(1)}%`);
@@ -113,10 +116,11 @@ if (!process.argv.includes('--dry')) {
   const model = {
     names,
     base: NO_MARKET ? 'none' : 'logq',
+    baseScale: BETA,
     trees: compactTrees(all),
     trainedOn: { races: fitRaces.length + validRaces.length, from: trainRaces[0]?.[0].date, to: trainRaces[trainRaces.length - 1]?.[0].date },
     test: { from: TEST_START, races: testRaces.length, ll: +res.test.ll.toFixed(4), baseLL: +base0.test.ll.toFixed(4), top1: +res.test.top1.toFixed(4), baseTop1: +base0.test.top1.toFixed(4) },
-    params: { rounds: all.length, depth: params.depth, lr: params.lr, lambda: params.lambda, colsample: params.colsample, subsample: params.subsample, topk: params.topk, stageWeight: params.stageWeight, bags: BAGS, drop: [...drop].map((f) => names[f]) },
+    params: { rounds: all.length, depth: params.depth, lr: params.lr, lambda: params.lambda, colsample: params.colsample, subsample: params.subsample, topk: params.topk, stageWeight: params.stageWeight, halfLife: params.halfLife, beta: BETA, bags: BAGS, drop: [...drop].map((f) => names[f]) },
     temps,
   };
   const file = path.join(ROOT, 'src/engine', NO_MARKET ? 'gbdtModelAi.js' : 'gbdtModel.js');
