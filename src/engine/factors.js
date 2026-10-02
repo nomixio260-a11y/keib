@@ -79,27 +79,20 @@ export function paceFromEarly(earlies) {
   return { z, front, second, label: z >= 0.35 ? 'H' : z <= -0.35 ? 'S' : 'M' };
 }
 
-/** スピード指数の平均を、今回の斤量で走ったときの水準に直す（1kg ≒ 2ポイント） */
+/**
+ * スピード指数：同じ芝ダでの最高値（持ち時計）を、今回の斤量で走ったときの水準に直す（1kg ≒ 2ポイント）。
+ * 実データでの比較（scripts/experiment.mjs）で、平均よりも最高値のほうが着順をよく説明した。
+ * 1年以上前の走は少し割り引き、同じ芝ダの走がなければ別の芝ダの最高値から割り引いて使う。
+ */
 function speedFactor(an, entry, race) {
-  // 今回と条件（芝ダ・距離）が近い走ほど重視
-  const items = an
-    .filter((a) => a.si != null)
-    .map((a) => ({
-      si: a.si,
-      w: a.recency * (a.sameSurface ? 1 : 0.35) * Math.exp(-Math.abs(a.run.distance - race.distance) / 700),
-    }));
+  const items = an.filter((a) => a.si != null);
   if (!items.length) return null;
-  // 上位3走をやや重視（凡走には展開や不利など理由があることが多い）
-  items.sort((x, y) => y.si - x.si);
-  let s = 0;
-  let w = 0;
-  items.forEach((it, idx) => {
-    const ww = it.w * (idx < 3 ? 1 : 0.7);
-    s += ww * it.si;
-    w += ww;
-  });
+  const ageOf = (a) => (race?.date && a.run.date ? daysBetween(a.run.date, race.date) : 30);
+  const val = (a) => a.si - (ageOf(a) > 365 ? 3 : 0);
+  const same = items.filter((a) => a.sameSurface);
+  const best = same.length ? Math.max(...same.map(val)) : Math.max(...items.map(val)) - 5;
   const weightAdj = entry?.weight > 0 ? -2 * (entry.weight - 55) : 0;
-  return s / w + weightAdj;
+  return best + weightAdj;
 }
 
 function formFactor(an, race) {

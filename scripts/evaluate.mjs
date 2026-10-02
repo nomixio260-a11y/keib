@@ -57,6 +57,21 @@ for (const key of ['balance', 'ai']) {
   };
 }
 
+// README 用の表（Markdown）
+{
+  const b = out.presets.balance;
+  const a = out.presets.ai;
+  const lines = [];
+  lines.push(`検証期間 ${period}・${test.length.toLocaleString('ja-JP')}レース（平地。予想の重みの学習にも統計にも使っていない期間）。払戻は実際の金額、1点100円。`, '');
+  lines.push('| | ◎の勝率 | ◎の複勝率 | 勝ち馬の対数損失（小さいほど良い） |', '| --- | --- | --- | --- |');
+  lines.push(`| 総合（AI＋人気） | ${pct(b.ai.winRate)} | ${pct(b.ai.top3Rate)} | ${b.ai.logLoss.toFixed(3)} |`);
+  lines.push(`| AI単独 | ${pct(a.ai.winRate)} | ${pct(a.ai.top3Rate)} | ${a.ai.logLoss.toFixed(3)} |`);
+  lines.push(`| 1番人気（単勝オッズ） | ${pct(b.fav.winRate)} | ${pct(b.fav.top3Rate)} | ${b.fav.logLoss.toFixed(3)} |`, '');
+  lines.push('| 買い方（総合） | 購入点数 | 的中率 | 回収率 |', '| --- | --- | --- | --- |');
+  for (const st of b.strategies) lines.push(`| ${st.label} | ${st.bets.toLocaleString('ja-JP')} | ${pct(st.hitRate)} | ${pct(st.roi)} |`);
+  console.log(`\n--- README 用 ---\n${lines.join('\n')}\n--- ここまで ---`);
+}
+
 if (!process.argv.includes('--dry')) {
   const header = '// scripts/evaluate.mjs が実際のレース結果（JRA）で検証した結果。手で編集しないでください。\n';
   await writeFile(path.join(root, 'src/data/realBacktest.js'), `${header}export const REAL_BACKTEST = ${JSON.stringify(out)};\n`);

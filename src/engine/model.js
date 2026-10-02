@@ -15,7 +15,7 @@ import { CALIBRATION } from './calibration.js';
  *   ref     … スライダーの既定値。係数 = coef × スライダー値 ÷ ref
  */
 const FACTOR_DEFS = [
-  { key: 'speed', label: 'スピード指数', unit: 8, missing: -0.6, desc: '前4走の走破タイムを、実際のレース結果から作った基準タイムと比べた指数。条件の近い走と直近の走を重く見て、今回の斤量に合わせて補正' },
+  { key: 'speed', label: 'スピード指数', unit: 8, missing: -0.6, desc: '前4走の走破タイムを、実際のレース結果から作った基準タイム（馬場差つき）と比べた指数。同じ芝ダでの最高値を今回の斤量に合わせて補正' },
   { key: 'form', label: '近走成績', unit: 0.2, missing: -0.3, desc: '着順・着差と、走ったクラスの格' },
   { key: 'closing', label: '上がり', unit: 0.25, missing: 0, desc: '上がり3ハロンを同じ条件の標準と比べた速さ（末脚の確かさ）' },
   { key: 'jockey', label: '騎手', unit: 0.07, missing: 0, desc: '実際のレース結果から集計した騎手の勝率・複勝率' },
