@@ -247,3 +247,15 @@ test('オッズの推移を記録する（同じ時刻は重ねない）', async
   assert.deepEqual(doc.snapshots[1].win, { 1: 2.9 });
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test('開催日ごとの馬場差は前回の分も引き継ぐ', async () => {
+  const { mergeBundle, attachDayVariants } = await import('../src/collector/bundle.js');
+  const stats = { baseTimes: { '東京|芝|1600': [94, 30] }, goingAdj: {}, classAdj: {}, dayVariant: {} };
+  const bundle = { days: [] };
+  mergeBundle(bundle, { days: [], dayVariant: { '2026-09-27|東京|芝': 0.2 } });
+  attachDayVariants(bundle, [], stats, { today: '2026-10-10' });
+  assert.equal(bundle.dayVariant['2026-09-27|東京|芝'], 0.2);
+  // 古すぎる日は落とす
+  attachDayVariants(bundle, [], stats, { today: '2027-06-01' });
+  assert.equal(bundle.dayVariant['2026-09-27|東京|芝'], undefined);
+});

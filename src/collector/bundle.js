@@ -220,13 +220,16 @@ export function attachDayVariants(bundle, records, stats, { days = 150, today = 
   const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
   const all = computeDayVariants([...records, ...bundleRecords(bundle)], stats);
   const known = stats.dayVariant || {};
-  bundle.dayVariant = Object.fromEntries(Object.entries(all).filter(([k]) => !(k in known) && k.slice(0, 10) >= cutoff));
+  // 前回までに計算した日の値も残す（バンドルから落ちた開催日の馬場差も、過去走の指数に使うため）
+  const merged = { ...(bundle.dayVariant || {}), ...all };
+  bundle.dayVariant = Object.fromEntries(Object.entries(merged).filter(([k]) => !(k in known) && k.slice(0, 10) >= cutoff));
   return bundle;
 }
 
 /** 前回のバンドルを引き継ぐ（結果のあるレース・まだ取り直していないレース） */
 export function mergeBundle(bundle, previous) {
   if (!previous?.days) return bundle;
+  if (previous.dayVariant) bundle.dayVariant = { ...previous.dayVariant, ...(bundle.dayVariant || {}) };
   for (const day of previous.days) {
     for (const race of day.races || []) {
       const cur = bundle.days.find((d) => d.date === race.date)?.races.find((r) => r.id === race.id);
