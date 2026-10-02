@@ -120,7 +120,7 @@ if (!process.argv.includes('--dry')) {
     trees: compactTrees(all),
     trainedOn: { races: fitRaces.length + validRaces.length, from: trainRaces[0]?.[0].date, to: trainRaces[trainRaces.length - 1]?.[0].date },
     test: { from: TEST_START, races: testRaces.length, ll: +res.test.ll.toFixed(4), baseLL: +base0.test.ll.toFixed(4), top1: +res.test.top1.toFixed(4), baseTop1: +base0.test.top1.toFixed(4) },
-    params: { rounds: all.length, depth: params.depth, lr: params.lr, lambda: params.lambda, colsample: params.colsample, subsample: params.subsample, topk: params.topk, stageWeight: params.stageWeight, halfLife: params.halfLife, beta: BETA, bags: BAGS, drop: [...drop].map((f) => names[f]) },
+    params: { rounds: all.length, depth: params.depth, lr: params.lr, lambda: params.lambda, colsample: params.colsample, subsample: params.subsample, topk: params.topk, stageWeight: params.stageWeight, halfLife: params.halfLife, beta: BETA, bags: BAGS, drop: [...drop].map((f) => names[f]), only: only.map((f) => names[f]), features: feats.length },
     temps,
   };
   const file = path.join(ROOT, 'src/engine', NO_MARKET ? 'gbdtModelAi.js' : 'gbdtModel.js');
