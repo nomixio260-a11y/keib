@@ -15,7 +15,8 @@
     "calibrate": "node scripts/calibrate.mjs",
     "evaluate": "node scripts/evaluate.mjs",
     "tunnel": "bash scripts/tunnel.sh",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "experiment": "node scripts/experiment.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
