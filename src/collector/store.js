@@ -11,6 +11,7 @@ export const HISTORY_DIR = path.join(DATA_DIR, 'history');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const BUNDLE_FILE = path.join(DATA_DIR, 'bundle.json');
 export const ODDS_DIR = path.join(DATA_DIR, 'odds');
+export const FINAL_ODDS_DIR = path.join(DATA_DIR, 'odds-final');
 
 /** data/history の全レース記録（日付順） */
 export async function loadHistory(dir = HISTORY_DIR) {
@@ -66,4 +67,20 @@ export async function appendOddsSnapshot(race, dir = ODDS_DIR) {
   doc.snapshots.push(snap);
   await writeJson(file, doc);
   return true;
+}
+
+/** 収集済みの確定オッズ（馬連・ワイド・3連複、scripts/collect-exotic.mjs）をレースに付ける。付けた数を返す */
+export async function attachFinalExoticOdds(races, dir = FINAL_ODDS_DIR) {
+  let n = 0;
+  for (const race of races) {
+    const doc = await readJson(path.join(dir, String(race.date || '').slice(0, 4), `${race.id}.json`));
+    if (!doc) continue;
+    const exotic = {};
+    for (const k of ['quinella', 'wide', 'trio']) if (doc[k] && Object.keys(doc[k]).length) exotic[k] = doc[k];
+    if (Object.keys(exotic).length) {
+      race.exoticOdds = exotic;
+      n++;
+    }
+  }
+  return n;
 }

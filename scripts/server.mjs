@@ -13,7 +13,7 @@ import path from 'node:path';
 import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, appendOddsSnapshot, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
 
 const PORT = Number(process.env.PORT || 8080);
@@ -37,6 +37,7 @@ async function initial() {
     const today = jstParts().date;
     const dates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort().slice(-KEEP_PAST);
     addPastDaysFromHistory(bundle, records, indexHistory(records), dates);
+    await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races));
     log(`過去の開催日 ${dates.length}日分を data/history から読み込みました`);
   }
   const prev = await readJson(BUNDLE_FILE);

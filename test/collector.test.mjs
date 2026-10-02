@@ -16,6 +16,8 @@ import {
   parseMeetingLinks,
   parseRaceLinks,
   parseMonthParams,
+  parseOddsLinks,
+  parseExoticOdds,
 } from '../src/collector/jra.js';
 import { pathForCname } from '../src/collector/client.js';
 import { cardToRace, resultToRecord, finishingOrder } from '../src/collector/collect.js';
@@ -243,4 +245,33 @@ test('開催・レースの一覧と月別ページの CNAME', () => {
   assert.equal(races[0].resultCname, 'pw01sde1005202604021120261004/D4');
   assert.equal(races[0].oddsCname, 'pw151ouS305202604021120261004Z/E5');
   assert.deepEqual(parseMonthParams('objParam["2609"]="7F"; objParam["2610"] = "0A";'), { 2609: '7F', 2610: '0A' });
+});
+
+test('馬連・ワイド・3連複のオッズページ', () => {
+  const links = parseOddsLinks(
+    `doAction('/JRADB/accessO.html','pw153ou1005202604011120261003Z/30') pw154ou1005202604011120261003Z/B4 pw155ou1005202604011120261003Z/38 pw156ou1005202604011120261003Z/BC pw157ou1005202604011120261003Z99/A2 pw157ou1005202604011120261003Z01/BB pw158ou1005202604011120261003Z/C4`,
+  );
+  assert.deepEqual(links, {
+    bracket: 'pw153ou1005202604011120261003Z/30',
+    quinella: 'pw154ou1005202604011120261003Z/B4',
+    wide: 'pw155ou1005202604011120261003Z/38',
+    exacta: 'pw156ou1005202604011120261003Z/BC',
+    trio: 'pw157ou1005202604011120261003Z99/A2',
+  });
+  const umaren = parseExoticOdds(`<h3>馬連オッズ（馬番順）</h3>
+    <table class="basic narrow-xy umaren"><caption>1</caption><tbody><tr><th>2</th><td>170.8</td></tr><tr><th>3</th><td><strong class="red">38.6</strong></td></tr><tr><th>4</th><td>&nbsp;</td></tr></tbody></table>
+    <table class="basic narrow-xy umaren"><caption>2</caption><tbody><tr><th>3</th><td>12.0</td></tr></tbody></table>
+    <table class="basic narrow auto"><caption>発売票数</caption><tbody><tr><th>馬連</th><td>3,534,076</td></tr></tbody></table>`);
+  assert.equal(umaren.type, 'quinella');
+  assert.deepEqual(umaren.odds, { '1-2': 170.8, '1-3': 38.6, '2-3': 12 });
+  const wide = parseExoticOdds(`<h3>ワイドオッズ（馬番順）</h3>
+    <table class="basic narrow-xy wide"><caption>1</caption><tbody><tr><th>2</th><td class="odds"><span class="inner"><span class="min">55.5</span><span class="cap">-</span><span class="max">60.8</span></span></td></tr></tbody></table>`);
+  assert.equal(wide.type, 'wide');
+  assert.deepEqual(wide.odds, { '1-2': 55.5 });
+  assert.deepEqual(wide.range, { '1-2': [55.5, 60.8] });
+  const trio = parseExoticOdds(`<h3>3連複オッズ（馬番順）</h3>
+    <table class="basic narrow-xy fuku3"><caption>1-2</caption><tbody><tr><th>3</th><td>940.0</td></tr><tr><th>4</th><td>550.1</td></tr></tbody></table>
+    <table class="basic narrow-xy fuku3"><caption>2-3</caption><tbody><tr><th>4</th><td>3382.1</td></tr></tbody></table>`);
+  assert.equal(trio.type, 'trio');
+  assert.deepEqual(trio.odds, { '1-2-3': 940, '1-2-4': 550.1, '2-3-4': 3382.1 });
 });

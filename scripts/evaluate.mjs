@@ -10,6 +10,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadHistory, statsForEngine, usable, PERIODS } from './calibrate.mjs';
+import { attachFinalExoticOdds } from '../src/collector/store.js';
 import { indexHistory, preRaceCard } from '../src/data/history.js';
 import { runBacktest } from '../src/engine/backtest.js';
 import { PRESETS } from '../src/engine/model.js';
@@ -28,10 +29,11 @@ if (!test.length) {
   console.error('検証用のレースがありません');
   process.exit(1);
 }
+const withExotic = await attachFinalExoticOdds(test);
 const period = `${test[0].date}〜${test[test.length - 1].date}`;
-console.log(`検証期間 ${period}（${test.length}レース、平地のみ）`);
+console.log(`検証期間 ${period}（${test.length}レース、平地のみ。馬連・ワイド・3連複の確定オッズあり ${withExotic}レース）`);
 
-const out = { period, races: test.length, source: 'JRA', generatedAt: new Date().toISOString().slice(0, 10), presets: {} };
+const out = { period, races: test.length, withExotic, source: 'JRA', generatedAt: new Date().toISOString().slice(0, 10), presets: {} };
 for (const key of ['balance', 'ai']) {
   const preset = PRESETS[key];
   const res = await runBacktest(test, { weights: preset.weights, noise: preset.noise, stats }, { sims: 4000 });

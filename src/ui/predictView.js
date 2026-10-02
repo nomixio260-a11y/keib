@@ -294,7 +294,7 @@ export function renderBetsPanel(pred, rec, ctx) {
           <td>${esc(BET_LABEL[t.type])}</td>
           <td class="num bt-combo">${esc(ticketLabel(t))}</td>
           <td class="num">${pct(t.pEv ?? t.p)}</td>
-          <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : ''}</td>
+          <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : t.type !== 'win' ? '<small class="tx-good" title="JRA の実際のオッズ">実</small>' : ''}</td>
           <td class="num ${evClass(t.ev)}">${t.ev.toFixed(2)}</td>
           <td class="num">${t.stake.toLocaleString('ja-JP')}</td>
         </tr>`,
@@ -321,7 +321,13 @@ export function renderBetsPanel(pred, rec, ctx) {
     <div class="seg strat-seg" role="group" aria-label="買い方">${strategies}</div>
     <p class="panel-note">${esc(STRATEGIES[state.strategy].desc)}</p>
     <div class="chips-row" role="group" aria-label="券種">${types}</div>
-    ${state.betTypes.some((t) => ESTIMATED_TYPES.includes(t)) ? '<p class="panel-note bet-caution">馬連・ワイド・馬単・三連複・三連単のオッズは単勝オッズからの推定です。実データの検証では、これらを期待値で選ぶと実際の払戻が見込みを大きく下回りました（人気薄の組み合わせほど実際の配当は低め）。参考程度にしてください。</p>' : ''}
+    ${
+      state.betTypes.some((t) => ESTIMATED_TYPES.includes(t))
+        ? pred.race.exoticOdds
+          ? '<p class="panel-note">馬連・ワイド・三連複は JRA の実際のオッズ（「実」）で計算しています。馬単・三連単は単勝オッズからの推定（「推」）です。</p>'
+          : '<p class="panel-note bet-caution">馬連・ワイド・馬単・三連複・三連単のオッズは単勝オッズからの推定です（発走2時間前から馬連・ワイド・三連複は実際のオッズを取り込みます）。推定オッズを期待値で選ぶと、実際の払戻は見込みを大きく下回りました。参考程度にしてください。</p>'
+        : ''
+    }
     <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>

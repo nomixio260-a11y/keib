@@ -3,7 +3,7 @@
 //   当日・これから：JRAの出馬表（前4走・単勝オッズ）。発走後は結果を取りにいく
 
 import { listCardMeetings, listRecentResultMeetings, listRaces, fetchCard, fetchResult, fetchOdds, cardToRace, resultToRecord } from './collect.js';
-import { raceKeyFromCname, CODE_BY_COURSE } from './jra.js';
+import { raceKeyFromCname, CODE_BY_COURSE, parseOdds, parseOddsLinks, parseExoticOdds } from './jra.js';
 import { preRaceCard, computeDayVariants } from '../data/history.js';
 import { jstParts, startMs } from '../engine/raceTime.js';
 
@@ -127,11 +127,12 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
         const card = await fetchCard(client, link.cardCname, ttl);
         const race = cardToRace(card, raceKeyFromCname(link.cardCname));
         race.cardCname = link.cardCname;
-        // 発走2時間前からは、単勝・複勝のオッズのページも取る（複勝オッズは出馬表にない）
+        // 発走2時間前からは、単勝・複勝と、馬連・ワイド・3連複のオッズのページも取る（出馬表にはない）
         const st2 = startMs(race);
         if (card.oddsCname && st2 && st2 - now < 2 * 60 * MIN && now - st2 < 30 * MIN) {
           try {
-            const o = await fetchOdds(client, card.oddsCname, { ttlMs: ttl });
+            const html = await client.page(card.oddsCname, { cache: 'ttl', ttlMs: ttl });
+            const o = parseOdds(html);
             const by = new Map(o.odds.map((x) => [x.number, x]));
             for (const e of race.entries) {
               const x = by.get(e.number);
@@ -140,10 +141,18 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
               e.placeMin = x.placeMin;
               e.placeMax = x.placeMax;
             }
+            const links = parseOddsLinks(html);
+            const exotic = known?.exoticOdds || {};
+            for (const kind of ['quinella', 'wide', 'trio']) {
+              if (!links[kind]) continue;
+              const parsed = parseExoticOdds(await client.page(links[kind], { cache: 'ttl', ttlMs: ttl }));
+              if (parsed.count) exotic[kind] = parsed.odds;
+            }
+            if (Object.keys(exotic).length) race.exoticOdds = exotic;
           } catch (err) {
             log(`オッズの取得に失敗 ${link.raceId}: ${err.message}`);
           }
-        }
+        } else if (known?.exoticOdds) race.exoticOdds = known.exoticOdds;
         race.oddsAt = new Date(client.fetchedAt?.(link.cardCname) ?? now).toISOString();
         race.status = 'card';
         // キャッシュから読んだだけ（中身が同じ）なら更新に数えない

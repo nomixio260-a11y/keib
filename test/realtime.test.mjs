@@ -278,3 +278,18 @@ test('プラケット・ルースのシミュレーションは解析的な確�
   // 着順の分布は各馬で合計1
   for (let i = 0; i < n; i++) assert.ok(Math.abs(Array.from(sim.posDist.subarray(i * n, i * n + n)).reduce((a, b) => a + b, 0) - 1) < 1e-9);
 });
+
+test('馬連・ワイド・3連複は実際のオッズがあればそれで期待値を計算する', async () => {
+  const { priceTicket } = await import('../src/engine/bets.js');
+  const race = makeRace({ seed: 9 });
+  race.exoticOdds = { quinella: { '1-2': 12.3 }, wide: { '1-2': 4.5 }, trio: { '1-2-3': 56.7 } };
+  const pred = predictRace(race, { sims: 2000 });
+  const i = (num) => pred.rows.findIndex((r) => r.entry.number === num);
+  const q = priceTicket({ type: 'quinella', idx: [i(2), i(1)] }, pred, 0.5);
+  assert.equal(q.odds, 12.3);
+  assert.equal(q.estimated, false);
+  assert.equal(priceTicket({ type: 'wide', idx: [i(1), i(2)] }, pred, 0.5).odds, 4.5);
+  assert.equal(priceTicket({ type: 'trio', idx: [i(3), i(1), i(2)] }, pred, 0.5).odds, 56.7);
+  // 表にない組み合わせは推定
+  assert.equal(priceTicket({ type: 'quinella', idx: [i(1), i(3)] }, pred, 0.5).estimated, true);
+});

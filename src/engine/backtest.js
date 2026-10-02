@@ -1,7 +1,7 @@
 // バックテスト：結果のわかっている過去レースで予想と買い方を検証する。
 
 import { predictRace } from './model.js';
-import { recommendBets, marksToIndex, ticketLabel } from './bets.js';
+import { recommendBets, buildCandidates, marksToIndex, ticketLabel } from './bets.js';
 
 /** 払戻表のキー（馬番で表す） */
 export function payoutKey(type, nums) {
@@ -56,6 +56,16 @@ export const BT_STRATEGIES = [
         .map((r, i) => ({ r, i }))
         .filter(({ r }) => r.ev != null && r.ev >= 1.2 && r.pWin >= 0.05)
         .map(({ i }) => ({ type: 'win', idx: [i], stake: 100 })),
+  },
+  {
+    key: 'exoticValue',
+    label: '馬連・ワイド・三連複 期待値1.1以上（実オッズがあるレース）',
+    build: (pred, m, settings) =>
+      pred.race?.exoticOdds
+        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], settings?.blend ?? 0.5)
+            .filter((c) => !c.estimated && c.ev >= 1.1 && c.pEv >= 0.02)
+            .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
+        : [],
   },
   {
     key: 'ai',

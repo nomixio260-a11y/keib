@@ -16,7 +16,7 @@ import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs } from '../src/collector/bundle.js';
 import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, appendOddsSnapshot, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory } from '../src/data/history.js';
 
 const args = process.argv.slice(2);
@@ -38,7 +38,8 @@ const records = await loadHistory();
 if (records.length) {
   const dates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort().slice(-keepPast);
   addPastDaysFromHistory(bundle, records, indexHistory(records), dates);
-  log(`過去の開催日：${dates.join(', ') || 'なし'}（data/history ${records.length}レースから）`);
+  const n = await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races));
+  log(`過去の開催日：${dates.join(', ') || 'なし'}（data/history ${records.length}レースから。確定オッズあり ${n}レース）`);
 }
 
 // 2) 前回のバンドル（ファイルか URL。GitHub Pages で公開中の data.json を引き継ぐときは URL）

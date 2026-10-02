@@ -31,6 +31,18 @@ const typeAvailable = (type, pred) => {
   return true;
 };
 
+/** 実際の馬連・ワイド・3連複オッズ（race.exoticOdds、JRA のオッズページ）があれば返す。なければ null */
+function realExotic(pred, type, idx) {
+  const table = pred.race?.exoticOdds?.[type];
+  if (!table) return null;
+  const key = idx
+    .map((i) => pred.rows[i].entry.number)
+    .sort((a, b) => a - b)
+    .join('-');
+  const v = table[key];
+  return v > 1 ? v : null;
+}
+
 /**
  * 買い目1点の確率・推定オッズ・期待値。idx は pred.rows のインデックス。
  * blend は期待値の計算で市場（オッズ）の確率を混ぜる割合（0〜1）。
@@ -63,6 +75,7 @@ export function priceTicket(t, pred, blend = 0) {
       const k = Math.min(x, y) * n + Math.max(x, y);
       p = combos[t.type][k];
       pm = market[t.type][k];
+      odds = realExotic(pred, t.type, [x, y]);
       break;
     }
     case 'exacta':
@@ -73,6 +86,7 @@ export function priceTicket(t, pred, blend = 0) {
       const [a, b, c] = [x, y, z].sort((u, v) => u - v);
       p = combos.trio[(a * n + b) * n + c];
       pm = market.trio[(a * n + b) * n + c];
+      odds = realExotic(pred, 'trio', [x, y, z]);
       break;
     }
     case 'trifecta':

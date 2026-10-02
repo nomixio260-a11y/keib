@@ -389,3 +389,60 @@ export function parseMonthParams(html) {
   for (const m of String(html).matchAll(/objParam\["(\d{4})"\]\s*=\s*"([0-9A-F]{2})"/g)) out[m[1]] = m[2];
   return out;
 }
+
+/** 単勝・複勝のオッズページにある、ほかの券種のオッズページの CNAME */
+export function parseOddsLinks(html) {
+  const out = {};
+  const KINDS = { pw153: 'bracket', pw154: 'quinella', pw155: 'wide', pw156: 'exacta', pw157: 'trio', pw158: 'trifecta' };
+  for (const m of String(html).matchAll(/(pw15[3-8])ou(?:S3|10)(\d{20})Z(99)?\/([0-9A-F]{2})/g)) {
+    const kind = KINDS[m[1]];
+    if (!kind || out[kind]) continue;
+    // 3連複は「Z99」が全馬番の一覧。3連単は1着の馬ごとのページなので全体の一覧はない
+    if (kind === 'trio' && !m[3]) continue;
+    if (kind === 'trifecta') continue;
+    out[kind] = `${m[1]}ou${m[0].includes('ouS3') ? 'S3' : '10'}${m[2]}Z${m[3] || ''}/${m[4]}`;
+  }
+  return out;
+}
+
+const oddsCell = (td) => {
+  const min = td.querySelector('.min');
+  if (min) {
+    const lo = toFloat(min.text);
+    const hi = toFloat(td.querySelector('.max')?.text || '');
+    return lo > 0 ? [lo, hi > 0 ? hi : lo] : null;
+  }
+  const v = toFloat(td.text);
+  return v > 0 ? [v, v] : null;
+};
+
+/**
+ * 馬連・ワイド・3連複のオッズページ（馬番順）。
+ * 表の caption が「1」（馬連・ワイド：1頭目）または「1-2」（3連複：1・2頭目）、行の見出しが残りの馬番。
+ * 返り値は { type, odds: { '1-2': 12.3 } }。ワイドは下限を odds に、範囲を range に入れる。
+ */
+export function parseExoticOdds(html) {
+  const root = parse(html);
+  const title = clean(root.querySelector('h3')?.text || '');
+  const type = /3連複/.test(title) ? 'trio' : /ワイド/.test(title) ? 'wide' : /馬連/.test(title) ? 'quinella' : /馬単/.test(title) ? 'exacta' : /枠連/.test(title) ? 'bracket' : null;
+  const odds = {};
+  const range = {};
+  for (const table of root.querySelectorAll('table')) {
+    const cap = clean(table.querySelector('caption')?.text || '');
+    if (!/^\d+(-\d+)?$/.test(cap)) continue;
+    const head = cap.split('-').map(Number);
+    for (const tr of table.querySelectorAll('tbody tr')) {
+      const n = toInt(tr.querySelector('th')?.text || '');
+      const td = tr.querySelector('td');
+      if (!n || !td) continue;
+      const v = oddsCell(td);
+      if (!v) continue;
+      const nums = type === 'exacta' ? [head[0], n] : [...head, n].sort((a, b) => a - b);
+      const key = nums.join(type === 'exacta' ? '>' : '-');
+      odds[key] = v[0];
+      if (v[1] !== v[0]) range[key] = v;
+    }
+  }
+  return { type, odds, range, count: Object.keys(odds).length };
+}
+
