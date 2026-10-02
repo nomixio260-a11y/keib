@@ -180,6 +180,7 @@ function detailPanel(entry, row, pred, ctx) {
         <div><dt>厩舎</dt><dd>${esc(entry.trainer || '—')}${entry.trainerArea ? `（${esc(entry.trainerArea)}）` : ''}</dd></div>
         ${REAL_STATS.trainerRates?.[entry.trainer] ? `<div><dt>厩舎成績</dt><dd class="num">勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].winRate)}・複勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].top3Rate)}</dd></div>` : ''}
         <div><dt>馬体重</dt><dd class="num">${esc(bw)}</dd></div>
+        ${entry.placeMin > 1 ? `<div><dt>複勝オッズ</dt><dd class="num">${odds(entry.placeMin)}〜${odds(entry.placeMax)}</dd></div>` : ''}
         <div><dt>騎手成績</dt><dd class="num">${j ? `勝率 ${pct(j.winRate)}・複勝率 ${pct(j.top3Rate)}${j.starts ? `（${j.starts}騎乗）` : ''}` : '—'}</dd></div>
         ${row ? `<div><dt>AI指数</dt><dd class="num">${fixed(row.index)}（${row.rank}位）</dd></div><div><dt>脚質</dt><dd>${esc(row.style.style)}</dd></div><div><dt>スピード指数</dt><dd class="num">最高 ${row.stats.bestSi != null ? row.stats.bestSi.toFixed(0) : '—'}・前走 ${row.stats.lastSi != null ? row.stats.lastSi.toFixed(0) : '—'}</dd></div>` : ''}
       </dl>
@@ -284,7 +285,7 @@ export function renderBetsPanel(pred, rec, ctx) {
           <td>${esc(BET_LABEL[t.type])}</td>
           <td class="num bt-combo">${esc(ticketLabel(t))}</td>
           <td class="num">${pct(t.pEv ?? t.p)}</td>
-          <td class="num">${odds(t.odds)}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : ''}</td>
+          <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : ''}</td>
           <td class="num ${evClass(t.ev)}">${t.ev.toFixed(2)}</td>
           <td class="num">${t.stake.toLocaleString('ja-JP')}</td>
         </tr>`,
@@ -334,7 +335,7 @@ export function renderBetsPanel(pred, rec, ctx) {
       <thead><tr><th>買い方</th><th>点数</th><th>的中率</th><th>期待回収率</th></tr></thead>
       <tbody>${formRows}</tbody>
     </table></div>
-    <p class="panel-note">オッズの「推」は単勝オッズから割引ハーヴィル式で推定した値です。発売中の実際のオッズとは異なります。</p>
+    <p class="panel-note">オッズの「推」は単勝オッズから推定した値で、発売中の実際のオッズとは異なります。複勝は JRA のオッズ（下限〜上限）が取れているときは下限で計算しています。</p>
   </section>`;
 }
 

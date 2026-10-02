@@ -216,7 +216,10 @@ export function predictRace(race, settings = {}) {
     const pPlace = placeCount === 3 ? r.pTop3 : r.pTop2;
     const mPlace = placeCount === 3 ? market.top3[i] : market.top2[i];
     r.pPlace = placeCount ? pPlace : null;
-    r.placeOdds = placeCount && !noOdds ? estimateOdds('place', mPlace) : null;
+    // 複勝オッズ：実際のオッズ（下限〜上限）があれば下限を使い、なければ単勝オッズから推定
+    const realPlace = r.entry.placeMin > 1 ? r.entry.placeMin : null;
+    r.placeOdds = placeCount && !noOdds ? realPlace ?? estimateOdds('place', mPlace) : null;
+    r.placeOddsEstimated = !realPlace;
     r.evPlace = r.placeOdds ? pPlace * r.placeOdds : null;
   });
   assignMarks(rows);

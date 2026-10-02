@@ -66,6 +66,10 @@ function attachResult(race, record) {
     const r = finalOdds.get(e.number);
     if (r?.odds) e.odds = r.odds;
     if (r?.popularity) e.popularity = r.popularity;
+    if (r?.placeMin > 1) {
+      e.placeMin = r.placeMin;
+      e.placeMax = r.placeMax;
+    }
     if (r && r.finish === 0 && /取消|除外/.test(r.status || '')) e.scratched = true;
     if (r?.bodyWeight && !e.bodyWeight) {
       e.bodyWeight = r.bodyWeight;
@@ -118,9 +122,27 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
       // 発走から30分以上たったら出馬表はもう取りにいかない（結果待ち）
       if (st && now - st > 30 * MIN && known.oddsAt && Date.parse(known.oddsAt) > st) continue;
       try {
-        const card = await fetchCard(client, link.cardCname, cardTtl(known, now));
+        const ttl = cardTtl(known, now);
+        const card = await fetchCard(client, link.cardCname, ttl);
         const race = cardToRace(card, raceKeyFromCname(link.cardCname));
         race.cardCname = link.cardCname;
+        // 発走2時間前からは、単勝・複勝のオッズのページも取る（複勝オッズは出馬表にない）
+        const st2 = startMs(race);
+        if (card.oddsCname && st2 && st2 - now < 2 * 60 * MIN && now - st2 < 30 * MIN) {
+          try {
+            const o = await fetchOdds(client, card.oddsCname, { ttlMs: ttl });
+            const by = new Map(o.odds.map((x) => [x.number, x]));
+            for (const e of race.entries) {
+              const x = by.get(e.number);
+              if (!x) continue;
+              if (x.odds > 1) e.odds = x.odds;
+              e.placeMin = x.placeMin;
+              e.placeMax = x.placeMax;
+            }
+          } catch (err) {
+            log(`オッズの取得に失敗 ${link.raceId}: ${err.message}`);
+          }
+        }
         race.oddsAt = new Date(client.fetchedAt?.(link.cardCname) ?? now).toISOString();
         race.status = 'card';
         // キャッシュから読んだだけ（中身が同じ）なら更新に数えない

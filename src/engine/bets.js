@@ -42,6 +42,7 @@ export function priceTicket(t, pred, blend = 0) {
   let p = 0;
   let pm = 0;
   let odds = null;
+  let oddsMax = null;
   switch (t.type) {
     case 'win':
       p = rows[x].pWin;
@@ -51,6 +52,11 @@ export function priceTicket(t, pred, blend = 0) {
     case 'place':
       p = placeCount >= 3 ? rows[x].pTop3 : rows[x].pTop2;
       pm = placeCount >= 3 ? market.top3[x] : market.top2[x];
+      // 実際の複勝オッズ（JRA の下限〜上限）があれば、控えめに下限を使う
+      if (rows[x].entry.placeMin > 1) {
+        odds = rows[x].entry.placeMin;
+        oddsMax = rows[x].entry.placeMax > 1 ? rows[x].entry.placeMax : null;
+      }
       break;
     case 'quinella':
     case 'wide': {
@@ -86,6 +92,7 @@ export function priceTicket(t, pred, blend = 0) {
     pMarket: pm,
     pEv,
     odds,
+    oddsMax,
     estimated,
     ev: odds ? pEv * odds : 0,
   };

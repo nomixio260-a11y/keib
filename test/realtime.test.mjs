@@ -186,3 +186,46 @@ test('バンドルの確定レースから最近の馬場差を作る', async ()
   // 統計にすでにある日は入れない
   assert.equal(bundle.dayVariant['2026-09-20|東京|芝'], undefined);
 });
+
+test('スピード指数ファクターは同じ芝ダでの最高値（斤量で補正）', async () => {
+  const { computeRaceFactors } = await import('../src/engine/factors.js');
+  const stats = { baseTimes: { '東京|芝|1600': [94, 30], '東京|ダ|1600': [97, 30] }, goingAdj: {}, classAdj: {} };
+  const run = (time, surface = '芝', date = '2026-09-01') => ({ date, course: '東京', surface, distance: 1600, going: '良', time, weight: 55, fieldSize: 12, finish: 3 });
+  const race = {
+    id: 't',
+    date: '2026-10-04',
+    course: '東京',
+    surface: '芝',
+    distance: 1600,
+    going: '良',
+    grade: '2勝',
+    entries: [
+      { number: 1, frame: 1, name: 'A', weight: 57, past: [run(95), run(93.6), run(96, 'ダ')] },
+      { number: 2, frame: 2, name: 'B', weight: 55, past: [run(96, 'ダ')] },
+    ],
+  };
+  const fx = computeRaceFactors(race, { stats });
+  const best = 80 + (1000 * (94 - 93.6)) / 94; // 同じ芝での最高値
+  assert.ok(Math.abs(fx.rows[0].raw.speed - (best - 4)) < 1e-6, String(fx.rows[0].raw.speed)); // 57kg は −4
+  // 同じ芝ダの走がなければ、別の芝ダの値から5ポイント引く
+  const dirt = 80 + (1000 * (97 - 96)) / 97;
+  assert.ok(Math.abs(fx.rows[1].raw.speed - (dirt - 5)) < 1e-6, String(fx.rows[1].raw.speed));
+});
+
+test('実際の複勝オッズがあれば下限で期待値を計算する', async () => {
+  const { priceTicket } = await import('../src/engine/bets.js');
+  const race = makeRace({ seed: 8 });
+  race.entries.forEach((e) => {
+    e.placeMin = 1.6;
+    e.placeMax = 2.4;
+  });
+  const pred = predictRace(race, { sims: 2000 });
+  const t = priceTicket({ type: 'place', idx: [0] }, pred, 0.5);
+  assert.equal(t.odds, 1.6);
+  assert.equal(t.oddsMax, 2.4);
+  assert.equal(t.estimated, false);
+  assert.equal(pred.rows[0].placeOdds, 1.6);
+  // 実オッズがなければ推定
+  const plain = predictRace(makeRace({ seed: 8 }), { sims: 2000 });
+  assert.equal(priceTicket({ type: 'place', idx: [0] }, plain, 0.5).estimated, true);
+});
