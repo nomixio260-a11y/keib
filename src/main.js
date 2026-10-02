@@ -333,6 +333,7 @@ function renderTopStatus() {
   if (el) el.innerHTML = statusHtml();
 }
 
+let railSel = null;
 function renderRailOnly() {
   const rail = $('#race-rail');
   if (!rail) return;
@@ -351,7 +352,15 @@ function renderRailOnly() {
   setHTML(rail, renderRail(ctx()));
   if (focusSel) rail.querySelector(focusSel)?.focus({ preventScroll: true });
   const nl = rail.querySelector('.race-list');
-  if (nl) nl.scrollLeft = scroll;
+  if (nl) {
+    // 狭い画面ではレース一覧が横に並ぶ。選んだレースが変わったら、そのレースが見える位置まで動かす
+    const on = nl.querySelector('.race-item.is-on');
+    if (railSel !== state.raceId && on && nl.scrollWidth > nl.clientWidth) {
+      const li = on.parentElement;
+      nl.scrollLeft = Math.max(0, li.offsetLeft - nl.offsetLeft - (nl.clientWidth - li.offsetWidth) / 2);
+    } else nl.scrollLeft = scroll;
+    railSel = state.raceId;
+  }
   const ns = rail.querySelector('.day-strip');
   if (ns) {
     if (stripScroll != null) ns.scrollLeft = stripScroll;

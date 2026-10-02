@@ -1,6 +1,6 @@
 // 予想の根拠をことばにする（各馬の短評・レース展望）
 
-import { FACTORS } from './model.js';
+import { FACTORS, PRESETS, coefficients } from './model.js';
 import { REAL_STATS } from './realStats.js';
 
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
@@ -76,9 +76,16 @@ function factorText(key, row, pred, sign, jockeys) {
   }
 }
 
+// 短評は「AI単独」の重みで見た各ファクターの効き方から作る（総合では人気の寄与が大きく、理由が見えにくいため）
+let aiCoefs = null;
+const aiCoef = () => (aiCoefs ||= coefficients(PRESETS.ai.weights));
+
 /** 1頭分の短評 { pros, cons } */
 export function horseComment(row, pred, jockeys) {
-  const items = FACTORS.map((f) => ({ key: f.key, c: row.contrib[f.key] })).filter((x) => Math.abs(x.c) > 0.04);
+  const coef = aiCoef();
+  const items = FACTORS.filter((f) => f.key !== 'market')
+    .map((f) => ({ key: f.key, c: (coef[f.key] || 0) * (row.z?.[f.key] ?? 0) }))
+    .filter((x) => Math.abs(x.c) > 0.04);
   const pros = items
     .filter((x) => x.c > 0)
     .sort((a, b) => b.c - a.c)
