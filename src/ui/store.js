@@ -1,6 +1,6 @@
 // localStorage の安全なラッパー（使えない環境でもアプリは動く）
 
-const KEY = 'keib:v1';
+const KEY = 'keib:v2';
 
 export function loadState() {
   try {

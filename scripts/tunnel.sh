@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Cloudflare Tunnel（Quick Tunnel）で、手元の PC から KEIB を一時的に公開する。
+# Cloudflare Tunnel（Quick Tunnel）で、手元の PC で動かしたリアルタイム版 KEIB を一時的に外から見られるようにする。
 #   npm run tunnel
-# 表示される https://xxxx.trycloudflare.com をスマホなどで開けます。Ctrl+C で終了。
+# 表示される https://xxxx.trycloudflare.com を自分のスマホなどで開けます。Ctrl+C で終了。
+# URL を知っている人は誰でも見られます。JRA のデータを表示するので、URL は自分だけで使ってください。
 #
 # 事前に cloudflared をインストールしてください:
 #   macOS:   brew install cloudflared
@@ -19,7 +20,7 @@ if ! command -v cloudflared >/dev/null 2>&1; then
 fi
 
 npm run build
-PORT="$PORT" node scripts/serve.mjs &
+PORT="$PORT" node scripts/server.mjs &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT INT TERM
 

@@ -118,7 +118,7 @@ export function paceMap(pred) {
  * 累積収支の折れ線（2系列）。focus 系列を強調、baseline は灰色。
  * 返り値の SVG には十字線用のオーバーレイがあり、bindLineChart で操作できる。
  */
-export function lineChart({ id, series, height = 240 }) {
+export function lineChart({ id, series, height = 240, xLabel = (i) => i + 1 }) {
   const W = 640;
   const H = height;
   const pad = { l: 64, r: 16, t: 16, b: 30 };
@@ -131,7 +131,7 @@ export function lineChart({ id, series, height = 240 }) {
     .map((t) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}" class="${t === 0 ? 'ch-zero' : 'ch-grid'}"/><text x="${pad.l - 8}" y="${y(t) + 4}" class="ch-tick ch-y">${t.toLocaleString('ja-JP')}</text>`)
     .join('');
   const xt = niceTicks(1, n, 6).ticks.filter((t) => t >= 1 && t <= n);
-  const xTicks = xt.map((t) => `<text x="${x(t - 1)}" y="${H - 8}" class="ch-tick ch-x">${t}</text>`).join('');
+  const xTicks = xt.map((t) => `<text x="${x(t - 1)}" y="${H - 8}" class="ch-tick ch-x">${xLabel(t - 1)}</text>`).join('');
   const lines = series
     .map((s) => {
       const d = s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
@@ -149,7 +149,7 @@ export function lineChart({ id, series, height = 240 }) {
 }
 
 /** 十字線＋ツールチップを付ける */
-export function bindLineChart(svg, series, labelOf) {
+export function bindLineChart(svg, series, labelOf, xLabel = (i) => i + 1) {
   if (!svg) return;
   const n = Number(svg.dataset.n);
   const l = Number(svg.dataset.l);
@@ -162,7 +162,7 @@ export function bindLineChart(svg, series, labelOf) {
     cross.setAttribute('x2', x);
     cross.setAttribute('visibility', 'visible');
     const lines = series.map((s) => `${s.label} ${yen(s.values[i] ?? 0)}`);
-    hit.setAttribute('data-tip', [`${i + 1}レース目まで`, ...lines, labelOf ? labelOf(i) : ''].filter(Boolean).join('\n'));
+    hit.setAttribute('data-tip', [`${xLabel(i)}レース目まで`, ...lines, labelOf ? labelOf(i) : ''].filter(Boolean).join('\n'));
   };
   const fromEvent = (e) => {
     const box = svg.getBoundingClientRect();

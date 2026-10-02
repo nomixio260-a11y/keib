@@ -6,18 +6,16 @@ import { baseTime, speedFigure } from '../src/engine/speed.js';
 import { formatTime, parseTime, daysBetween, addDays } from '../src/engine/util.js';
 import { harville, impliedWinProbs, estimateOdds } from '../src/engine/market.js';
 import { simulate, comboProbs } from '../src/engine/simulate.js';
-import { predictRace, DEFAULT_WEIGHTS, FACTORS, coefficients } from '../src/engine/model.js';
+import { predictRace, DEFAULT_WEIGHTS, DEFAULT_PRESET, PRESETS, FACTORS, coefficients } from '../src/engine/model.js';
 import { recommendBets, evaluateTickets, ticketHits, allocate, evaluateFormations, STRATEGIES, ticketsToText } from '../src/engine/bets.js';
 import { payoutKey, payoutOf, runBacktest } from '../src/engine/backtest.js';
 import { horseComment, paceComment } from '../src/engine/comments.js';
-import { generateRaceDay, generateBacktestRaces } from '../src/data/generator.js';
-import { SIRE_MAP } from '../src/data/names.js';
+import { makeRace, makeResultRaces } from './fixtures/race.mjs';
 
 const sum = (a) => Array.from(a).reduce((x, y) => x + y, 0);
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
 
-const day = generateRaceDay();
-const mainRace = day.races.find((r) => r.id === 'tky11');
+const mainRace = makeRace({ n: 14, seed: 3 });
 
 test('枠番の割り当て（JRA方式）', () => {
   const frames = (n) => Array.from({ length: n }, (_, i) => frameOf(i + 1, n));
@@ -105,7 +103,7 @@ test('モンテカルロ：確率の合計と再現性', () => {
 });
 
 test('予想：確率・印・指数', () => {
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 8000 });
+  const pred = predictRace(mainRace, { sims: 8000 });
   assert.equal(pred.n, mainRace.entries.length);
   close(pred.rows.reduce((a, r) => a + r.pWin, 0), 1, 1e-9);
   for (const r of pred.rows) {
@@ -124,14 +122,14 @@ test('予想：確率・印・指数', () => {
 });
 
 test('予想：同じ入力なら同じ結果、取消馬は除外', () => {
-  const a = predictRace(mainRace, { sires: SIRE_MAP, sims: 4000 });
-  const b = predictRace(mainRace, { sires: SIRE_MAP, sims: 4000 });
+  const a = predictRace(mainRace, { sims: 4000 });
+  const b = predictRace(mainRace, { sims: 4000 });
   assert.deepEqual(
     a.rows.map((r) => r.pWin),
     b.rows.map((r) => r.pWin),
   );
   const race = { ...mainRace, entries: mainRace.entries.map((e, i) => (i === 0 ? { ...e, scratched: true } : e)) };
-  const c = predictRace(race, { sires: SIRE_MAP, sims: 4000 });
+  const c = predictRace(race, { sims: 4000 });
   assert.equal(c.n, mainRace.entries.length - 1);
   assert.ok(!c.rows.some((r) => r.entry.number === mainRace.entries[0].number));
 });
@@ -141,13 +139,15 @@ test('ウェイト：0にしたファクターは寄与しない', () => {
   const coefs = coefficients(weights);
   assert.ok(coefs.speed > 0);
   assert.equal(coefs.jockey, 0);
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 3000, weights });
+  const pred = predictRace(mainRace, { sims: 3000, weights });
   for (const r of pred.rows) assert.ok(r.contrib.jockey === 0);
-  assert.equal(DEFAULT_WEIGHTS.market, 0);
+  // AI単独のプリセットはオッズを使わない
+  assert.equal(PRESETS.ai.weights.market, 0);
+  assert.ok(DEFAULT_WEIGHTS === PRESETS[DEFAULT_PRESET].weights);
 });
 
 test('買い目：予算内・100円単位・期待値の条件', () => {
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 8000 });
+  const pred = predictRace(mainRace, { sims: 8000 });
   for (const strategy of Object.keys(STRATEGIES)) {
     const rec = recommendBets(pred, { budget: 3000, strategy });
     const total = rec.tickets.reduce((a, t) => a + t.stake, 0);
@@ -194,7 +194,7 @@ test('的中判定', () => {
 });
 
 test('フォーメーションの点数', () => {
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 5000 });
+  const pred = predictRace(mainRace, { sims: 5000 });
   const f = Object.fromEntries(evaluateFormations(pred).map((x) => [x.key, x]));
   const partners = pred.rows.filter((r) => ['○', '▲', '△'].includes(r.mark)).length;
   const hasStar = pred.rows.some((r) => r.mark === '☆');
@@ -219,8 +219,8 @@ test('払戻表のキー', () => {
 });
 
 test('短評と展開コメント', () => {
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 3000 });
-  const c = horseComment(pred.order[0], pred, mainRace.jockeys);
+  const pred = predictRace(mainRace, { sims: 3000 });
+  const c = horseComment(pred.order[0], pred, {});
   assert.ok(Array.isArray(c.pros) && Array.isArray(c.cons));
   assert.ok(c.pros.length > 0, 'AI上位の馬には良い材料がある');
   const p = paceComment(pred);
@@ -229,8 +229,8 @@ test('短評と展開コメント', () => {
 });
 
 test('バックテストが動く', async () => {
-  const races = generateBacktestRaces(12, 99);
-  const res = await runBacktest(races, { sires: SIRE_MAP }, { sims: 1500 });
+  const races = makeResultRaces(12, 99);
+  const res = await runBacktest(races, {}, { sims: 1500 });
   assert.equal(res.races, 12);
   const win = res.strategies.find((s) => s.key === 'win');
   assert.equal(win.bets, 12);
@@ -252,7 +252,7 @@ test('市場モデル：正規モデルの当てはめで単勝の確率を再�
 
 test('期待値にオッズを混ぜると、AIとオッズの中間になる', async () => {
   const { priceTicket } = await import('../src/engine/bets.js');
-  const pred = predictRace(mainRace, { sires: SIRE_MAP, sims: 4000 });
+  const pred = predictRace(mainRace, { sims: 4000 });
   const i = pred.rows.findIndex((r) => r.mark === '◎');
   const ai = priceTicket({ type: 'win', idx: [i] }, pred, 0);
   const half = priceTicket({ type: 'win', idx: [i] }, pred, 0.5);

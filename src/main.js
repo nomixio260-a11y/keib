@@ -1,15 +1,15 @@
-// KEIB 競馬予想 — アプリ本体（状態・画面切り替え・イベント）
+// KEIB 競馬予想 — アプリ本体（実データの読み込み・状態・画面切り替え・イベント）
+//
+// 予想に使うのは JRA の実際の出馬表・オッズ・結果だけ（data.json）。架空のデータは使わない。
+// リアルタイム版（npm run server）では data.json が1分ごとに新しくなるので、画面も読み直す。
 
-import { generateRaceDay, backtestRaceStream, SAMPLE_DATE } from './data/generator.js';
-import { SIRE_MAP } from './data/names.js';
 import { BET_TYPES } from './engine/constants.js';
-import { predictRace, DEFAULT_WEIGHTS, PRESETS, FACTORS } from './engine/model.js';
+import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
 import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS } from './engine/bets.js';
 import { runBacktest } from './engine/backtest.js';
-import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_TEMPLATE, PAST_TEMPLATE } from './engine/importer.js';
-import { formatDateJa } from './engine/util.js';
+import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
+import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
 import {
-  renderRail,
   renderRaceMain,
   renderSummary,
   renderCardTable,
@@ -17,13 +17,18 @@ import {
   renderBetsPanel,
   renderWeightsPanel,
   renderEmptyRace,
+  renderJumpRace,
 } from './ui/predictView.js';
-import { renderBacktest } from './ui/backtestView.js';
+import { renderRail, dayLabel, statusBadge } from './ui/timeline.js';
+import { renderBacktest, currentBacktest } from './ui/backtestView.js';
 import { renderData } from './ui/dataView.js';
 import { renderLogic } from './ui/logicView.js';
 import { bindLineChart } from './ui/charts.js';
 import { installTooltips } from './ui/tooltip.js';
-import { loadState, saveState } from './ui/store.js';
+import { loadState as loadSaved, saveState } from './ui/store.js';
+import { esc } from './ui/format.js';
+import { REAL_BACKTEST } from './data/realBacktest.js';
+import { REAL_STATS } from './engine/realStats.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -39,35 +44,44 @@ function setHTML(el, html) {
 }
 
 // ---------------------------------------------------------------------------
-// データと状態
+// 状態
 
-const day = generateRaceDay();
-const sampleById = new Map(day.races.map((r) => [r.id, r]));
-const saved = loadState();
-
+const saved = loadSaved();
+// 校正し直したら、保存してある重み付けは使わない（古い係数用の値なので）
+const sameCal = saved.calId === CALIBRATION_ID;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
+const DATA_URL = 'data.json';
 
 const state = {
   tab: 'predict',
-  venue: ['東京', '京都', 'import'].includes(saved.venue) ? saved.venue : '東京',
-  raceId: typeof saved.raceId === 'string' ? saved.raceId : 'tky11',
-  weights: { ...DEFAULT_WEIGHTS, ...(saved.weights || {}) },
-  preset: saved.preset || 'balance',
-  noise: Number(saved.noise) || 1,
+  day: typeof saved.day === 'string' ? saved.day : null,
+  venue: typeof saved.venue === 'string' ? saved.venue : null,
+  raceId: typeof saved.raceId === 'string' ? saved.raceId : null,
+  weights: { ...DEFAULT_WEIGHTS, ...(sameCal ? saved.weights || {} : {}) },
+  preset: sameCal && (PRESETS[saved.preset] || saved.preset === 'custom') ? saved.preset : DEFAULT_PRESET,
+  noise: (sameCal && Number(saved.noise)) || DEFAULT_NOISE,
   sims: [5000, 20000, 50000].includes(saved.sims) ? saved.sims : 20000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
   strategy: STRATEGIES[saved.strategy] ? saved.strategy : 'balance',
   betTypes: Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...BET_TYPES],
-  sort: saved.sort === 'ai' ? 'ai' : 'number',
+  sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   blend: BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : DEFAULT_BLEND,
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
 };
+if (!FACTORS.every((f) => Number.isFinite(Number(state.weights[f.key])))) state.weights = { ...DEFAULT_WEIGHTS };
 let imported = Array.isArray(saved.imported) ? saved.imported.filter((r) => r && Array.isArray(r.entries)) : [];
 
-const bt = { count: 200, running: false, progress: 0, stage: '', result: null, focus: 'ai', stream: null, races: [], started: false };
+// 実データ
+const data = { bundle: null, loadState: 'loading', loadError: '', lastFetch: null, live: false };
+let raceIndex = new Map();
+// 利用者がレースを選ぶまでは「次に発走するレース」を自動で追いかける
+let userPicked = false;
+const preferredVenue = state.venue;
+
+const bt = { source: REAL_BACKTEST ? 'saved' : 'recent', preset: 'balance', focus: 'ai', recent: { running: false, progress: 0, result: null } };
 const dataView = {
-  form: { date: SAMPLE_DATE, course: '中山', raceNo: 11, name: '', grade: '3勝', surface: '芝', distance: 1800, going: '良', card: '', past: '' },
+  form: { date: jstParts().date, course: '東京', raceNo: 11, name: '', grade: '3勝', surface: '芝', distance: 1600, going: '良', card: '', past: '' },
   messages: null,
   json: '',
   jsonMessage: null,
@@ -76,19 +90,66 @@ const dataView = {
 let current = { pred: null, rec: null };
 
 function persist() {
-  const { venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits } = state;
-  saveState({ venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
+  const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits } = state;
+  saveState({ calId: CALIBRATION_ID, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
 }
 
-const venues = () => [
-  { key: '東京', label: '東京' },
-  { key: '京都', label: '京都' },
-  { key: 'import', label: '取り込み', count: imported.length },
-];
+const today = () => jstParts().date;
+const days = () => data.bundle?.days || [];
 
-const racesOf = (venue) => (venue === 'import' ? imported : day.races.filter((r) => r.course === venue));
-const baseRace = (id) => sampleById.get(id) || imported.find((r) => r.id === id) || null;
-const venueOf = (race) => (race.imported ? 'import' : race.course);
+function racesOf(day, venue) {
+  if (day === 'import') return imported;
+  const d = days().find((x) => x.date === day);
+  if (!d) return [];
+  return venue ? d.races.filter((r) => r.course === venue) : d.races;
+}
+
+function venuesOf(day) {
+  if (day === 'import') return [];
+  const d = days().find((x) => x.date === day);
+  return d ? d.venues || [...new Set(d.races.map((r) => r.course))] : [];
+}
+
+const baseRace = (id) => raceIndex.get(id) || imported.find((r) => r.id === id) || null;
+const dayOfRace = (race) => (race.imported ? 'import' : race.date);
+
+/** 最初に開く開催日：今日 → 次の開催日 → 直近の開催日 */
+function defaultDay() {
+  const t = today();
+  const list = days().map((d) => d.date);
+  if (list.includes(t)) return t;
+  return list.find((d) => d > t) || list[list.length - 1] || (imported.length ? 'import' : null);
+}
+
+/** 最初に開くレース：次に発走するレース → 最後に確定したレース */
+function defaultRace(day, venue) {
+  const races = racesOf(day, venue);
+  if (!races.length) return null;
+  const now = Date.now();
+  const upcoming = races.filter((r) => !r.result?.length && startMs(r) && startMs(r) > now - 10 * 60 * 1000).sort((a, b) => startMs(a) - startMs(b));
+  if (upcoming.length) return upcoming[0];
+  const done = races.filter((r) => r.result?.length);
+  return done.length ? done[done.length - 1] : races[0];
+}
+
+/** 開いている開催日・場・レースが無効なら直す */
+function ensureSelection() {
+  const valid = (d) => d === 'import' ? imported.length > 0 : days().some((x) => x.date === d);
+  const cur = state.raceId ? baseRace(state.raceId) : null;
+  if (cur && userPicked) {
+    state.day = dayOfRace(cur);
+    if (!cur.imported) state.venue = cur.course;
+    return;
+  }
+  if (!userPicked || !state.day || !valid(state.day)) state.day = defaultDay();
+  if (!state.day) return;
+  const venues = venuesOf(state.day);
+  if (!userPicked && venues.includes(preferredVenue)) state.venue = preferredVenue;
+  if (!venues.includes(state.venue)) state.venue = venues[0] || null;
+  if (!userPicked || !cur || dayOfRace(cur) !== state.day || (!cur.imported && cur.course !== state.venue)) {
+    state.raceId = defaultRace(state.day, state.day === 'import' ? null : state.venue)?.id ?? null;
+  }
+}
 
 /** ユーザーの変更（馬場・オッズ・取消）を反映したレース */
 function effectiveRace(base) {
@@ -112,18 +173,67 @@ function effectiveRace(base) {
 }
 
 // ---------------------------------------------------------------------------
+// 実データの読み込み（data.json）
+
+function setBundle(bundle) {
+  data.bundle = bundle;
+  data.loadState = bundle.days?.length ? 'ok' : 'none';
+  data.live = !!bundle.live;
+  raceIndex = new Map();
+  for (const d of bundle.days || []) for (const r of d.races) raceIndex.set(r.id, r);
+}
+
+/** data.json を読む。変わっていれば true */
+async function fetchBundle() {
+  try {
+    const res = await fetch(DATA_URL, { cache: 'no-store' });
+    if (!res.ok) throw Object.assign(new Error(`data.json を取得できません（HTTP ${res.status}）`), { missing: res.status === 404 });
+    const json = await res.json();
+    if (!json || !Array.isArray(json.days)) throw new Error('data.json の形式が違います');
+    data.lastFetch = new Date().toISOString();
+    if (data.bundle && json.generatedAt === data.bundle.generatedAt && !!json.live === data.live) {
+      // 中身は同じ：確認した時刻だけ更新
+      data.bundle.checkedAt = json.checkedAt;
+      return false;
+    }
+    setBundle(json);
+    data.loadError = '';
+    return true;
+  } catch (e) {
+    if (!data.bundle) {
+      data.loadState = e.missing || e instanceof TypeError ? 'none' : 'error';
+      data.loadError = e instanceof TypeError ? '' : e.message;
+    }
+    return false;
+  }
+}
+
+/** 予想に使う統計：実データの統計に、バンドルにある最近の開催日の馬場差を足したもの */
+let statsCache = { bundle: null, stats: REAL_STATS };
+function currentStats() {
+  if (statsCache.bundle !== data.bundle) {
+    const extra = data.bundle?.dayVariant;
+    statsCache = { bundle: data.bundle, stats: extra && Object.keys(extra).length ? { ...REAL_STATS, dayVariant: { ...(REAL_STATS.dayVariant || {}), ...extra } } : REAL_STATS };
+  }
+  return statsCache.stats;
+}
+
+/** 予想のキャッシュに使う、レースの中身の目印 */
+const raceSig = (race) => `${race.id}|${race.oddsAt || ''}|${race.status || ''}|${race.going || ''}|${race.result?.length || 0}`;
+
+// ---------------------------------------------------------------------------
 // 予想（キャッシュつき）
 
 const predCache = new Map();
 const settingsKey = () => JSON.stringify([state.weights, state.noise, state.sims]);
 
 function getPrediction(race) {
-  const key = `${race.id}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}`;
+  const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}`;
   const hit = predCache.get(key);
   if (hit) return hit;
-  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims: state.sims, sires: SIRE_MAP });
+  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims: state.sims, stats: currentStats() });
   predCache.set(key, pred);
-  if (predCache.size > 30) predCache.delete(predCache.keys().next().value);
+  if (predCache.size > 60) predCache.delete(predCache.keys().next().value);
   return pred;
 }
 
@@ -131,12 +241,13 @@ const quickPicks = new Map();
 let quickKey = '';
 let quickTimer = null;
 
-function pickOf(pred) {
+function pickOf(pred, race) {
+  if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
   const h = pred.order[0];
-  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade };
+  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, sig: raceSig(race) };
 }
 
-/** レース一覧の◎を裏で少しずつ計算 */
+/** 一覧の◎（とその日の成績）を裏で少しずつ計算 */
 function scheduleQuickPicks() {
   const key = `${settingsKey()}|${JSON.stringify(state.edits)}`;
   if (key !== quickKey) {
@@ -144,13 +255,15 @@ function scheduleQuickPicks() {
     quickKey = key;
   }
   clearTimeout(quickTimer);
-  const queue = racesOf(state.venue).filter((r) => !quickPicks.has(r.id));
+  const venueFirst = (r) => (state.day === 'import' || r.course === state.venue ? 0 : 1);
+  const queue = racesOf(state.day, null)
+    .filter((r) => quickPicks.get(r.id)?.sig !== raceSig(r))
+    .sort((a, b) => venueFirst(a) - venueFirst(b));
   const step = () => {
     const t0 = performance.now();
     while (queue.length && performance.now() - t0 < 24) {
       const race = effectiveRace(queue.shift());
-      const pred = getPrediction(race);
-      if (!pred.empty) quickPicks.set(race.id, pickOf(pred));
+      quickPicks.set(race.id, pickOf(getPrediction(race), race));
     }
     if (state.tab === 'predict') renderRailOnly();
     if (queue.length) quickTimer = setTimeout(step, 16);
@@ -161,43 +274,101 @@ function scheduleQuickPicks() {
 // ---------------------------------------------------------------------------
 // 描画
 
-const ctx = () => ({ state, venues: venues(), racesOf, quickPicks, edits: state.edits[state.raceId], bt, dataView, imported });
+const ctx = () => ({
+  state,
+  days: days(),
+  today: today(),
+  now: Date.now(),
+  racesOf,
+  venuesOf,
+  quickPicks,
+  imported,
+  edits: state.edits[state.raceId],
+  bt,
+  dataView,
+  strategyLabel: STRATEGIES[state.strategy].label,
+  recentCount: recentRaces().length,
+  railStatus: statusHtml(),
+  stats: currentStats(),
+  ...data,
+});
+
+/** データの更新状況（ヘッダーと、狭い画面ではレース一覧の上に出す） */
+function statusHtml() {
+  if (data.loadState !== 'ok') return data.loadState === 'loading' ? '読み込み中…' : '<span class="live-dot is-off" aria-hidden="true"></span>実データなし';
+  const t = today();
+  const upcoming = days().filter((d) => d.date >= t);
+  const label = upcoming.length ? upcoming.map((d) => dayLabel(d.date)).join('・') : `${dayLabel(days()[days().length - 1].date)}まで`;
+  const at = data.bundle.checkedAt || data.bundle.generatedAt;
+  const gen = at ? new Date(Date.parse(at) + 9 * 3600 * 1000).toISOString() : '';
+  const genText = gen ? `${Number(gen.slice(5, 7))}/${Number(gen.slice(8, 10))} ${gen.slice(11, 16)}` : '';
+  return `<span class="live-dot${data.live ? ' is-live' : ''}" aria-hidden="true"></span>${esc(label)}<span class="meet-sub">JRA ${esc(genText)} 更新${data.live ? '・自動更新中' : ''}</span>`;
+}
+
+function renderTopStatus() {
+  const el = $('#meet-date');
+  if (el) el.innerHTML = statusHtml();
+}
 
 function renderRailOnly() {
   const rail = $('#race-rail');
-  const scroll = rail.querySelector('.race-list')?.scrollLeft ?? 0;
-  const scrollTop = rail.scrollTop;
-  setHTML(rail, renderRail(ctx()));
+  if (!rail) return;
   const list = rail.querySelector('.race-list');
-  if (list) list.scrollLeft = scroll;
+  const strip = rail.querySelector('.day-strip');
+  const scroll = list?.scrollLeft ?? 0;
+  const stripScroll = strip?.scrollLeft ?? null;
+  const scrollTop = rail.scrollTop;
+  if (!days().length && !imported.length) {
+    setHTML(rail, '');
+    return;
+  }
+  // 一覧を作り直してもキーボードの位置を保つ
+  const a = document.activeElement;
+  const focusSel = a && rail.contains(a) ? ['race', 'day', 'venue'].map((k) => (a.dataset?.[k] ? `[data-${k}="${a.dataset[k]}"]` : '')).find(Boolean) : null;
+  setHTML(rail, renderRail(ctx()));
+  if (focusSel) rail.querySelector(focusSel)?.focus({ preventScroll: true });
+  const nl = rail.querySelector('.race-list');
+  if (nl) nl.scrollLeft = scroll;
+  const ns = rail.querySelector('.day-strip');
+  if (ns) {
+    if (stripScroll != null) ns.scrollLeft = stripScroll;
+    else ns.querySelector('.day-chip.is-on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
   rail.scrollTop = scrollTop;
 }
 
 function computeCurrent() {
-  let base = baseRace(state.raceId);
-  if (!base) {
-    base = racesOf(state.venue)[0] || day.races[0];
-    if (base) state.raceId = base.id;
-  }
+  ensureSelection();
+  const base = state.raceId ? baseRace(state.raceId) : null;
   if (!base) return null;
-  if (venueOf(base) !== state.venue) state.venue = venueOf(base);
   const race = effectiveRace(base);
+  if (race.jump || race.surface === '障') return { pred: null, rec: null, jump: race };
   const pred = getPrediction(race);
   if (pred.empty) return { pred, rec: null };
-  quickPicks.set(race.id, pickOf(pred));
+  quickPicks.set(race.id, pickOf(pred, race));
   const rec = recommendBets(pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
   return { pred, rec };
 }
 
 function renderPredict() {
   current = computeCurrent() || { pred: null, rec: null };
+  renderTopStatus();
   renderRailOnly();
   const main = $('#race-main');
+  if (current.jump) {
+    setHTML(main, renderJumpRace(current.jump, ctx()));
+    setHTML($('#slot-pace'), '');
+    setHTML($('#slot-bets'), '');
+    setHTML($('#slot-weights'), renderWeightsPanel(ctx()));
+    scheduleQuickPicks();
+    return;
+  }
   if (!current.pred || current.pred.empty) {
     setHTML(main, renderEmptyRace(ctx()));
     setHTML($('#slot-pace'), '');
     setHTML($('#slot-bets'), '');
-    setHTML($('#slot-weights'), renderWeightsPanel(ctx()));
+    setHTML($('#slot-weights'), data.loadState === 'ok' || imported.length ? renderWeightsPanel(ctx()) : '');
+    scheduleQuickPicks();
     return;
   }
   setHTML(main, renderRaceMain(current.pred, current.rec, ctx()));
@@ -207,10 +378,10 @@ function renderPredict() {
   scheduleQuickPicks();
 }
 
-/** 重みを動かしている最中：スライダーは作り直さずに、予想だけ更新 */
+/** 重みを動かしている最中・データ更新時：スライダーは作り直さずに、予想だけ更新 */
 function refreshPrediction() {
   current = computeCurrent() || current;
-  if (!current.pred || current.pred.empty) return renderPredict();
+  if (!current.pred || current.pred.empty || current.jump) return renderPredict();
   const main = $('#race-main');
   const scrollY = window.scrollY;
   setHTML(main, renderRaceMain(current.pred, current.rec, ctx()));
@@ -227,6 +398,12 @@ function refreshBets() {
   setHTML($('#slot-bets'), renderBetsPanel(current.pred, current.rec, ctx()));
   const sum = $('#slot-summary');
   if (sum) setHTML(sum, renderSummary(current.pred, current.rec));
+  if (current.pred.race.result?.length) {
+    // 答え合わせも今の買い方で作り直す
+    const scrollY = window.scrollY;
+    setHTML($('#race-main'), renderRaceMain(current.pred, current.rec, ctx()));
+    window.scrollTo({ top: scrollY });
+  }
 }
 
 function refreshCard() {
@@ -234,16 +411,44 @@ function refreshCard() {
   if (slot && current.pred) setHTML(slot, renderCardTable(current.pred, ctx()));
 }
 
+/** 発走までの時間・状態の表示だけ更新 */
+function tickClock() {
+  if (state.tab !== 'predict') return;
+  renderRailOnly();
+  const race = current.pred?.race || current.jump;
+  const badge = $('#race-main .rh-eyebrow .status-badge');
+  if (race && badge && !race.imported) badge.outerHTML = statusBadge(race, Date.now(), { withTime: true });
+}
+
+// ---------------------------------------------------------------------------
+// バックテスト
+
+/** 直近の開催日の、結果が確定した平地のレース */
+function recentRaces() {
+  const t = today();
+  return days()
+    .filter((d) => d.date <= t)
+    .flatMap((d) => d.races)
+    .filter((r) => r.result?.length && !r.jump && r.surface !== '障');
+}
+
 function renderBacktestView() {
   const el = $('#view-backtest');
   setHTML(el, renderBacktest(ctx()));
-  if (bt.result) {
-    const focus = bt.result.strategies.find((s) => s.key === bt.focus) || bt.result.strategies[0];
-    const base = bt.result.strategies.find((s) => s.key === 'fav');
-    bindLineChart($('#bt-line'), [
-      { label: focus.label, values: focus.curve },
-      { label: base.label, values: base.curve },
-    ]);
+  const res = currentBacktest(bt);
+  if (res) {
+    const focus = res.strategies.find((s) => s.key === bt.focus) || res.strategies[0];
+    const base = res.strategies.find((s) => s.key === 'fav');
+    const step = res.step || 1;
+    bindLineChart(
+      $('#bt-line'),
+      [
+        { label: focus.label, values: focus.curve },
+        { label: base.label, values: base.curve },
+      ],
+      null,
+      (i) => Math.min(res.races, (i + 1) * step),
+    );
   }
 }
 
@@ -251,11 +456,38 @@ function updateProgress() {
   const bar = $('#view-backtest .progress');
   if (!bar) return;
   bar.hidden = false;
-  bar.setAttribute('aria-valuenow', String(Math.round(bt.progress * 100)));
-  bar.firstElementChild.style.width = `${(bt.progress * 100).toFixed(0)}%`;
-  const label = $('#view-backtest .progress-label');
-  if (label) label.textContent = bt.stage;
+  bar.setAttribute('aria-valuenow', String(Math.round(bt.recent.progress * 100)));
+  bar.firstElementChild.style.width = `${(bt.recent.progress * 100).toFixed(0)}%`;
 }
+
+async function runRecentBacktest() {
+  if (bt.recent.running) return;
+  const races = recentRaces().map(effectiveRace);
+  if (!races.length) return;
+  bt.recent.running = true;
+  bt.recent.progress = 0;
+  bt.source = 'recent';
+  renderBacktestView();
+  try {
+    bt.recent.result = await runBacktest(
+      races,
+      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats() },
+      {
+        sims: 4000,
+        onProgress: (p) => {
+          bt.recent.progress = p;
+          updateProgress();
+        },
+      },
+    );
+  } finally {
+    bt.recent.running = false;
+    if (state.tab === 'backtest') renderBacktestView();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 画面
 
 function renderDataView() {
   setHTML($('#view-data'), renderData(ctx()));
@@ -267,7 +499,7 @@ function renderLogicView() {
 
 function setHash(token) {
   try {
-    history.replaceState(null, '', `#${token}`);
+    history.replaceState(null, '', token ? `#${token}` : location.pathname + location.search);
   } catch {
     // フレーム内などで使えない場合は無視
   }
@@ -282,11 +514,10 @@ function showTab(tab, { updateHash = true } = {}) {
   });
   for (const t of TABS) $(`#view-${t}`).hidden = t !== state.tab;
   if (state.tab === 'predict') renderPredict();
-  else if (state.tab === 'backtest') {
-    renderBacktestView();
-    if (!bt.started) runBacktestUI();
-  } else if (state.tab === 'data') renderDataView();
+  else if (state.tab === 'backtest') renderBacktestView();
+  else if (state.tab === 'data') renderDataView();
   else renderLogicView();
+  renderTopStatus();
   if (updateHash) setHash(state.tab === 'predict' ? state.raceId : state.tab);
 }
 
@@ -294,7 +525,9 @@ function selectRace(id) {
   const base = baseRace(id);
   if (!base) return;
   state.raceId = id;
-  state.venue = venueOf(base);
+  state.day = dayOfRace(base);
+  if (!base.imported) state.venue = base.course;
+  userPicked = true;
   persist();
   if (state.tab !== 'predict') showTab('predict');
   else {
@@ -303,6 +536,16 @@ function selectRace(id) {
   }
   const head = $('#race-main');
   if (head && head.getBoundingClientRect().top < 0) head.scrollIntoView({ block: 'start' });
+}
+
+function selectDay(day) {
+  state.day = day;
+  const venues = venuesOf(day);
+  if (!venues.includes(state.venue)) state.venue = venues[0] || null;
+  const race = defaultRace(day, day === 'import' ? null : state.venue);
+  if (race) return selectRace(race.id);
+  persist();
+  renderPredict();
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +581,41 @@ function scheduleRecompute() {
 }
 
 // ---------------------------------------------------------------------------
+// データの自動更新
+
+let pendingRefresh = false;
+const typing = () => {
+  const a = document.activeElement;
+  return a && a.matches?.('input:not([type="checkbox"]):not([type="range"]), textarea, select');
+};
+
+function applyDataUpdate() {
+  if (typing()) {
+    pendingRefresh = true;
+    return;
+  }
+  pendingRefresh = false;
+  if (state.tab === 'predict') {
+    const before = current.pred?.race ? raceSig(current.pred.race) : null;
+    const base = state.raceId ? baseRace(state.raceId) : null;
+    if (!current.pred || !base || raceSig(base) !== before) refreshPrediction();
+    else {
+      renderTopStatus();
+      renderRailOnly();
+      scheduleQuickPicks();
+    }
+  } else if (state.tab === 'data') renderDataView();
+  else renderTopStatus();
+}
+
+async function poll() {
+  const changed = await fetchBundle();
+  if (changed) applyDataUpdate();
+  else if (state.tab === 'data') renderDataView();
+  setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
+}
+
+// ---------------------------------------------------------------------------
 // クリップボード
 
 async function copyText(text, statusEl, fallbackEl) {
@@ -353,45 +631,6 @@ async function copyText(text, statusEl, fallbackEl) {
       fallbackEl.select();
     }
     if (statusEl) statusEl.textContent = '自動でコピーできませんでした。下の欄を選択したので Ctrl+C（⌘+C）でコピーしてください';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// バックテスト
-
-async function runBacktestUI() {
-  if (bt.running) return;
-  bt.started = true;
-  bt.running = true;
-  bt.progress = 0;
-  bt.stage = '過去レースを用意しています';
-  renderBacktestView();
-  try {
-    if (!bt.stream) bt.stream = backtestRaceStream(777);
-    while (bt.races.length < bt.count) {
-      const t0 = performance.now();
-      while (bt.races.length < bt.count && performance.now() - t0 < 40) bt.races.push(bt.stream.next());
-      bt.progress = 0.45 * (bt.races.length / bt.count);
-      updateProgress();
-      await new Promise((r) => setTimeout(r, 0));
-    }
-    bt.stage = '予想して払戻を精算しています';
-    const result = await runBacktest(
-      bt.races.slice(0, bt.count),
-      { weights: state.weights, noise: state.noise, blend: state.blend, sires: SIRE_MAP },
-      {
-        sims: 2000,
-        onProgress: (p) => {
-          bt.progress = 0.45 + 0.55 * p;
-          updateProgress();
-        },
-      },
-    );
-    bt.result = result;
-  } finally {
-    bt.running = false;
-    bt.stage = '';
-    if (state.tab === 'backtest') renderBacktestView();
   }
 }
 
@@ -440,19 +679,20 @@ function onClick(e) {
   }
   const raceBtn = t.closest('[data-race]');
   if (raceBtn) return selectRace(raceBtn.dataset.race);
+  const dayBtn = t.closest('[data-day]');
+  if (dayBtn) return selectDay(dayBtn.dataset.day);
   const venueBtn = t.closest('[data-venue]');
   if (venueBtn) {
     state.venue = venueBtn.dataset.venue;
-    const first = racesOf(state.venue)[0];
-    if (first) state.raceId = first.id;
+    const race = defaultRace(state.day, state.venue);
+    if (race) return selectRace(race.id);
     persist();
-    renderPredict();
-    if (first) setHash(first.id);
-    return;
+    return renderPredict();
   }
   const goingBtn = t.closest('[data-going]');
   if (goingBtn) {
     const base = baseRace(state.raceId);
+    if (!base) return;
     const ed = editOf(state.raceId);
     ed.going = goingBtn.dataset.going === base.going ? undefined : goingBtn.dataset.going;
     if (!ed.going) delete ed.going;
@@ -473,18 +713,25 @@ function onClick(e) {
   }
   if (act === 'copy-bets' && current.rec) {
     const race = current.pred.race;
-    const text = ticketsToText(`${race.name}（${race.course}${race.raceNo}R）KEIB AI推奨・${STRATEGIES[state.strategy].label}`, current.rec.tickets);
+    const text = ticketsToText(`${race.name}（${race.date} ${race.course}${race.raceNo}R）KEIB AI推奨・${STRATEGIES[state.strategy].label}`, current.rec.tickets);
     copyText(text, $('#panel-bets .copy-status'), $('#copy-fallback-bets'));
     return;
   }
   if (act === 'reset-weights') {
     state.weights = { ...DEFAULT_WEIGHTS };
-    state.preset = 'balance';
-    state.noise = 1;
+    state.preset = DEFAULT_PRESET;
+    state.noise = DEFAULT_NOISE;
     persist();
     return renderPredict();
   }
-  if (act === 'run-backtest') return runBacktestUI();
+  if (act === 'run-recent') return runRecentBacktest();
+  if (act === 'reload-data') {
+    fetchBundle().then((changed) => {
+      if (changed) applyDataUpdate();
+      renderDataView();
+    });
+    return;
+  }
   if (act === 'import-json') {
     const text = $('#f-json')?.value || '';
     dataView.json = text;
@@ -531,8 +778,15 @@ function onClick(e) {
   if (preset) {
     state.preset = preset.dataset.preset;
     state.weights = { ...PRESETS[state.preset].weights };
+    state.noise = PRESETS[state.preset].noise ?? 1;
     persist();
     return renderPredict();
+  }
+  const btPreset = t.closest('[data-bt-preset]');
+  if (btPreset) {
+    bt.source = 'saved';
+    bt.preset = btPreset.dataset.btPreset;
+    return renderBacktestView();
   }
   const focusRow = t.closest('[data-bt-focus]');
   if (focusRow) {
@@ -542,10 +796,8 @@ function onClick(e) {
   const tmpl = t.closest('[data-template]');
   if (tmpl) {
     readFormFromDom();
-    if (tmpl.dataset.template === 'card') {
-      dataView.form.card = CARD_TEMPLATE;
-      if (!dataView.form.name) Object.assign(dataView.form, { name: 'サンプル特別', course: '中山', grade: '3勝', surface: '芝', distance: 1800 });
-    } else dataView.form.past = PAST_TEMPLATE;
+    if (tmpl.dataset.template === 'card') dataView.form.card = dataView.form.card ? dataView.form.card : `${CARD_HEADER}\n`;
+    else dataView.form.past = dataView.form.past ? dataView.form.past : `${PAST_HEADER}\n`;
     return renderDataView();
   }
   const openRace = t.closest('[data-open-race]');
@@ -555,8 +807,8 @@ function onClick(e) {
     imported = imported.filter((r) => r.id !== del.dataset.deleteRace);
     delete state.edits[del.dataset.deleteRace];
     if (state.raceId === del.dataset.deleteRace) {
-      state.raceId = 'tky11';
-      state.venue = '東京';
+      state.raceId = null;
+      userPicked = false;
     }
     persist();
     return renderDataView();
@@ -650,8 +902,20 @@ function onChange(e) {
     persist();
     return refreshPrediction();
   }
-  if (t.matches('[data-bt-count]')) {
-    bt.count = Number(t.value);
+  if (t.matches('[data-bundle-file]') && t.files?.[0]) {
+    readFileText(t.files[0]).then((text) => {
+      try {
+        const json = JSON.parse(text);
+        if (!Array.isArray(json.days)) throw new Error();
+        setBundle(json);
+        data.lastFetch = new Date().toISOString();
+        userPicked = false;
+        renderDataView();
+      } catch {
+        data.loadError = 'バンドルの形式が違います（data/bundle.json を選んでください）';
+        renderDataView();
+      }
+    });
     return;
   }
   if (t.matches('[data-file-for]') && t.files?.[0]) {
@@ -678,7 +942,6 @@ function onSubmit(e) {
   }
   addImported([race]);
   dataView.messages = { errors: [], warnings, okText: `${race.name}（${race.entries.length}頭）を取り込みました。` };
-  state.venue = 'import';
   selectRace(race.id);
 }
 
@@ -698,27 +961,36 @@ function onKeydown(e) {
 function routeFromHash() {
   const token = (location.hash || '').replace(/^#/, '');
   if (TABS.includes(token)) return { tab: token };
-  if (token && baseRace(token)) return { tab: 'predict', raceId: token };
+  if (token) return { tab: 'predict', raceId: token };
   return { tab: 'predict' };
 }
 
-function start() {
-  $('#meet-date').textContent = `${formatDateJa(day.date)} 東京・京都`;
+function applyRoute(r) {
+  if (r.raceId && baseRace(r.raceId)) {
+    state.raceId = r.raceId;
+    userPicked = true;
+  }
+  showTab(r.tab, { updateHash: false });
+}
+
+async function start() {
   const app = $('#app');
   app.addEventListener('click', onClick);
   app.addEventListener('input', onInput);
   app.addEventListener('change', onChange);
   app.addEventListener('submit', onSubmit);
   app.addEventListener('keydown', onKeydown);
-  installTooltips(app);
-  window.addEventListener('hashchange', () => {
-    const r = routeFromHash();
-    if (r.raceId) state.raceId = r.raceId;
-    showTab(r.tab, { updateHash: false });
+  app.addEventListener('focusout', () => {
+    if (pendingRefresh) setTimeout(() => !typing() && applyDataUpdate(), 0);
   });
-  const r = routeFromHash();
-  if (r.raceId) state.raceId = r.raceId;
-  showTab(r.tab, { updateHash: false });
+  installTooltips(app);
+  window.addEventListener('hashchange', () => applyRoute(routeFromHash()));
+  const route = routeFromHash();
+  showTab(route.tab, { updateHash: false });
+  await fetchBundle();
+  applyRoute(route);
+  setInterval(tickClock, 30 * 1000);
+  setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
 }
 
 start();

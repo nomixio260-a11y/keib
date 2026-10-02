@@ -1,7 +1,50 @@
 // データ画面：CSV / JSON の取り込みと書き出し
 
 import { COURSE_NAMES, GOINGS, GRADES, gradeLabel } from '../engine/constants.js';
+import { REAL_STATS } from '../engine/realStats.js';
+import { CALIBRATION } from '../engine/calibration.js';
 import { esc } from './format.js';
+import { dayLabel } from './timeline.js';
+
+const stamp = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(Date.parse(iso) + 9 * 3600 * 1000).toISOString();
+  return `${d.slice(0, 10)} ${d.slice(11, 16)}`;
+};
+
+/** 実データの出どころと更新状況 */
+function sourcePanel(ctx) {
+  const { bundle, loadState, loadError, lastFetch, live } = ctx;
+  const days = bundle?.days || [];
+  const rows = days
+    .map((d) => {
+      const res = d.races.filter((r) => r.status === 'result').length;
+      return `<tr><td class="num">${esc(dayLabel(d.date))}</td><td>${esc((d.venues || []).join('・'))}</td><td class="num">${d.races.length}</td><td class="num">${res}</td></tr>`;
+    })
+    .join('');
+  const state =
+    loadState === 'ok'
+      ? `<p class="src-state is-ok"><span class="live-dot${live ? ' is-live' : ''}"></span>JRA公式サイトのデータ（${esc(stamp(bundle.generatedAt))} 時点・${esc(stamp(bundle.checkedAt || bundle.generatedAt))} 確認）${live ? '・1分ごとに自動更新' : ''}</p>`
+      : loadState === 'loading'
+        ? '<p class="src-state">読み込み中…</p>'
+        : `<p class="src-state is-bad">実データを読み込めませんでした。${esc(loadError || '')}</p>`;
+  return `<section class="panel source-panel">
+    <header class="panel-head"><h2>実データ</h2><span class="panel-sub">出馬表・オッズ・結果・払戻（JRA）</span></header>
+    ${state}
+    ${rows ? `<div class="table-scroll"><table class="col-table src-table"><thead><tr><th>開催日</th><th>競馬場</th><th>レース</th><th>確定</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+    <dl class="bet-stats src-stats">
+      <div><dt>統計の元データ</dt><dd class="num">${REAL_STATS.races ? `${REAL_STATS.races.toLocaleString('ja-JP')}レース` : '—'}</dd></div>
+      <div><dt>期間</dt><dd class="num">${REAL_STATS.from ? `${esc(REAL_STATS.from)}〜${esc(REAL_STATS.to)}` : '—'}</dd></div>
+      <div><dt>重みの学習</dt><dd class="num">${CALIBRATION.trainedOn ? `${CALIBRATION.trainedOn.toLocaleString('ja-JP')}レース` : '—'}</dd></div>
+      <div><dt>最終確認</dt><dd class="num">${esc(lastFetch ? stamp(lastFetch) : '—')}</dd></div>
+    </dl>
+    <div class="panel-actions wrap">
+      <button type="button" class="btn" data-action="reload-data">最新にする</button>
+      <label class="file-btn">バンドル（JSON）を開く<input type="file" accept=".json,application/json" data-bundle-file></label>
+    </div>
+    <p class="panel-note">基準タイム・騎手成績・枠順傾向などの統計と、予想の重みは、すべて実際のレース結果から計算しています。架空のデータは使っていません。</p>
+  </section>`;
+}
 
 const CARD_COLS = [
   ['馬番', '必須。1〜18'],
@@ -66,8 +109,9 @@ export function renderData(ctx) {
 
   return `<div class="view-intro">
       <h1 class="view-title">データ</h1>
-      <p>自分で用意した出馬表と過去走（馬柱）を取り込むと、サンプルと同じ方法で予想できます。データはこのブラウザの中だけで処理され、外部には送信されません。</p>
+      <p>予想に使う実データの状況です。JRAの出馬表・オッズ・結果を使います。自分で用意した実際の出馬表と過去走（馬柱）を CSV / JSON で取り込んで予想することもできます（取り込んだデータはこのブラウザの中だけで処理され、外部には送信されません）。</p>
     </div>
+    ${sourcePanel(ctx)}
     <div class="data-grid">
       <form class="panel import-form" id="import-form" novalidate>
         <header class="panel-head"><h2>CSVで取り込む</h2></header>
@@ -77,7 +121,7 @@ export function renderData(ctx) {
             <label>開催日<input id="f-date" name="date" type="date" value="${esc(f.date)}" required></label>
             <label>競馬場${select('f-course', 'course', COURSE_NAMES.map((c) => ({ value: c, label: c })), f.course)}</label>
             <label>レース番号<input id="f-raceNo" name="raceNo" type="number" min="1" max="12" value="${esc(f.raceNo)}"></label>
-            <label class="span2">レース名<input id="f-name" name="name" type="text" value="${esc(f.name)}" placeholder="例：〇〇ステークス"></label>
+            <label class="span2">レース名<input id="f-name" name="name" type="text" value="${esc(f.name)}" placeholder="出馬表のレース名"></label>
             <label>クラス${select('f-grade', 'grade', GRADES.map((g) => ({ value: g, label: gradeLabel(g) })), f.grade)}</label>
             <label>芝・ダート${select('f-surface', 'surface', [{ value: '芝', label: '芝' }, { value: 'ダ', label: 'ダート' }], f.surface)}</label>
             <label>距離（m）<input id="f-distance" name="distance" type="number" min="800" max="4000" step="100" value="${esc(f.distance)}"></label>
@@ -89,7 +133,7 @@ export function renderData(ctx) {
             <label for="f-card">出馬表（CSV）</label>
             <span class="csv-actions">
               <label class="file-btn">ファイルを選ぶ<input type="file" accept=".csv,.tsv,.txt,text/csv" data-file-for="f-card"></label>
-              <button type="button" class="mini-btn" data-template="card">見本を入れる</button>
+              <button type="button" class="mini-btn" data-template="card">列名を入れる</button>
             </span>
           </div>
           <textarea id="f-card" name="card" rows="7" spellcheck="false" placeholder="1行目に列名、2行目から1頭ずつ">${esc(f.card)}</textarea>
@@ -99,7 +143,7 @@ export function renderData(ctx) {
             <label for="f-past">過去走（CSV・省略可）</label>
             <span class="csv-actions">
               <label class="file-btn">ファイルを選ぶ<input type="file" accept=".csv,.tsv,.txt,text/csv" data-file-for="f-past"></label>
-              <button type="button" class="mini-btn" data-template="past">見本を入れる</button>
+              <button type="button" class="mini-btn" data-template="past">列名を入れる</button>
             </span>
           </div>
           <textarea id="f-past" name="past" rows="7" spellcheck="false" placeholder="1行に1走。馬番で出馬表と結び付けます">${esc(f.past)}</textarea>
@@ -115,7 +159,7 @@ export function renderData(ctx) {
         <section class="panel">
           <header class="panel-head"><h2>JSONで取り込む・書き出す</h2></header>
           <p class="panel-note">表示中のレースをJSONにして保存したり、別のブラウザに移したりできます。複数レースの配列も読み込めます。</p>
-          <textarea id="f-json" rows="8" spellcheck="false" aria-label="JSON" placeholder='{"date":"2026-10-04","course":"東京", ... ,"entries":[...]}'>${esc(dataView.json)}</textarea>
+          <textarea id="f-json" rows="8" spellcheck="false" aria-label="JSON" placeholder='{"date":"…","course":"…", … ,"entries":[…]}'>${esc(dataView.json)}</textarea>
           ${dataView.jsonMessage ? `<p class="msg-inline ${dataView.jsonMessage.error ? 'tx-bad' : 'tx-good'}" role="status">${esc(dataView.jsonMessage.text)}</p>` : ''}
           <div class="panel-actions wrap">
             <button type="button" class="btn" data-action="import-json">JSONを取り込む</button>

@@ -1,8 +1,9 @@
 // 予想ファクターの計算。各馬の過去走から「生の値」を出す（レース内での標準化は model.js）。
 
-import { speedFigure } from './speed.js';
+import { speedFigure, last3fBase } from './speed.js';
 import { classLevel, COURSES, drawBias, straightBias, JOCKEY_DEFAULT } from './constants.js';
 import { impliedWinProbs } from './market.js';
+import { REAL_STATS } from './realStats.js';
 import { clamp, daysBetween, mean } from './util.js';
 
 // 直近の走ほど重視する
@@ -11,7 +12,7 @@ const RECENCY = [1, 0.8, 0.65, 0.5, 0.4];
 const isHeavy = (going) => going === '重' || going === '不良';
 
 /** 過去走1走を数値化 */
-export function analyzeRun(run, k, race) {
+export function analyzeRun(run, k, race, stats = REAL_STATS) {
   const field = Math.max(2, run.fieldSize || 16);
   const finished = run.finish > 0;
   const pos = finished ? 1 - (Math.min(run.finish, field) - 1) / (field - 1) : 0;
@@ -22,6 +23,8 @@ export function analyzeRun(run, k, race) {
   let recency = RECENCY[k] ?? 0.3;
   if (ageDays > 365) recency *= 0.5;
   const passing = Array.isArray(run.passing) ? run.passing.filter((p) => p > 0) : [];
+  // 上がり3F：その条件の標準的な上がりより何秒速いか（0.5が標準、1.5秒速いと1）
+  const l3base = run.last3f > 0 ? last3fBase(run.course, run.surface, run.distance, stats) : null;
   return {
     run,
     k,
@@ -30,10 +33,10 @@ export function analyzeRun(run, k, race) {
     pos,
     marginScore,
     perf: 0.5 * pos + 0.5 * marginScore,
-    si: speedFigure(run),
+    si: speedFigure(run, stats),
     recency,
     sameSurface: run.surface === race.surface,
-    closing: run.last3fRank > 0 ? 1 - (Math.min(run.last3fRank, field) - 1) / (field - 1) : null,
+    closing: l3base ? clamp(0.5 + (l3base - run.last3f) / 3, 0, 1) : null,
     firstPos: passing.length ? (Math.min(passing[0], field) - 1) / (field - 1) : null,
     led: passing.length ? passing[0] === 1 : false,
   };
@@ -125,10 +128,19 @@ function closingFactor(an) {
   return s / w;
 }
 
-function jockeyFactor(entry, jockeys) {
+function jockeyFactor(entry, jockeys, average = JOCKEY_DEFAULT) {
   const j = jockeys?.[entry.jockey];
-  const win = j?.winRate ?? JOCKEY_DEFAULT.winRate;
-  const top3 = j?.top3Rate ?? JOCKEY_DEFAULT.top3Rate;
+  const win = j?.winRate ?? average.winRate;
+  const top3 = j?.top3Rate ?? average.top3Rate;
+  return 0.35 * win + 0.65 * top3;
+}
+
+/** 厩舎（調教師）の勝率・複勝率。データがなければ null（平均扱い） */
+function trainerFactor(entry, trainers, average) {
+  if (!trainers || !average) return null;
+  const t = trainers[entry.trainer];
+  const win = t?.winRate ?? average.winRate;
+  const top3 = t?.top3Rate ?? average.top3Rate;
   return 0.35 * win + 0.65 * top3;
 }
 
@@ -242,18 +254,21 @@ function summaryStats(an) {
     top3: an.filter((a) => a.run.finish >= 1 && a.run.finish <= 3).length,
     bestSi: sis.length ? Math.max(...sis) : allSis.length ? Math.max(...allSis) : null,
     lastSi: an[0]?.si ?? null,
-    topClosing: an.filter((a) => a.run.last3fRank === 1).length,
+    topClosing: an.filter((a) => a.closing != null && a.closing >= 0.8).length,
   };
 }
 
 /** レース全体のファクター（生の値）を計算 */
 export function computeRaceFactors(race, opts = {}) {
+  const stats = opts.stats || REAL_STATS;
   const entries = race.entries.filter((e) => !e.scratched);
-  const jockeys = race.jockeys || opts.jockeys || {};
+  const hasRaceJockeys = race.jockeys && Object.keys(race.jockeys).length;
+  const jockeys = hasRaceJockeys ? race.jockeys : opts.jockeys || stats.jockeyRates || {};
+  const jockeyAvg = stats.jockeyAverage || JOCKEY_DEFAULT;
   const sires = opts.sires || {};
   const rows = entries.map((entry) => {
     const runs = (entry.past || []).filter((r) => r && r.date).slice(0, 5);
-    const an = runs.map((run, k) => analyzeRun(run, k, race));
+    const an = runs.map((run, k) => analyzeRun(run, k, race, stats));
     const style = runningStyle(an);
     const sire = sires[entry.sire] || null;
     const apt = aptitudeFactor(an, race, sire);
@@ -271,7 +286,8 @@ export function computeRaceFactors(race, opts = {}) {
         speed: speedFactor(an, entry, race),
         form: formFactor(an, race),
         closing: closingFactor(an),
-        jockey: jockeyFactor(entry, jockeys),
+        jockey: jockeyFactor(entry, jockeys, jockeyAvg),
+        trainer: trainerFactor(entry, stats.trainerRates, stats.trainerAverage),
         aptitude: apt.value,
         condition: cond.value,
       },
@@ -281,7 +297,9 @@ export function computeRaceFactors(race, opts = {}) {
   // 展開と枠順はレース全体を見て決まる
   const pace = paceFromEarly(rows.map((r) => r.style.early ?? 0.45));
   const sb = straightBias(race.course, race.surface, race.distance);
-  const db = drawBias(race.course, race.surface, race.distance);
+  // 枠順傾向は実データの統計を優先（なければ代表的な傾向を弱めて使う）
+  const realDraw = stats.draw?.[`${race.course}|${race.surface}|${race.distance}`];
+  const db = realDraw ?? drawBias(race.course, race.surface, race.distance) * 0.5;
   const gates = Math.max(...race.entries.map((e) => e.number || 0), race.entries.length);
   const nigeCount = rows.filter((r) => r.style.style === '逃げ').length;
   for (const r of rows) {

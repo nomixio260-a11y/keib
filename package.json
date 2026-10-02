@@ -1,7 +1,7 @@
 {
   "name": "keib",
   "version": "1.0.0",
-  "description": "KEIB 競馬予想 — ブラウザで動く競馬予想ソフト（指数・展開予想・モンテカルロ・期待値・バックテスト）",
+  "description": "KEIB 競馬予想 — JRAの実データ（出馬表・オッズ・結果）で予想する競馬予想ソフト（スピード指数・展開・モンテカルロ・期待値・バックテスト・リアルタイム更新）",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,15 +9,22 @@
     "dev": "node scripts/build.mjs --watch",
     "serve": "node scripts/serve.mjs",
     "start": "npm run build && npm run serve",
-    "tunnel": "bash scripts/tunnel.sh",
+    "server": "node scripts/build.mjs && node scripts/server.mjs",
+    "collect": "node scripts/collect.mjs",
+    "build-data": "node scripts/build-data.mjs",
     "calibrate": "node scripts/calibrate.mjs",
-    "test": "node --test",
-    "evaluate": "node scripts/evaluate.mjs"
+    "evaluate": "node scripts/evaluate.mjs",
+    "tunnel": "bash scripts/tunnel.sh",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.18"
+  },
+  "dependencies": {
+    "node-html-parser": "^9.0.4",
+    "undici": "^7.30.0"
   }
 }

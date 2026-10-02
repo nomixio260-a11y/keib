@@ -1,4 +1,5 @@
 # main ブランチへの push で dist/ をビルドして GitHub Pages に公開する。
+# 実データ（JRA の出馬表・オッズ・結果）は含めない（data/ はリポジトリにないため、画面は「実データがありません」になる）。
 # 初回だけ、リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にしてください。
 name: GitHub Pages
 

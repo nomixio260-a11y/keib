@@ -1,6 +1,7 @@
 // 予想の根拠をことばにする（各馬の短評・レース展望）
 
 import { FACTORS } from './model.js';
+import { REAL_STATS } from './realStats.js';
 
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
 
@@ -39,12 +40,17 @@ function factorText(key, row, pred, sign, jockeys) {
       return sign > 0 ? `近走${finishesText(row.runs)}着と好調` : `近走${finishesText(row.runs)}着と精彩を欠く`;
     case 'closing':
       if (!row.runs.length) return null;
-      if (sign > 0) return s.topClosing > 0 ? `上がり最速${s.topClosing}回の末脚` : '末脚は堅実';
+      if (sign > 0) return s.topClosing > 0 ? `速い上がりを${s.topClosing}回記録` : '末脚は堅実';
       return '決め手に欠ける';
     case 'jockey': {
       const j = jockeys?.[row.entry.jockey];
       if (!j) return null;
       return sign > 0 ? `${row.entry.jockey}騎手（勝率${pct(j.winRate)}）` : `鞍上の勝率は${pct(j.winRate)}`;
+    }
+    case 'trainer': {
+      const t = REAL_STATS.trainerRates?.[row.entry.trainer];
+      if (!t) return null;
+      return sign > 0 ? `${row.entry.trainer}厩舎（勝率${pct(t.winRate)}）` : `厩舎の勝率は${pct(t.winRate)}`;
     }
     case 'aptitude':
       return aptitudeText(row, race, sign);

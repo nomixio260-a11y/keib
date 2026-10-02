@@ -1,6 +1,7 @@
-// バックテスト画面
+// バックテスト画面：学習に使っていない実際のレース（JRA）で、予想と買い方を検証した結果。払戻は実際の金額
 
 import { PRESETS } from '../engine/model.js';
+import { REAL_BACKTEST } from '../data/realBacktest.js';
 import { calibrationChart, lineChart } from './charts.js';
 import { esc, pct, yen } from './format.js';
 
@@ -8,31 +9,21 @@ export function presetLabel(state) {
   return state.preset === 'custom' ? 'カスタム' : PRESETS[state.preset]?.label || 'バランス';
 }
 
-function controls(ctx) {
-  const { state, bt } = ctx;
-  return `<div class="bt-controls">
-    <div class="field-row">
-      <label class="field" for="bt-count">レース数</label>
-      <select id="bt-count" data-bt-count ${bt.running ? 'disabled' : ''}>
-        ${[100, 200, 400].map((n) => `<option value="${n}" ${bt.count === n ? 'selected' : ''}>${n}レース</option>`).join('')}
-      </select>
-    </div>
-    <p class="bt-weights">使う設定：重み付け <b>${esc(presetLabel(state))}</b>・期待値にオッズを混ぜる割合 <b>${Math.round(state.blend * 100)}%</b>（予想画面の設定）</p>
-    <button type="button" class="btn" data-action="run-backtest" ${bt.running ? 'disabled' : ''}>${bt.result ? 'もう一度検証' : '検証する'}</button>
-    <div class="progress" ${bt.running ? '' : 'hidden'} role="progressbar" aria-label="検証の進み具合" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(bt.progress * 100)}">
-      <span style="width:${(bt.progress * 100).toFixed(0)}%"></span>
-    </div>
-    <span class="progress-label" role="status">${bt.running ? esc(bt.stage) : ''}</span>
-  </div>`;
+/** 表示中の検証結果（保存済みの検証 or 直近の開催日の再計算） */
+export function currentBacktest(bt) {
+  if (bt.source === 'recent') return bt.recent.result ? { ...bt.recent.result, step: 1 } : null;
+  const p = REAL_BACKTEST?.presets?.[bt.preset] || REAL_BACKTEST?.presets?.balance;
+  return p ? { ...p, races: REAL_BACKTEST.races, step: p.curveStep || 1 } : null;
 }
 
 function tiles(res) {
   const win = res.strategies.find((s) => s.key === 'win');
+  const place = res.strategies.find((s) => s.key === 'place');
   const ai = res.strategies.find((s) => s.key === 'ai');
   return `<div class="summary bt-summary">
     <div class="tile"><div class="tile-label">◎の勝率</div><div class="tile-value num">${pct(res.ai.winRate)}</div><div class="tile-sub">1番人気は ${pct(res.fav.winRate)}</div></div>
     <div class="tile"><div class="tile-label">◎の複勝率</div><div class="tile-value num">${pct(res.ai.top3Rate)}</div><div class="tile-sub">1番人気は ${pct(res.fav.top3Rate)}</div></div>
-    <div class="tile"><div class="tile-label">単勝◎の回収率</div><div class="tile-value num">${pct(win.roi)}</div><div class="tile-sub">収支 ${yen(win.profit)}（1点100円）</div></div>
+    <div class="tile"><div class="tile-label">単勝◎の回収率</div><div class="tile-value num">${pct(win.roi)}</div><div class="tile-sub">複勝◎は ${pct(place.roi)}</div></div>
     <div class="tile"><div class="tile-label">AI推奨の回収率</div><div class="tile-value num">${pct(ai.roi)}</div><div class="tile-sub">的中率 ${pct(ai.hitRate)}・${ai.bets.toLocaleString('ja-JP')}点</div></div>
   </div>`;
 }
@@ -59,45 +50,71 @@ function strategyTable(res, focus) {
     <tbody>${rows}</tbody></table></div>`;
 }
 
+function sourceSwitch(ctx) {
+  const { bt, recentCount } = ctx;
+  const presets = REAL_BACKTEST?.presets
+    ? Object.entries(REAL_BACKTEST.presets)
+        .map(([k, p]) => `<button type="button" class="seg-btn${bt.source === 'saved' && bt.preset === k ? ' is-on' : ''}" data-bt-preset="${esc(k)}" aria-pressed="${bt.source === 'saved' && bt.preset === k}">${esc(p.label)}</button>`)
+        .join('')
+    : '';
+  return `<div class="bt-controls">
+    ${presets ? `<div class="seg" role="group" aria-label="検証結果"><span class="seg-label">検証済み</span>${presets}</div>` : ''}
+    <button type="button" class="${bt.source === 'recent' ? 'btn' : 'ghost-btn'}" data-action="run-recent" ${bt.recent.running || !recentCount ? 'disabled' : ''}>直近の開催日（${recentCount}レース）を今の設定で検証</button>
+    <div class="progress" ${bt.recent.running ? '' : 'hidden'} role="progressbar" aria-label="検証の進み具合" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(bt.recent.progress * 100)}">
+      <span style="width:${(bt.recent.progress * 100).toFixed(0)}%"></span>
+    </div>
+    <span class="progress-label" role="status">${bt.recent.running ? '予想して実際の払戻で精算しています' : ''}</span>
+  </div>`;
+}
+
 export function renderBacktest(ctx) {
-  const { bt } = ctx;
-  const res = bt.result;
+  const { bt, state } = ctx;
+  const saved = REAL_BACKTEST;
   const intro = `<div class="view-intro">
     <h1 class="view-title">バックテスト</h1>
-    <p>結果がわかっている過去のレースで、今の予想設定と買い方を検証します。使うのは<strong>架空の過去レース</strong>（予想の学習には使っていないもの）で、オッズと払戻は「馬柱などの公開情報と、市場だけが持つ情報」を組み合わせた市場モデルで作っています。</p>
+    <p>予想の学習に<strong>使っていない</strong>実際のレース（JRA）で、予想と買い方を検証した結果です。各レースの予想は、そのレースより前の情報（出馬表・前4走・騎手成績・最終オッズ）だけで計算し、払戻は実際の金額で精算しています。</p>
+    ${saved ? `<p class="bt-meta">検証期間 <b>${esc(saved.period)}</b>・<b class="num">${saved.races.toLocaleString('ja-JP')}</b>レース（平地）・データ JRA・作成 ${esc(saved.generatedAt)}</p>` : ''}
   </div>`;
+  const res = currentBacktest(bt);
   if (!res) {
-    return `${intro}${controls(ctx)}<div class="empty-state small"><p>「検証する」を押すと、レースごとに予想 → 買い目 → 払戻の精算を行います。</p></div>`;
+    return `${intro}${sourceSwitch(ctx)}<div class="empty-state small"><p>${saved ? '「直近の開催日を検証」を押すと、表示中の設定で予想 → 買い目 → 実際の払戻の精算を行います。' : '検証結果はまだありません。npm run evaluate で作成するか、直近の開催日で検証してください。'}</p></div>`;
   }
   const focus = res.strategies.find((s) => s.key === bt.focus) || res.strategies[0];
   const base = res.strategies.find((s) => s.key === 'fav');
+  const step = res.step || 1;
+  const xLabel = (i) => Math.min(res.races, (i + 1) * step);
   const series = [
     { label: base.label, values: base.curve, cls: 's-base' },
     { label: focus.label, values: focus.curve, cls: 's-focus', area: true },
   ];
-  return `${intro}${controls(ctx)}
+  const settingNote =
+    bt.source === 'recent'
+      ? `表示中の設定（重み付け <b>${esc(presetLabel(state))}</b>・オッズを混ぜる割合 <b>${Math.round(state.blend * 100)}%</b>）で、直近の開催日の${res.races}レースを検証した結果です。`
+      : `重み付け <b>${esc(res.label)}</b>・オッズを混ぜる割合 50% で検証した結果です。`;
+  return `${intro}${sourceSwitch(ctx)}
+    <p class="bt-weights">${settingNote}</p>
     ${tiles(res)}
     <section class="bt-section">
-      <h2 class="section-title">買い方ごとの成績 <small>${res.races}レース・行を押すとグラフが切り替わります</small></h2>
+      <h2 class="section-title">買い方ごとの成績 <small>${res.races.toLocaleString('ja-JP')}レース・1点100円・行を押すとグラフが切り替わります</small></h2>
       ${strategyTable(res, focus.key)}
-      <p class="panel-note">三連複などは1回の高配当で回収率が大きく動きます。「最高払戻」が収支の大半を占めているときは、レース数を増やして確かめてください。</p>
+      <p class="panel-note">三連複などは1回の高配当で回収率が大きく動きます。「最高払戻」が収支の大半を占めているときは、運の要素が大きいと考えてください。</p>
     </section>
     <div class="bt-charts">
       <section class="panel">
         <header class="panel-head"><h2>累積収支の推移</h2></header>
         <ul class="legend"><li><span class="lg-line s-focus"></span>${esc(focus.label)}</li><li><span class="lg-line s-base"></span>${esc(base.label)}</li></ul>
-        <div class="chart-box">${lineChart({ id: 'bt-line', series })}</div>
+        <div class="chart-box">${lineChart({ id: 'bt-line', series, xLabel })}</div>
         <p class="panel-note">最終収支：${esc(focus.label)} ${yen(focus.profit)}、${esc(base.label)} ${yen(base.profit)}。グラフにカーソルを合わせるか、選んで左右キーで各時点の値を表示します。</p>
       </section>
       <section class="panel">
         <header class="panel-head"><h2>予測の当たり具合</h2></header>
-        <ul class="legend"><li><span class="lg-dot s-focus"></span>AI（${esc(presetLabel(ctx.state))}）</li><li><span class="lg-dot s-base"></span>オッズ（市場）</li></ul>
+        <ul class="legend"><li><span class="lg-dot s-focus"></span>AI</li><li><span class="lg-dot s-base"></span>オッズ（市場）</li></ul>
         <div class="chart-box">${calibrationChart(res.calibration)}</div>
         <p class="panel-note">点が斜めの線に近いほど、確率の見積もりが正確です。対数損失（小さいほど良い）は AI ${res.ai.logLoss.toFixed(3)}、オッズ ${res.fav.logLoss.toFixed(3)}。</p>
       </section>
     </div>
     <section class="note-box">
       <h2>結果の読み方</h2>
-      <p>オッズには馬柱などの公開情報がすでに織り込まれているため、公開情報だけで計算する予想で長期的に回収率100%を超えるのは難しく、この検証でも多くの買い方が100%を下回ります。単発のレースや少ないレース数では運の影響が大きいので、数百レース単位で比べてください。ここでの数字は架空データでの結果で、実際の馬券での成績を保証するものではありません。</p>
+      <p>オッズには多くの人の予想がすでに織り込まれているため、公開情報だけで長期的に回収率100%を超えるのは非常に難しく、この検証でも多くの買い方が100%を下回ります。◎の勝率・複勝率が1番人気と比べてどうか、キャリブレーション（予測した確率と実際の勝率の一致）がどうかを、予想の確かさの目安にしてください。過去の成績は将来の結果を保証するものではありません。</p>
     </section>`;
 }

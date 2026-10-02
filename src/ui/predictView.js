@@ -1,86 +1,65 @@
-// 予想画面：レース一覧・出馬表・展開・買い目・重み付け
+// 予想画面：レース見出し・出馬表・展開・買い目・重み付け
 
 import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS, PRESETS } from '../engine/model.js';
 import { BLEND_OPTIONS, STRATEGIES, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
-import { formatShortDate, formatTime } from '../engine/util.js';
+import { REAL_STATS } from '../engine/realStats.js';
+import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
 import { esc, fixed, frameBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
+import { gradeChip, statusBadge } from './timeline.js';
+import { renderResultPanel } from './resultView.js';
 
-const GRADE_CLASS = { G1: 'gr-g1', G2: 'gr-g2', G3: 'gr-g3', L: 'gr-l', OP: 'gr-op' };
-
-function gradeChip(grade) {
-  if (!GRADE_CLASS[grade]) return '';
-  return `<span class="grade-chip ${GRADE_CLASS[grade]}">${esc(grade === 'OP' ? 'OP' : grade)}</span>`;
-}
-
-function surfaceChip(race) {
-  return `<span class="surf-chip ${race.surface === '芝' ? 'is-turf' : 'is-dirt'}">${esc(race.surface)}${esc(race.distance)}</span>`;
-}
-
-// ---------------------------------------------------------------------------
-// レース一覧
-
-export function renderRail(ctx) {
-  const { state, venues, racesOf, quickPicks } = ctx;
-  const races = racesOf(state.venue);
-  const venueBtns = venues
-    .map(
-      (v) =>
-        `<button type="button" class="seg-btn${v.key === state.venue ? ' is-on' : ''}" data-venue="${esc(v.key)}" aria-pressed="${v.key === state.venue}">${esc(v.label)}${v.count != null ? `<span class="seg-count">${v.count}</span>` : ''}</button>`,
-    )
-    .join('');
-  const items = races.length
-    ? races
-        .map((r) => {
-          const pick = quickPicks.get(r.id);
-          const on = r.id === state.raceId;
-          return `<li><button type="button" class="race-item${on ? ' is-on' : ''}" data-race="${esc(r.id)}" aria-current="${on ? 'true' : 'false'}">
-            <span class="ri-no">${esc(r.raceNo)}<small>R</small></span>
-            <span class="ri-body">
-              <span class="ri-top"><span class="ri-name">${esc(r.name)}</span>${gradeChip(r.grade)}</span>
-              <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.length}頭</span></span>
-              <span class="ri-pick">${pick ? `<span class="mark mk-h">◎</span>${frameBadge(pick.frame, pick.number, 'sm')}<span class="ri-horse">${esc(pick.name)}</span>` : '<span class="ri-wait">計算中…</span>'}</span>
-            </span>
-            ${pick ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>` : ''}
-          </button></li>`;
-        })
-        .join('')
-    : `<li class="rail-empty">取り込んだレースはまだありません。<button type="button" class="link-btn" data-tab="data">データ画面</button>から CSV か JSON を読み込むと、ここに並びます。</li>`;
-  return `<div class="seg venue-seg" role="group" aria-label="開催場">${venueBtns}</div><ol class="race-list">${items}</ol>`;
-}
+const timeOf = (iso) => {
+  if (!iso) return '';
+  const d = new Date(Date.parse(iso) + 9 * 3600 * 1000);
+  return d.toISOString().slice(11, 16);
+};
 
 // ---------------------------------------------------------------------------
 // レース見出しとサマリー
 
 function renderHead(race, ctx) {
-  const { edits } = ctx;
-  const dir = COURSES[race.course]?.dir;
+  const { edits, now } = ctx;
+  const dir = race.direction || COURSES[race.course]?.dir;
   const going = GOINGS.map(
     (g) => `<button type="button" class="seg-btn${race.going === g ? ' is-on' : ''}" data-going="${g}" aria-pressed="${race.going === g}">${g}</button>`,
   ).join('');
   const hasEdits = edits && (edits.going || Object.keys(edits.odds || {}).length || Object.keys(edits.scratched || {}).length);
+  const surf = race.surface === '障' ? '障害' : surfaceName(race.surface);
+  let source = '';
+  if (race.imported) source = '<span class="pill pill-import">取り込みデータ</span>';
+  else if (race.status === 'result') source = '<span class="src-note">JRA 確定オッズ・結果</span>';
+  else if (race.source === 'JRA') {
+    const hasOdds = race.entries.some((e) => e.odds > 1);
+    source = `<span class="src-note">JRA 出馬表${hasOdds ? `・オッズ ${esc(timeOf(race.oddsAt))} 時点` : '・オッズ未発表'}</span>`;
+  }
   return `<div class="race-head">
     <div class="rh-eyebrow">
-      <span>${esc(race.course)} ${esc(race.raceNo)}R</span>
+      <span>${race.date ? esc(formatDateJa(race.date)) : ''} ${esc(race.course)} ${esc(race.raceNo)}R</span>
       ${race.startTime ? `<span class="num">${esc(race.startTime)} 発走</span>` : ''}
-      <span>${esc(race.weather || '')}</span>
-      ${race.sample ? '<span class="pill pill-sample" title="実在の馬・騎手・レースとは関係ありません">サンプル（架空データ）</span>' : ''}
-      ${race.imported ? '<span class="pill pill-import">取り込みデータ</span>' : ''}
+      ${race.weather ? `<span>天候 ${esc(race.weather)}</span>` : ''}
+      ${race.imported ? '' : statusBadge(race, now, { withTime: true })}
+      ${source}
     </div>
     <h1 class="rh-title">${esc(race.name)} ${gradeChip(race.grade)}</h1>
     <div class="rh-chips">
-      <span class="chip ${race.surface === '芝' ? 'is-turf' : 'is-dirt'}">${surfaceName(race.surface)} ${esc(race.distance)}m${dir ? `（${dir}回り）` : ''}</span>
+      <span class="chip ${race.surface === '芝' ? 'is-turf' : race.surface === 'ダ' ? 'is-dirt' : ''}">${esc(surf)} ${esc(race.distance)}m${dir ? `（${esc(dir)}${race.lane ? `・${esc(race.lane)}` : ''}）` : ''}</span>
       ${race.ageCond ? `<span class="chip">${esc(race.ageCond)}</span>` : ''}
-      <span class="chip">${esc(gradeLabel(race.grade))}</span>
+      ${race.grade ? `<span class="chip">${esc(gradeLabel(race.grade))}</span>` : ''}
+      ${race.weightRule ? `<span class="chip">${esc(race.weightRule)}</span>` : ''}
       <span class="chip">${race.entries.filter((e) => !e.scratched).length}頭</span>
     </div>
-    <div class="rh-controls">
-      <div class="seg going-seg" role="group" aria-label="馬場状態"><span class="seg-label">馬場</span>${going}</div>
+    ${
+      race.jump
+        ? ''
+        : `<div class="rh-controls">
+      <div class="seg going-seg" role="group" aria-label="馬場状態"><span class="seg-label">馬場${race.going ? '' : '（未発表）'}</span>${going}</div>
       ${hasEdits ? '<button type="button" class="ghost-btn" data-action="reset-edits">変更を元に戻す</button>' : ''}
-    </div>
+    </div>`
+    }
   </div>`;
 }
 
@@ -110,8 +89,12 @@ export function renderSummary(pred, rec) {
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>
-      <div class="tile-main"><span class="tile-strong num">${rec.tickets.length}点</span><span class="tile-strong num">${yen(total)}</span></div>
-      <div class="tile-sub">${rec.tickets.length ? `的中率 <b class="num">${pct(rec.stats.hitRate)}</b>・AI想定の回収率 <b class="num">${pct(rec.stats.roi, 0)}</b>` : '条件に合う買い目なし（見送り）'}</div>
+      ${
+        rec.noOdds
+          ? '<div class="tile-main"><span class="tile-strong">オッズ待ち</span></div><div class="tile-sub">単勝オッズが出たら買い目を計算します</div>'
+          : `<div class="tile-main"><span class="tile-strong num">${rec.tickets.length}点</span><span class="tile-strong num">${yen(total)}</span></div>
+      <div class="tile-sub">${rec.tickets.length ? `的中率 <b class="num">${pct(rec.stats.hitRate)}</b>・AI想定の回収率 <b class="num">${pct(rec.stats.roi, 0)}</b>` : '条件に合う買い目なし（見送り）'}</div>`
+      }
     </a>
   </div>`;
 }
@@ -126,12 +109,12 @@ function evClass(ev) {
   return 'ev-lo';
 }
 
-function pastTable(row, race) {
+function pastTable(row, race, stats) {
   const runs = row?.runs?.length ? row.runs : [];
-  if (!runs.length) return '<p class="muted">出走歴がありません（初出走）。血統・騎手・枠順から評価しています。</p>';
+  if (!runs.length) return '<p class="muted">出走歴がありません（初出走）。騎手・枠順・人気から評価しています。</p>';
   const body = runs
     .map((r) => {
-      const si = speedFigure(r);
+      const si = speedFigure(r, stats || REAL_STATS);
       const fin = r.finish > 0 ? r.finish : '中止';
       return `<tr>
         <td class="num">${esc(formatShortDate(r.date))}</td>
@@ -140,8 +123,8 @@ function pastTable(row, race) {
         <td><span class="${r.surface === '芝' ? 'tx-turf' : 'tx-dirt'}">${esc(r.surface)}</span>${esc(r.distance)} ${esc(r.going)}</td>
         <td class="num pp-fin${r.finish === 1 ? ' is-win' : r.finish > 0 && r.finish <= 3 ? ' is-top3' : ''}">${esc(fin)}<small>/${esc(r.fieldSize)}</small></td>
         <td class="num">${esc(formatTime(r.time))}</td>
-        <td class="num">${r.margin != null ? esc(r.margin.toFixed(1)) : '—'}</td>
-        <td class="num">${r.last3f ? esc(r.last3f.toFixed(1)) : '—'}${r.last3fRank ? `<small>(${esc(r.last3fRank)})</small>` : ''}</td>
+        <td class="num">${r.margin != null ? esc(Number(r.margin).toFixed(1)) : '—'}</td>
+        <td class="num">${r.last3f ? esc(Number(r.last3f).toFixed(1)) : '—'}${r.last3fRank ? `<small>(${esc(r.last3fRank)})</small>` : ''}</td>
         <td class="num">${esc((r.passing || []).join('-'))}</td>
         <td class="num pp-si">${si != null ? esc(si.toFixed(0)) : '—'}</td>
         <td>${esc(r.jockey || '')}</td>
@@ -160,8 +143,9 @@ function detailPanel(entry, row, pred, ctx) {
   const factors = FACTORS.filter((f) => pred.coefs[f.key] > 0);
   const maxAbs = Math.max(0.01, ...pred.rows.flatMap((r) => factors.map((f) => Math.abs(r.contrib[f.key]))));
   const scratched = !!entry.scratched;
-  const comment = row ? horseComment(row, pred, race.jockeys) : null;
-  const j = race.jockeys?.[entry.jockey];
+  const jockeys = race.jockeys && Object.keys(race.jockeys).length ? race.jockeys : REAL_STATS.jockeyRates;
+  const comment = row ? horseComment(row, pred, jockeys) : null;
+  const j = jockeys?.[entry.jockey];
   const bw = entry.bodyWeight ? `${entry.bodyWeight}kg${entry.bodyWeightDiff != null ? `（${signed(entry.bodyWeightDiff)}）` : ''}` : '—';
   const editBox = `<div class="d-edit">
       <label class="field-inline">単勝オッズ<input type="number" inputmode="decimal" step="0.1" min="1" id="odds-${esc(race.id)}-${esc(entry.number)}" data-odds="${esc(entry.number)}" value="${entry.odds ?? ''}"></label>
@@ -189,26 +173,42 @@ function detailPanel(entry, row, pred, ctx) {
     <div class="d-left">${comments}${analysis}</div>
     <div class="d-right">
       <h4 class="d-h">近走成績（馬柱）</h4>
-      ${pastTable(row || { runs: entry.past }, race)}
+      ${pastTable(row || { runs: entry.past }, race, ctx.stats)}
       <dl class="d-meta">
         <div><dt>父</dt><dd>${esc(entry.sire || '—')}</dd></div>
-        <div><dt>厩舎</dt><dd>${esc(entry.trainer || '—')}</dd></div>
+        ${entry.damSire ? `<div><dt>母の父</dt><dd>${esc(entry.damSire)}</dd></div>` : ''}
+        <div><dt>厩舎</dt><dd>${esc(entry.trainer || '—')}${entry.trainerArea ? `（${esc(entry.trainerArea)}）` : ''}</dd></div>
+        ${REAL_STATS.trainerRates?.[entry.trainer] ? `<div><dt>厩舎成績</dt><dd class="num">勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].winRate)}・複勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].top3Rate)}</dd></div>` : ''}
         <div><dt>馬体重</dt><dd class="num">${esc(bw)}</dd></div>
-        <div><dt>騎手成績</dt><dd class="num">${j ? `勝率 ${pct(j.winRate)}・複勝率 ${pct(j.top3Rate)}` : '—'}</dd></div>
+        <div><dt>騎手成績</dt><dd class="num">${j ? `勝率 ${pct(j.winRate)}・複勝率 ${pct(j.top3Rate)}${j.starts ? `（${j.starts}騎乗）` : ''}` : '—'}</dd></div>
         ${row ? `<div><dt>AI指数</dt><dd class="num">${fixed(row.index)}（${row.rank}位）</dd></div><div><dt>脚質</dt><dd>${esc(row.style.style)}</dd></div><div><dt>スピード指数</dt><dd class="num">最高 ${row.stats.bestSi != null ? row.stats.bestSi.toFixed(0) : '—'}・前走 ${row.stats.lastSi != null ? row.stats.lastSi.toFixed(0) : '—'}</dd></div>` : ''}
       </dl>
     </div>
   </div>`;
 }
 
+function finCell(race, num) {
+  if (!race.result?.length) return '';
+  const f = race.finishes?.[num];
+  const txt = typeof f === 'number' && f > 0 ? f : f || '—';
+  const cls = f === 1 ? ' is-win' : typeof f === 'number' && f > 0 && f <= 3 ? ' is-top3' : '';
+  return `<td class="c-fin num${cls}">${esc(txt)}</td>`;
+}
+
 export function renderCardTable(pred, ctx) {
   const { state } = ctx;
   const race = pred.race;
+  const hasResult = !!race.result?.length;
   const byNum = new Map(pred.rows.map((r) => [r.entry.number, r]));
   const maxWin = Math.max(...pred.rows.map((r) => r.pWin), 0.01);
   let entries = [...race.entries];
   if (state.sort === 'ai') entries.sort((a, b) => (byNum.get(b.number)?.pWin ?? -1) - (byNum.get(a.number)?.pWin ?? -1));
+  else if (state.sort === 'finish' && hasResult) {
+    const fo = (e) => (typeof race.finishes?.[e.number] === 'number' && race.finishes[e.number] > 0 ? race.finishes[e.number] : 99);
+    entries.sort((a, b) => fo(a) - fo(b) || a.number - b.number);
+  }
   const expanded = new Set(state.expanded[race.id] || []);
+  const cols = hasResult ? 12 : 11;
   const rows = entries
     .map((e) => {
       const r = byNum.get(e.number);
@@ -222,6 +222,7 @@ export function renderCardTable(pred, ctx) {
            <td class="c-ev num ${evClass(r.ev)}">${r.ev != null ? r.ev.toFixed(2) : '—'}</td>`
         : `<td class="c-index"></td><td class="c-win"><span class="scratch-tag">取消</span></td><td class="c-top3"></td><td class="c-odds num">${odds(e.odds)}</td><td class="c-ev"></td>`;
       return `<tr class="row${open ? ' is-open' : ''}${scratched ? ' is-scratched' : ''}" data-num="${esc(e.number)}">
+        ${finCell(race, e.number)}
         <td class="c-mark">${r?.mark ? `<span class="mark ${markClass(r.mark)}">${esc(r.mark)}</span>` : ''}</td>
         <td class="c-frame f${esc(e.frame)}"><span>${esc(e.frame)}</span></td>
         <td class="c-num"><span class="num-box">${esc(e.number)}</span></td>
@@ -229,20 +230,21 @@ export function renderCardTable(pred, ctx) {
         <td class="c-style">${r ? `<span class="style-chip ${STYLE_CLASS[r.style.style]}">${esc(r.style.style)}</span>` : ''}</td>
         ${cells}
         <td class="c-toggle"><button type="button" class="icon-btn" data-toggle="${esc(e.number)}" aria-expanded="${open}" aria-label="${esc(e.name)}の詳細"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></td>
-      </tr>${open ? `<tr class="detail"><td colspan="11">${detailPanel(e, r, pred, ctx)}</td></tr>` : ''}`;
+      </tr>${open ? `<tr class="detail"><td colspan="${cols}">${detailPanel(e, r, pred, ctx)}</td></tr>` : ''}`;
     })
     .join('');
+  const sortBtn = (key, label) =>
+    `<button type="button" class="seg-btn${state.sort === key || (key === 'number' && !['ai', 'finish'].includes(state.sort)) ? ' is-on' : ''}" data-sort="${key}" aria-pressed="${state.sort === key}">${label}</button>`;
   return `<div class="card-tools">
       <div class="seg" role="group" aria-label="並び順">
         <span class="seg-label">並び順</span>
-        <button type="button" class="seg-btn${state.sort !== 'ai' ? ' is-on' : ''}" data-sort="number" aria-pressed="${state.sort !== 'ai'}">馬番</button>
-        <button type="button" class="seg-btn${state.sort === 'ai' ? ' is-on' : ''}" data-sort="ai" aria-pressed="${state.sort === 'ai'}">AI評価</button>
+        ${sortBtn('number', '馬番')}${sortBtn('ai', 'AI評価')}${hasResult ? sortBtn('finish', '着順') : ''}
       </div>
-      <p class="card-hint">行を押すと馬柱・評価の内訳・オッズ修正が開きます</p>
+      <p class="card-hint">${pred.noOdds ? '単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。' : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
     </div>
-    <div class="table-scroll card-scroll"><table class="card">
+    <div class="table-scroll card-scroll"><table class="card${hasResult ? ' has-fin' : ''}">
     <thead><tr>
-      <th class="c-mark" title="印">印</th><th class="c-frame" title="枠番">枠</th><th class="c-num">馬番</th><th class="c-horse">馬名</th><th class="c-style">脚質</th>
+      ${hasResult ? '<th class="c-fin" title="確定着順">着</th>' : ''}<th class="c-mark" title="印">印</th><th class="c-frame" title="枠番">枠</th><th class="c-num">馬番</th><th class="c-horse">馬名</th><th class="c-style">脚質</th>
       <th class="c-index" title="レース内の偏差値（平均50）">AI指数</th><th class="c-win">勝率</th><th class="c-top3">複勝率</th><th class="c-odds">単勝</th><th class="c-ev" title="勝率 × 単勝オッズ。1.0を超えると理論上プラス">期待値</th><th class="c-toggle"><span class="sr-only">詳細</span></th>
     </tr></thead>
     <tbody>${rows}</tbody></table></div>`;
@@ -273,7 +275,9 @@ export function renderBetsPanel(pred, rec, ctx) {
       `<label class="toggle-chip"><input type="checkbox" data-bettype="${t}" ${state.betTypes.includes(t) ? 'checked' : ''}><span>${esc(BET_LABEL[t])}</span></label>`,
   ).join('');
   const total = rec.tickets.reduce((a, t) => a + t.stake, 0);
-  const body = rec.tickets.length
+  const body = rec.noOdds
+    ? '<tr><td colspan="6" class="muted bt-empty">単勝オッズの発表前です。オッズが出ると、期待値から買い目を選びます（土曜のレースは金曜、日曜のレースは土曜に前日発売が始まります）。</td></tr>'
+    : rec.tickets.length
     ? rec.tickets
         .map(
           (t) => `<tr>
@@ -349,6 +353,7 @@ export function renderWeightsPanel(ctx) {
   return `<section class="panel" id="panel-weights" aria-labelledby="h-weights">
     <header class="panel-head"><h2 id="h-weights">予想の重み付け</h2><span class="pill" id="custom-pill" ${state.preset === 'custom' ? '' : 'hidden'}>カスタム</span></header>
     <div class="seg preset-seg" role="group" aria-label="プリセット">${presets}</div>
+    ${PRESETS[state.preset]?.desc ? `<p class="panel-note preset-desc">${esc(PRESETS[state.preset].desc)}</p>` : ''}
     <div class="sliders">${sliders}</div>
     <div class="slider">
       <label for="noise"><span>荒れ度</span><output class="num" id="noise-out">${Number(state.noise).toFixed(1)}</output></label>
@@ -366,12 +371,51 @@ export function renderWeightsPanel(ctx) {
 }
 
 export function renderRaceMain(pred, rec, ctx) {
-  return `${renderHead(pred.race, ctx)}<div id="slot-summary">${renderSummary(pred, rec)}</div><div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
+  const race = pred.race;
+  const result = race.result?.length ? renderResultPanel(pred, rec, ctx) : '';
+  return `${renderHead(race, ctx)}<div id="slot-summary">${renderSummary(pred, rec)}</div>${result}<div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
+}
+
+/** 障害レース：予想の対象外（出馬表と結果だけ表示） */
+export function renderJumpRace(race, ctx) {
+  const body = race.entries
+    .map((e) => {
+      const f = race.finishes?.[e.number];
+      return `<tr class="${e.scratched ? 'is-scratched' : ''}">
+        ${race.result?.length ? `<td class="c-fin num">${esc(typeof f === 'number' && f > 0 ? f : f || '—')}</td>` : ''}
+        <td class="c-frame f${esc(e.frame)}"><span>${esc(e.frame)}</span></td>
+        <td class="c-num"><span class="num-box">${esc(e.number)}</span></td>
+        <td class="c-horse"><span class="h-name">${esc(e.name)}</span><span class="h-sub">${esc(`${e.sex || ''}${e.age ?? ''}`)}${e.weight ? ` · ${esc(e.weight)}kg` : ''}${e.jockey ? ` · ${esc(e.jockey)}` : ''}</span></td>
+        <td class="c-odds num">${odds(e.odds)}<small>${e.popularity ? `${e.popularity}人気` : ''}</small></td>
+      </tr>`;
+    })
+    .join('');
+  return `${renderHead(race, ctx)}
+    <div class="note-box"><p>障害レースは、平地とは能力の測り方が違うため予想の対象外です。出馬表${race.result?.length ? 'と結果' : ''}だけ表示しています。</p></div>
+    <div class="table-scroll card-scroll"><table class="card jump-card">
+      <thead><tr>${race.result?.length ? '<th class="c-fin">着</th>' : ''}<th class="c-frame">枠</th><th class="c-num">馬番</th><th class="c-horse">馬名</th><th class="c-odds">単勝</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>`;
 }
 
 export function renderEmptyRace(ctx) {
+  const { loadState, loadError } = ctx;
+  if (loadState === 'loading') {
+    return `<div class="empty-state"><h1>実データを読み込んでいます</h1><p>JRAの出馬表・オッズ・結果を読み込んでいます…</p></div>`;
+  }
+  if (loadState === 'none' || loadState === 'error') {
+    return `<div class="empty-state">
+      <h1>実データがありません</h1>
+      <p>KEIB は架空のデータでは予想しません。JRAの実際の出馬表・オッズ・結果を読み込むと予想が表示されます。</p>
+      ${loadError ? `<p class="muted">${esc(loadError)}</p>` : ''}
+      <ul class="empty-steps">
+        <li>自分のパソコンで <code>npm run server</code> を実行すると、JRAの出馬表・オッズ・結果を自動で取り込み、リアルタイムで予想します。</li>
+        <li>手元の出馬表を使うときは、<button type="button" class="link-btn" data-tab="data">データ画面</button>で CSV か JSON を取り込んでください。</li>
+      </ul>
+    </div>`;
+  }
   return `<div class="empty-state">
     <h1>レースがありません</h1>
-    <p>左の一覧からレースを選ぶか、<button type="button" class="link-btn" data-tab="data">データ画面</button>で自分のレースを取り込んでください。</p>
+    <p>左の一覧から開催日とレースを選んでください。</p>
   </div>`;
 }

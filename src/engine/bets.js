@@ -207,6 +207,8 @@ export const BLEND_OPTIONS = [
 
 export function recommendBets(pred, { budget = 3000, strategy = 'balance', types = BET_TYPES, blend = DEFAULT_BLEND } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
+  // オッズが出るまでは期待値を計算できない
+  if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
   const cands = buildCandidates(pred, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);
@@ -329,7 +331,7 @@ export const FORMATIONS = [
 /** フォーメーションごとの点数・的中率・期待回収率（1点100円） */
 export function evaluateFormations(pred, blend = DEFAULT_BLEND) {
   const mk = marksToIndex(pred);
-  if (mk['◎'] < 0) return [];
+  if (mk['◎'] < 0 || pred.noOdds) return [];
   const p4 = [mk['○'], mk['▲'], ...mk['△']].filter((v) => v >= 0);
   const p5 = mk['☆'] >= 0 ? [...p4, mk['☆']] : p4;
   const m = { h: mk['◎'], p4, p5 };
