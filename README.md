@@ -51,7 +51,7 @@ npm run server     # http://localhost:8080
 ### 過去の結果を集める・モデルを校正する
 
 ```bash
-npm run collect -- history 2025-10 2026-09   # 指定した月の全レース結果と確定オッズを data/history に保存（1年分で約2時間）
+npm run collect -- history 2024-10 2026-09   # 指定した月の全レース結果と確定オッズを data/history に保存（1年分で約2時間。いまの統計・モデルは 2024-10〜 の2年分で作っている）
 npm run calibrate                            # 統計（基準タイム・馬場差・騎手/厩舎・枠順）と予想の重みを推定
 npm run evaluate                             # 学習に使っていない直近のレースで検証（src/data/realBacktest.js を更新）
 npm run build-data                           # 画面用の実データ data/bundle.json を作る（過去の開催日＋今週）
