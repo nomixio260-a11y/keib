@@ -13,8 +13,8 @@ import path from 'node:path';
 import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts } from '../src/collector/bundle.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
-import { indexHistory } from '../src/data/history.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { indexHistory, attachCareer } from '../src/data/history.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -28,6 +28,9 @@ const client = createJraClient({ minIntervalMs: Number(process.env.KEIB_INTERVAL
 
 let bundle = emptyBundle();
 let records = [];
+let horseIndex = null;
+let snaps = { get: () => null };
+const attachCareers = () => attachCareer(bundle.days.flatMap((d) => d.races), horseIndex, { stats: REAL_STATS, fallback: snaps.get });
 let body = JSON.stringify({ ...bundle, live: true });
 let lastError = null;
 
@@ -43,6 +46,9 @@ async function initial() {
   const prev = await readJson(BUNDLE_FILE);
   if (prev) mergeBundle(bundle, prev);
   attachDayVariants(bundle, records, REAL_STATS);
+  snaps = await loadHorseSnapshots();
+  horseIndex = records.length ? indexHistory(records) : null;
+  attachCareers();
   compactBundle(bundle);
   body = JSON.stringify({ ...bundle, live: true });
 }
@@ -60,7 +66,11 @@ async function refresh() {
       onOdds: (race) => appendOddsSnapshot(race),
     });
     pruneBundle(bundle, { keepPast: KEEP_PAST });
-    if (results) attachDayVariants(bundle, records, REAL_STATS);
+    if (results) {
+      attachDayVariants(bundle, records, REAL_STATS);
+      if (records.length) horseIndex = indexHistory(records);
+    }
+    attachCareers();
     compactBundle(bundle);
     body = JSON.stringify({ ...bundle, live: true });
     lastError = null;

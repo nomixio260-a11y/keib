@@ -16,7 +16,12 @@
     "evaluate": "node scripts/evaluate.mjs",
     "tunnel": "bash scripts/tunnel.sh",
     "test": "node --test \"test/*.test.mjs\"",
-    "experiment": "node scripts/experiment.mjs"
+    "experiment": "node scripts/experiment.mjs",
+    "dataset": "node scripts/dataset.mjs",
+    "cv": "node scripts/cv-gbdt.mjs",
+    "train": "node scripts/train-gbdt.mjs",
+    "ml": "node scripts/ml-pipeline.mjs",
+    "horses": "node scripts/horses.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

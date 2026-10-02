@@ -261,13 +261,13 @@ const raceSig = (race) => `${race.id}|${race.oddsAt || ''}|${race.status || ''}|
 // 予想（キャッシュつき）
 
 const predCache = new Map();
-const settingsKey = () => JSON.stringify([state.weights, state.noise, state.sims]);
+const settingsKey = () => JSON.stringify([state.preset, state.weights, state.noise, state.sims]);
 
 function getPrediction(race) {
   const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}`;
   const hit = predCache.get(key);
   if (hit) return hit;
-  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims: state.sims, stats: currentStats() });
+  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims: state.sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml });
   predCache.set(key, pred);
   if (predCache.size > 60) predCache.delete(predCache.keys().next().value);
   return pred;
@@ -517,7 +517,7 @@ async function runRecentBacktest() {
   try {
     bt.recent.result = await runBacktest(
       races,
-      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats() },
+      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml },
       {
         sims: 4000,
         onProgress: (p) => {

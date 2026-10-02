@@ -84,3 +84,11 @@ export async function attachFinalExoticOdds(races, dir = FINAL_ODDS_DIR) {
   }
   return n;
 }
+
+/** src/data/horses.json（馬ごとの通算要約）。{ horseId → careerSnapshot の形 } */
+export async function loadHorseSnapshots() {
+  const doc = await readJson(path.join(ROOT, 'src/data/horses.json'));
+  if (!doc?.horses) return { asOf: null, get: () => null };
+  const { careerFromRow } = await import('../engine/features.js');
+  return { asOf: doc.asOf, size: Object.keys(doc.horses).length, get: (id) => careerFromRow(doc.horses[id]) };
+}

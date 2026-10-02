@@ -371,11 +371,12 @@ export function renderWeightsPanel(ctx) {
       <p class="slider-desc" id="wd-${f.key}">${esc(f.desc)}</p>
     </div>`,
   ).join('');
+  const ml = !!PRESETS[state.preset]?.ml;
   return `<section class="panel" id="panel-weights" aria-labelledby="h-weights">
-    <header class="panel-head"><h2 id="h-weights">予想の重み付け</h2><span class="pill" id="custom-pill" ${state.preset === 'custom' ? '' : 'hidden'}>カスタム</span></header>
+    <header class="panel-head"><h2 id="h-weights">予想のモデル</h2><span class="pill" id="custom-pill" ${state.preset === 'custom' ? '' : 'hidden'}>カスタム</span></header>
     <div class="seg preset-seg" role="group" aria-label="プリセット">${presets}</div>
     ${PRESETS[state.preset]?.desc ? `<p class="panel-note preset-desc">${esc(PRESETS[state.preset].desc)}</p>` : ''}
-    <div class="sliders">${sliders}</div>
+    ${ml ? '' : `<div class="sliders">${sliders}</div>`}
     <div class="slider">
       <label for="noise"><span>荒れ度</span><output class="num" id="noise-out">${Number(state.noise).toFixed(1)}</output></label>
       <input type="range" id="noise" min="0.6" max="1.6" step="0.1" value="${esc(state.noise)}" data-noise>

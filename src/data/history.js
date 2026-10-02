@@ -2,6 +2,7 @@
 // 学習・検証では、各レースの前に終わったレースだけを使い、未来の情報が混ざらないようにする。
 
 import { daysBetween } from '../engine/util.js';
+import { careerSnapshot } from '../engine/features.js';
 
 // 出馬表（レース前時点）に載せる過去走の数。JRA の出馬表は前4走だが、馬のデータベースから足して増やせる（MAX_PAST）
 const MAX_PAST = Number(globalThis.process?.env?.KEIB_MAX_PAST || 4);
@@ -38,6 +39,7 @@ export function runFromRecord(record, runner) {
 /** 馬ごとの出走履歴（新しい順） */
 export function indexHistory(records) {
   const byHorse = new Map();
+  const ratings = computeRatings(records);
   for (const rec of records) {
     for (const r of rec.runners) {
       if (!r.horseId) continue;
@@ -46,12 +48,61 @@ export function indexHistory(records) {
     }
   }
   for (const list of byHorse.values()) list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.raceId.localeCompare(a.raceId)));
-  return { byHorse };
+  return { byHorse, ratings };
+}
+
+/**
+ * 対戦成績による馬の強さの評価（イロ・レーティング）。平地のレースを日付順にたどり、同じレースの馬どうしの
+ * 「先着したか」で更新する（相手の強さを考慮した着順の評価。スピード指数とは別の見方）。
+ * 出走回数の少ない馬は大きく動かす。返り値 { history: 馬ID → [{ date, raceId, after }]（日付順）, current: 馬ID → 今の値 }
+ */
+export function computeRatings(records, { k = 32, start = 1500 } = {}) {
+  const sorted = [...records].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const current = new Map();
+  const starts = new Map();
+  const history = new Map();
+  for (const rec of sorted) {
+    if (rec.jump || rec.surface === '障') continue;
+    const rs = rec.runners.filter((r) => r.horseId && r.finish > 0);
+    const n = rs.length;
+    if (n < 2) continue;
+    const cur = rs.map((r) => current.get(r.horseId) ?? start);
+    const kk = rs.map((r) => (k * Math.max(1, 3 - 0.5 * (starts.get(r.horseId) || 0))) / (n - 1));
+    const delta = new Array(n).fill(0);
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        const expect = 1 / (1 + 10 ** ((cur[j] - cur[i]) / 400));
+        const actual = rs[i].finish < rs[j].finish ? 1 : rs[i].finish > rs[j].finish ? 0 : 0.5;
+        delta[i] += kk[i] * (actual - expect);
+        delta[j] -= kk[j] * (actual - expect);
+      }
+    rs.forEach((r, i) => {
+      const after = Math.round((cur[i] + delta[i]) * 10) / 10;
+      current.set(r.horseId, after);
+      starts.set(r.horseId, (starts.get(r.horseId) || 0) + 1);
+      (history.get(r.horseId) || history.set(r.horseId, []).get(r.horseId)).push({ date: rec.date, raceId: rec.id, after });
+    });
+  }
+  return { history, current, start };
+}
+
+/** その日より前の時点のレーティング（なければ null） */
+export function ratingBefore(ratings, horseId, date) {
+  const list = ratings?.history?.get(horseId);
+  if (!list) return null;
+  let v = null;
+  for (const x of list) {
+    if (x.date < date) v = x.after;
+    else break;
+  }
+  return v;
 }
 
 /** 結果の記録 → レース前時点の出馬表（過去走はこのレースより前のものだけ） */
 export function preRaceCard(record, index, { maxPast = MAX_PAST } = {}) {
-  const entries = record.runners.map((r) => {
+  // 結果の記録は着順で並んでいるので、出馬表と同じ馬番順に並べ直す（並び順から結果が漏れないように）
+  const runners = [...record.runners].sort((a, b) => a.number - b.number);
+  const entries = runners.map((r) => {
     const hist = (index.byHorse.get(r.horseId) || []).filter((h) => h.date < record.date).slice(0, maxPast);
     return {
       frame: r.frame,
@@ -296,3 +347,28 @@ export function jockeyRates(jockeys, prior = 60) {
 
 /** 2つの日付の間の日数（a < b） */
 export const gapDays = (a, b) => daysBetween(a, b);
+
+/** 馬の通算要約（そのレースより前の出走だけ） */
+export function careerBefore(index, horseId, date, stats) {
+  const hist = (index.byHorse.get(horseId) || []).filter((h) => h.date < date);
+  const c = careerSnapshot(hist.map((h) => runFromRecord(h.rec, h.runner)), stats);
+  if (c) c.elo = ratingBefore(index.ratings, horseId, date);
+  return c;
+}
+
+/** レースの各馬に通算要約（entry.career）を付ける。fallback(horseId) はデータベースにない馬のため */
+export function attachCareer(races, index, { stats, fallback = null, before = null } = {}) {
+  let n = 0;
+  for (const race of races) {
+    for (const e of race.entries || []) {
+      if (!e.horseId) continue;
+      const c = (index && careerBefore(index, e.horseId, before || race.date, stats)) || fallback?.(e.horseId) || null;
+      if (c) {
+        e.career = c;
+        n++;
+      }
+    }
+  }
+  return n;
+}
+

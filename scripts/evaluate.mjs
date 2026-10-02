@@ -11,7 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadHistory, statsForEngine, usable, PERIODS } from './calibrate.mjs';
 import { attachFinalExoticOdds } from '../src/collector/store.js';
-import { indexHistory, preRaceCard } from '../src/data/history.js';
+import { indexHistory, preRaceCard, attachCareer } from '../src/data/history.js';
+import { GBDT_READY } from '../src/engine/gbdt.js';
 import { runBacktest } from '../src/engine/backtest.js';
 import { PRESETS } from '../src/engine/model.js';
 
@@ -30,13 +31,15 @@ if (!test.length) {
   process.exit(1);
 }
 const withExotic = await attachFinalExoticOdds(test);
+// 機械学習の特徴量用：各馬の通算要約（そのレースより前の出走だけ）
+attachCareer(test, index, { stats });
 const period = `${test[0].date}〜${test[test.length - 1].date}`;
 console.log(`検証期間 ${period}（${test.length}レース、平地のみ。馬連・ワイド・3連複の確定オッズあり ${withExotic}レース）`);
 
 const out = { period, races: test.length, withExotic, source: 'JRA', generatedAt: new Date().toISOString().slice(0, 10), presets: {} };
-for (const key of ['balance', 'ai']) {
+for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   const preset = PRESETS[key];
-  const res = await runBacktest(test, { weights: preset.weights, noise: preset.noise, stats }, { sims: 4000 });
+  const res = await runBacktest(test, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml }, { sims: 4000 });
   console.log(`\n■ ${preset.label}`);
   console.log(`  ◎      勝率 ${pct(res.ai.winRate)}  連対率 ${pct(res.ai.top2Rate)}  複勝率 ${pct(res.ai.top3Rate)}  対数損失 ${res.ai.logLoss.toFixed(3)}`);
   console.log(`  1番人気 勝率 ${pct(res.fav.winRate)}  連対率 ${pct(res.fav.top2Rate)}  複勝率 ${pct(res.fav.top3Rate)}  対数損失 ${res.fav.logLoss.toFixed(3)}`);
@@ -45,7 +48,7 @@ for (const key of ['balance', 'ai']) {
   }
   console.log('  自信度ごとの◎（レース数・勝率・複勝率・単勝回収率・複勝回収率）');
   for (const [g, v] of Object.entries(res.byGrade)) if (v.n) console.log(`    ${g}: ${String(v.n).padStart(4)}R  ${pct(v.winRate).padStart(6)}  ${pct(v.top3Rate).padStart(6)}  ${pct(v.winRoi).padStart(6)}  ${pct(v.placeRoi).padStart(6)}`);
-  if (key === 'balance') {
+  if (key === 'ml' || (key === 'balance' && !GBDT_READY)) {
     console.log('  キャリブレーション（予測勝率 → 実際の勝率）');
     for (const b of res.calibration.ai) if (b.n) console.log(`    ${pct(b.lo)}〜${pct(Math.min(1, b.hi))}: 予測 ${pct(b.sumP / b.n)} 実際 ${pct(b.wins / b.n)} (${b.n}頭)`);
   }
@@ -64,18 +67,19 @@ for (const key of ['balance', 'ai']) {
 
 // README 用の表（Markdown）
 {
-  const b = out.presets.balance;
-  const a = out.presets.ai;
+  const b = out.presets.ml || out.presets.balance;
+  const mainLabel = out.presets.ml ? '機械学習（既定）' : '総合（既定）';
   const lines = [];
-  lines.push(`検証期間 ${period}・${test.length.toLocaleString('ja-JP')}レース（平地。予想の重みの学習にも統計にも使っていない期間）。払戻は実際の金額、1点100円。`, '');
+  lines.push(`検証期間 ${period}・${test.length.toLocaleString('ja-JP')}レース（平地。モデルの学習にも統計にも使っていない期間）。払戻は実際の金額、1点100円。`, '');
   lines.push('| | ◎の勝率 | ◎の複勝率 | 勝ち馬の対数損失（小さいほど良い） |', '| --- | --- | --- | --- |');
-  lines.push(`| 総合（AI＋人気） | ${pct(b.ai.winRate)} | ${pct(b.ai.top3Rate)} | ${b.ai.logLoss.toFixed(3)} |`);
-  lines.push(`| AI単独 | ${pct(a.ai.winRate)} | ${pct(a.ai.top3Rate)} | ${a.ai.logLoss.toFixed(3)} |`);
+  if (out.presets.ml) lines.push(`| 機械学習（AI＋人気、既定） | ${pct(out.presets.ml.ai.winRate)} | ${pct(out.presets.ml.ai.top3Rate)} | ${out.presets.ml.ai.logLoss.toFixed(3)} |`);
+  lines.push(`| 総合（線形モデル、AI＋人気） | ${pct(out.presets.balance.ai.winRate)} | ${pct(out.presets.balance.ai.top3Rate)} | ${out.presets.balance.ai.logLoss.toFixed(3)} |`);
+  lines.push(`| AI単独（オッズを使わない） | ${pct(out.presets.ai.ai.winRate)} | ${pct(out.presets.ai.ai.top3Rate)} | ${out.presets.ai.ai.logLoss.toFixed(3)} |`);
   lines.push(`| 1番人気（単勝オッズ） | ${pct(b.fav.winRate)} | ${pct(b.fav.top3Rate)} | ${b.fav.logLoss.toFixed(3)} |`, '');
-  lines.push('| 自信度（総合） | レース数 | ◎の勝率 | ◎の複勝率 | 単勝◎の回収率 | 複勝◎の回収率 |', '| --- | --- | --- | --- | --- | --- |');
+  lines.push(`| 自信度（${mainLabel}） | レース数 | ◎の勝率 | ◎の複勝率 | 単勝◎の回収率 | 複勝◎の回収率 |`, '| --- | --- | --- | --- | --- | --- |');
   for (const [g, v] of Object.entries(b.byGrade)) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.winRate)} | ${pct(v.top3Rate)} | ${pct(v.winRoi)} | ${pct(v.placeRoi)} |`);
   lines.push('');
-  lines.push('| 買い方（総合） | 購入点数 | 的中率 | 回収率 |', '| --- | --- | --- | --- |');
+  lines.push(`| 買い方（${mainLabel}） | 購入点数 | 的中率 | 回収率 |`, '| --- | --- | --- | --- |');
   for (const st of b.strategies) lines.push(`| ${st.label} | ${st.bets.toLocaleString('ja-JP')} | ${pct(st.hitRate)} | ${pct(st.roi)} |`);
   console.log(`\n--- README 用 ---\n${lines.join('\n')}\n--- ここまで ---`);
 }

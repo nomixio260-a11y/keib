@@ -4,10 +4,27 @@ import { PAYOUT_RATE, BET_LABEL } from '../engine/constants.js';
 import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor } from '../engine/model.js';
 import { CALIBRATION } from '../engine/calibration.js';
 import { REAL_STATS } from '../engine/realStats.js';
-import { esc } from './format.js';
+import { GBDT_READY, GBDT_INFO } from '../engine/gbdt.js';
+import { FEATURE_NAMES } from '../engine/features.js';
+import { esc, pct } from './format.js';
+import { REAL_BACKTEST } from '../data/realBacktest.js';
+
+/** 機械学習（勾配ブースティング）の説明。モデルがあるときだけ */
+function mlSection() {
+  if (!GBDT_READY || !GBDT_INFO) return '';
+  const t = GBDT_INFO.test || {};
+  const tr = GBDT_INFO.trainedOn || {};
+  const pctOf = (v) => `${((v || 0) * 100).toFixed(1)}%`;
+  return `<section class="logic-sec">
+        <h2>7. 機械学習（決定木のブースティング）</h2>
+        <p>「機械学習」の重み付けでは、単勝オッズの対数確率を出発点にして、<strong>オッズにまだ織り込まれていない分だけ</strong>を決定木の集まり（勾配ブースティング）が学びます。特徴量は上のファクターに加えて、前走までのスピード指数の推移、通算成績、対戦成績の評価（相手の強さを考慮した着順の評価）、複勝オッズと単勝オッズのずれなど ${FEATURE_NAMES.length}項目で、すべて発走前にわかる情報です。設定（木の深さ・学習率・正則化・使う特徴量）は学習期間の中の交差検証で選び、検証期間の成績は最後に一度だけ確認しています。</p>
+        <p>学習 ${esc(tr.from || '')}〜${esc(tr.to || '')}（${(tr.races || 0).toLocaleString('ja-JP')}レース）、木 ${esc(GBDT_INFO.params?.rounds || 0)}本。学習に使っていない ${esc(t.from || '')} 以降の ${esc(t.races || 0)}レースでは、勝ち馬の対数損失が単勝オッズだけの ${(-(t.baseLL || 0)).toFixed(3)} から ${(-(t.ll || 0)).toFixed(3)} に、◎の勝率が ${pctOf(t.baseTop1)} から ${pctOf(t.top1)} になりました。差はわずかです。オッズには大勢の予想がすでに織り込まれていて、公開情報から上積みできる分は小さいためです。</p>
+      </section>`;
+}
 
 export function renderLogic(ctx) {
   const { state } = ctx;
+  const vb = REAL_BACKTEST?.presets?.[DEFAULT_PRESET] || REAL_BACKTEST?.presets?.balance || null;
   const nStats = REAL_STATS.races ? REAL_STATS.races.toLocaleString('ja-JP') : '—';
   const nFit = CALIBRATION.trainedOn ? CALIBRATION.trainedOn.toLocaleString('ja-JP') : '—';
   const statsPeriod = REAL_STATS.from ? `${REAL_STATS.from}〜${REAL_STATS.to}` : '';
@@ -65,14 +82,15 @@ export function renderLogic(ctx) {
         <h2>6. 買い目と資金配分</h2>
         <p>「的中重視」は当たりやすい買い目を選び、どれが当たっても払戻がそろうように配分します。「バランス」と「高配当」は期待値の条件を満たす買い目から選び、ケリー基準（有利さに比例）で配分します。どの戦略でも、シミュレーションの全結果に買い目を当てはめて、的中率・期待回収率・プラス収支になる確率を計算しています。</p>
       </section>
+      ${mlSection()}
       <section class="logic-sec">
-        <h2>7. データと更新</h2>
+        <h2>${GBDT_READY ? 8 : 7}. データと更新</h2>
         <p>出馬表・オッズ・結果・払戻は JRA 公式サイトの公開情報です。リアルタイム版（<code>npm run server</code>）は、発走が近いレースほど短い間隔（2分〜30分）で出馬表とオッズを取り直し、発走から10分ほどで結果と払戻を取り込みます。画面は1分ごとに最新のデータを読み直します。確定したレースは、予想と実際の着順・払戻を並べて答え合わせできます。</p>
       </section>
     </div>
     <section class="note-box">
       <h2>◎の勝率はなぜ 4割弱なのか</h2>
-      <p>競馬は1レースに10頭以上が走り、いちばん人気の馬でも勝つのは3回に1回ほどです（JRA 全体でおよそ33%。2026年7〜9月は 36.6%）。単勝オッズには大勢の人の予想が織り込まれていて、公開されている情報だけでそれを大きく上回ることはできません。KEIB の◎も学習に使っていない期間で 36.7% と、1番人気と同じ水準です。</p>
+      <p>競馬は1レースに10頭以上が走り、いちばん人気の馬でも勝つのは3回に1回ほどです（JRA 全体でおよそ33%${vb ? `。検証期間の${REAL_BACKTEST.races}レースでは ${pct(vb.fav.winRate)}` : ''}）。単勝オッズには大勢の人の予想が織り込まれていて、公開されている情報だけでそれを大きく上回ることはできません。KEIB の◎も学習に使っていない期間で${vb ? ` ${pct(vb.ai.winRate)}` : ''}と、1番人気と同じ水準です${vb && vb.ai.logLoss < vb.fav.logLoss ? `（勝ち馬の確率の当てはまり＝対数損失では ${vb.ai.logLoss.toFixed(3)} と、オッズだけの ${vb.fav.logLoss.toFixed(3)} をわずかに上回ります）` : ''}。</p>
       <p>ですから「勝率を上げる」より、<strong>どのレースなら当たりやすいかを見分ける</strong>ことに意味があります。自信度（S/A/B/C）は◎の勝率と2番手との差から決めていて、同じ自信度のときに実際に◎がどれだけ勝ったか（複勝率も）を本命のタイルに表示しています。自信度が高いレースだけに絞れば的中率は上がりますが、その分オッズも低く、長期的に回収率100%を超えるのは難しいことに変わりはありません。</p>
     </section>
     <section class="note-box">

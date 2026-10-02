@@ -6,6 +6,7 @@ import { harville, estimateOdds } from './market.js';
 import { hashString } from './rng.js';
 import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
+import { GBDT_READY, gbdtScores } from './gbdt.js';
 
 /**
  * ファクター定義。
@@ -44,6 +45,17 @@ const TOTAL_WEIGHTS = CALIBRATION.combinedWeights
 const scaled = (base, mult) => Object.fromEntries(Object.entries(base).map(([k, v]) => [k, Math.min(100, Math.round(v * (mult[k] ?? 1)))]));
 
 export const PRESETS = {
+  ...(GBDT_READY
+    ? {
+        ml: {
+          label: '機械学習',
+          weights: AI_WEIGHTS,
+          noise: 1,
+          ml: true,
+          desc: '単勝オッズを出発点に、70の特徴量から決定木の集まり（勾配ブースティング）が「オッズにまだ織り込まれていない分」を学習したモデル。学習に使っていない期間で最も正確でした。重み付けのスライダーは使いません（内訳の表示にだけ使います）。',
+        },
+      }
+    : {}),
   balance: {
     label: '総合',
     weights: TOTAL_WEIGHTS,
@@ -60,7 +72,7 @@ export const PRESETS = {
   pace: { label: '展開重視', weights: scaled(AI_WEIGHTS, { pace: 2.5, draw: 2, closing: 1.5 }), noise: 1, desc: '脚質・ペース・枠順を重く見ます。' },
 };
 
-export const DEFAULT_PRESET = PRESETS[CALIBRATION.defaultPreset] ? CALIBRATION.defaultPreset : 'balance';
+export const DEFAULT_PRESET = GBDT_READY ? 'ml' : PRESETS[CALIBRATION.defaultPreset] ? CALIBRATION.defaultPreset : 'balance';
 export const DEFAULT_WEIGHTS = PRESETS[DEFAULT_PRESET].weights;
 export const DEFAULT_NOISE = PRESETS[DEFAULT_PRESET].noise;
 /** 校正のたびに変わる目印（保存した重みが古い校正のものか見分ける） */
@@ -150,7 +162,23 @@ export function scoreRace(race, settings = {}) {
     }
     r.score = s;
   }
-  return { ...fx, rows, coefs };
+  // 機械学習：スコアを決定木の出力（市場＋補正）に置き換える。ファクターの内訳は説明用に残す
+  let ml = false;
+  let temps = null;
+  if (settings.ml && GBDT_READY) {
+    const g = gbdtScores(race, { stats: settings.stats, careerOf: settings.careerOf, fx });
+    const by = new Map(g.rows.map((r) => [r.number, r]));
+    for (const r of rows) {
+      const m = by.get(r.entry.number);
+      if (!m) continue;
+      r.score = m.score;
+      r.mlAdj = m.adj;
+      r.features = m.x;
+    }
+    ml = true;
+    temps = g.temps;
+  }
+  return { ...fx, rows, coefs, ml, temps };
 }
 
 export function assignMarks(rows) {
@@ -195,7 +223,7 @@ export function predictRace(race, settings = {}) {
   // 単勝オッズがまだ出ていない（前日発売の前など）
   const noOdds = !rows.some((r) => r.entry.odds > 1);
   const seed = hashString(`${race.id}|${sims}`);
-  const temps = tempsFor(settings.weights || DEFAULT_WEIGHTS, settings.noise ?? 1);
+  const temps = scored.ml ? scored.temps.map((t) => t * (settings.noise ?? 1)) : tempsFor(settings.weights || DEFAULT_WEIGHTS, settings.noise ?? 1);
   const sim = simulatePL(
     rows.map((r) => r.score),
     { sims, seed, temps },
@@ -250,6 +278,7 @@ export function predictRace(race, settings = {}) {
     placeCount,
     noOdds,
     temps,
+    ml: scored.ml,
     pace: scored.pace,
     straightBias: scored.straightBias,
     drawBias: scored.drawBias,

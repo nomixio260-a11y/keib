@@ -16,8 +16,8 @@ import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs } from '../src/collector/bundle.js';
 import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
-import { indexHistory } from '../src/data/history.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { indexHistory, attachCareer } from '../src/data/history.js';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => {
@@ -86,6 +86,13 @@ if (!flag('offline')) {
 
 pruneBundle(bundle, { keepPast, today });
 attachDayVariants(bundle, records, REAL_STATS, { today });
+// 機械学習の特徴量に使う馬ごとの通算要約。データベースがあればそのレースより前の出走から、なければ src/data/horses.json
+{
+  const snaps = await loadHorseSnapshots();
+  const index = records.length ? indexHistory(records) : null;
+  const n = attachCareer(bundle.days.flatMap((d) => d.races), index, { stats: REAL_STATS, fallback: snaps.get });
+  log(`通算要約を付けた馬：${n}（${index ? 'データベース' : `horses.json ${snaps.asOf || '—'} 時点`}）`);
+}
 compactBundle(bundle);
 await writeJson(out, bundle);
 const races = bundle.days.reduce((a, d) => a + d.races.length, 0);
