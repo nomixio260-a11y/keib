@@ -741,9 +741,20 @@ a {
 
 .ri-meta {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.ri-meta > * {
+  white-space: nowrap;
+}
+
+.ri-meta .status-badge {
+  padding: 0 6px;
+  font-size: 10.5px;
 }
 
 .ri-pick {

@@ -72,8 +72,8 @@ export function renderBacktest(ctx) {
   const saved = REAL_BACKTEST;
   const intro = `<div class="view-intro">
     <h1 class="view-title">バックテスト</h1>
-    <p>予想の学習に<strong>使っていない</strong>実際のレース（JRA）で、予想と買い方を検証した結果です。各レースの予想は、そのレースより前の情報（出馬表・前4走・騎手成績・最終オッズ）だけで計算し、払戻は実際の金額で精算しています。</p>
-    ${saved ? `<p class="bt-meta">検証期間 <b>${esc(saved.period)}</b>・<b class="num">${saved.races.toLocaleString('ja-JP')}</b>レース（平地）・データ JRA・作成 ${esc(saved.generatedAt)}</p>` : ''}
+    <p>実際のレース（JRA）で予想と買い方を検証した結果です。各レースの予想は、そのレースより前の情報（出馬表・前4走・騎手と厩舎の成績・最終オッズ）だけで計算し、払戻は実際の金額で精算しています。「検証済み」は、予想の重みの学習にも統計にも<strong>使っていない</strong>期間のレースでの結果です。</p>
+    ${saved ? `<p class="bt-meta">検証済みの期間 <b>${esc(saved.period)}</b>・<b class="num">${saved.races.toLocaleString('ja-JP')}</b>レース（平地）・データ JRA・作成 ${esc(saved.generatedAt)}</p>` : ''}
   </div>`;
   const res = currentBacktest(bt);
   if (!res) {
@@ -89,7 +89,7 @@ export function renderBacktest(ctx) {
   ];
   const settingNote =
     bt.source === 'recent'
-      ? `表示中の設定（重み付け <b>${esc(presetLabel(state))}</b>・オッズを混ぜる割合 <b>${Math.round(state.blend * 100)}%</b>）で、直近の開催日の${res.races}レースを検証した結果です。`
+      ? `表示中の設定（重み付け <b>${esc(presetLabel(state))}</b>・オッズを混ぜる割合 <b>${Math.round(state.blend * 100)}%</b>）で、直近の開催日の${res.races}レースを検証した結果です（統計にはこの期間の結果も含まれるので、厳密な検証は「検証済み」を見てください）。`
       : `重み付け <b>${esc(res.label)}</b>・オッズを混ぜる割合 50% で検証した結果です。`;
   return `${intro}${sourceSwitch(ctx)}
     <p class="bt-weights">${settingNote}</p>

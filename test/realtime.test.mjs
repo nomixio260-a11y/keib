@@ -174,3 +174,15 @@ test('開催日ごとの馬場差：時計がかかった日は指数が上が�
   const without = speedFigure(run, stats);
   assert.ok(withVar > without, `${withVar} > ${without}`);
 });
+
+test('バンドルの確定レースから最近の馬場差を作る', async () => {
+  const { bundleRecords, attachDayVariants } = await import('../src/collector/bundle.js');
+  const race = (id, date, t) => ({ id, date, course: '東京', surface: '芝', distance: 1600, going: '良', grade: '2勝', status: 'result', resultRows: [{ number: 1, finish: 1, time: t }], entries: [] });
+  const bundle = { days: [{ date: '2026-09-27', races: [race('a', '2026-09-27', 95), race('b', '2026-09-27', 95), race('c', '2026-09-27', 95)] }] };
+  assert.equal(bundleRecords(bundle).length, 3);
+  const stats = { baseTimes: { '東京|芝|1600': [94, 30] }, goingAdj: {}, classAdj: {}, dayVariant: { '2026-09-20|東京|芝': 0.1 } };
+  attachDayVariants(bundle, [], stats, { today: '2026-10-02' });
+  assert.ok(bundle.dayVariant['2026-09-27|東京|芝'] > 0.3);
+  // 統計にすでにある日は入れない
+  assert.equal(bundle.dayVariant['2026-09-20|東京|芝'], undefined);
+});

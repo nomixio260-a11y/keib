@@ -114,10 +114,10 @@ function raceItem(r, ctx) {
     <span class="ri-no">${esc(r.raceNo)}<small>R</small></span>
     <span class="ri-body">
       <span class="ri-top"><span class="ri-name">${esc(r.name)}</span>${gradeChip(r.grade)}</span>
-      <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.filter((e) => !e.scratched).length}頭</span>${timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
+      <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.filter((e) => !e.scratched).length}頭</span>${st === 'closing' || st === 'live' ? statusBadge(r, now) : timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
       <span class="ri-pick">${pickHtml}</span>
     </span>
-    <span class="ri-side">${st === 'closing' || st === 'live' ? statusBadge(r, now) : ''}${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>` : ''}</span>
+    <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>` : ''}</span>
   </button></li>`;
 }
 

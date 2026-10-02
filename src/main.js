@@ -3,7 +3,7 @@
 // 予想に使うのは JRA の実際の出馬表・オッズ・結果だけ（data.json）。架空のデータは使わない。
 // リアルタイム版（npm run server）では data.json が1分ごとに新しくなるので、画面も読み直す。
 
-import { BET_TYPES } from './engine/constants.js';
+import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
 import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS } from './engine/bets.js';
 import { runBacktest } from './engine/backtest.js';
@@ -121,15 +121,22 @@ function defaultDay() {
   return list.find((d) => d > t) || list[list.length - 1] || (imported.length ? 'import' : null);
 }
 
-/** 最初に開くレース：次に発走するレース → 最後に確定したレース */
+/** その日のメインレース（格がいちばん上、同じなら11R寄り） */
+function featuredRace(races) {
+  const score = (r) => classLevel(r.grade) * 100 - Math.abs((r.raceNo || 0) - 11);
+  return [...races].filter((r) => !r.jump).sort((a, b) => score(b) - score(a))[0] || races[0];
+}
+
+/** 最初に開くレース：今日なら次に発走するレース、ほかの日はメインレース */
 function defaultRace(day, venue) {
   const races = racesOf(day, venue);
   if (!races.length) return null;
-  const now = Date.now();
-  const upcoming = races.filter((r) => !r.result?.length && startMs(r) && startMs(r) > now - 10 * 60 * 1000).sort((a, b) => startMs(a) - startMs(b));
-  if (upcoming.length) return upcoming[0];
-  const done = races.filter((r) => r.result?.length);
-  return done.length ? done[done.length - 1] : races[0];
+  if (day === today()) {
+    const now = Date.now();
+    const upcoming = races.filter((r) => !r.result?.length && startMs(r) && startMs(r) > now - 10 * 60 * 1000).sort((a, b) => startMs(a) - startMs(b));
+    if (upcoming.length) return upcoming[0];
+  }
+  return day === 'import' ? races[races.length - 1] : featuredRace(races);
 }
 
 /** 開いている開催日・場・レースが無効なら直す */
@@ -183,7 +190,17 @@ function setBundle(bundle) {
   for (const d of bundle.days || []) for (const r of d.races) raceIndex.set(r.id, r);
 }
 
-/** data.json を読む。変わっていれば true */
+/** HTML に埋め込まれた実データ（ビルドした時点のもの） */
+function inlineBundle() {
+  try {
+    const json = JSON.parse(document.getElementById('keib-data')?.textContent || 'null');
+    return json && Array.isArray(json.days) ? json : null;
+  } catch {
+    return null;
+  }
+}
+
+/** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
 async function fetchBundle() {
   try {
     const res = await fetch(DATA_URL, { cache: 'no-store' });
@@ -201,6 +218,12 @@ async function fetchBundle() {
     return true;
   } catch (e) {
     if (!data.bundle) {
+      const inline = inlineBundle();
+      if (inline) {
+        setBundle(inline);
+        data.lastFetch = new Date().toISOString();
+        return true;
+      }
       data.loadState = e.missing || e instanceof TypeError ? 'none' : 'error';
       data.loadError = e instanceof TypeError ? '' : e.message;
     }

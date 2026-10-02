@@ -41,7 +41,13 @@ async function buildOnce() {
   const body = (await readFile(r('src/app.html'), 'utf8')).trim();
   const head = [`<title>${TITLE}</title>`, `<meta name="description" content="${DESCRIPTION}">`, FONTS, `<style>${css.code.trim()}</style>`].join('\n');
 
-  const fragment = `${head}\n${body}\n<script>${script}</script>\n`;
+  // 実データ（data/bundle.json）があれば HTML にも埋め込む。data.json を読めない環境（ファイルを直接開く・
+  // 読み込みが制限された埋め込み表示）でも、ビルドした時点の実データで表示できる
+  const bundleFile = process.env.KEIB_BUNDLE || r('data/bundle.json');
+  const inline = existsSync(bundleFile)
+    ? `<script type="application/json" id="keib-data">${(await readFile(bundleFile, 'utf8')).replace(/</g, '\\u003c')}</script>\n`
+    : '';
+  const fragment = `${head}\n${body}\n${inline}<script>${script}</script>\n`;
   const full = [
     '<!doctype html>',
     '<html lang="ja">',
@@ -53,6 +59,7 @@ async function buildOnce() {
     '</head>',
     '<body>',
     body,
+    inline.trim(),
     `<script>${script}</script>`,
     '</body>',
     '</html>',
@@ -63,10 +70,9 @@ async function buildOnce() {
   await writeFile(r('dist/index.html'), full);
   await writeFile(r('dist/artifact.html'), fragment);
   // 実データ（data/bundle.json）があれば一緒に置く。公開リポジトリ・GitHub Pages には含めない
-  const bundle = process.env.KEIB_BUNDLE || r('data/bundle.json');
-  if (existsSync(bundle)) await copyFile(bundle, r('dist/data.json'));
+  if (inline) await copyFile(bundleFile, r('dist/data.json'));
   const kb = (Buffer.byteLength(full) / 1024).toFixed(0);
-  console.log(`ビルド完了 dist/index.html（${kb} KB）・dist/artifact.html  ${Date.now() - t0}ms`);
+  console.log(`ビルド完了 dist/index.html（${kb} KB）・dist/artifact.html${inline ? '・dist/data.json（実データを埋め込み済み）' : '（実データなし）'}  ${Date.now() - t0}ms`);
 }
 
 await buildOnce();
