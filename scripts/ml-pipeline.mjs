@@ -21,14 +21,18 @@ const BAGS = process.env.BAGS || '5';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const run = (args, env = {}) => execFileSync('node', args, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, TEST_START, ...env } });
 
-// 馬体重は交差検証で外したほうが良かった（レースごとのばらつきが大きく過学習しやすい）。
+// 交差検証で効かなかった特徴量は外す（馬体重は過学習、条件つきの騎手・厩舎成績／対戦成績／市場の形は差なし）。
+// 血統（sire*）は競走馬ページの収集後に試す。beta は出発点 beta×log(市場確率)（人気薄の過大評価の補正）
 const NO_BW = ['bodyWeight', 'bwDiff', 'bwKnown'];
+const NO_GAIN = ['jWinCourse', 'tWinSurf', 'pairWin', 'pairStarts', 'h2h', 'h2hN', 'handicap', 'qFav', 'qEntropy'];
+const LEAN = [...NO_BW, ...NO_GAIN];
+const BETA = Number(process.env.BETA || 1.1);
 const CANDIDATES = [
-  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: NO_BW },
-  { depth: 2, lr: 0.04, lambda: 5, drop: NO_BW },
-  { depth: 3, lr: 0.02, lambda: 20, colsample: 0.5, subsample: 0.7, drop: NO_BW },
-  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6 },
-  { depth: 1, lr: 0.05, lambda: 5, drop: NO_BW },
+  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
+  { depth: 2, lr: 0.04, lambda: 5, drop: LEAN, beta: BETA },
+  { depth: 3, lr: 0.02, lambda: 20, colsample: 0.5, subsample: 0.7, drop: LEAN, beta: BETA },
+  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: NO_BW, beta: BETA },
+  { depth: 1, lr: 0.05, lambda: 5, drop: LEAN, beta: BETA },
 ];
 
 if (process.env.SKIP_DATASET !== '1') {
@@ -57,5 +61,6 @@ run([path.join(ROOT, 'scripts/train-gbdt.mjs')], {
   ...(cfg.colsample ? { COLSAMPLE: String(cfg.colsample) } : {}),
   ...(cfg.subsample ? { SUBSAMPLE: String(cfg.subsample) } : {}),
   FEATS_DROP: (cfg.drop || []).join(','),
+  BETA: String(cfg.beta ?? 1),
 });
 log('完了。次は CAL_START=… TEST_START=… node scripts/evaluate.mjs で検証期間の成績を確認してください');
