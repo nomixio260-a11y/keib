@@ -40,7 +40,10 @@ const cvOut = path.join(tmp, 'cv.json');
 log('交差検証で設定を選ぶ');
 run([path.join(ROOT, 'scripts/cv-gbdt.mjs')], { CONFIGS: JSON.stringify(CANDIDATES), CV_OUT: cvOut, FOLDS: process.env.FOLDS || '5' });
 const cv = JSON.parse(await readFile(cvOut, 'utf8'));
-const best = cv.results[0];
+// 候補どうしの差は ±0.001 くらいの偶然で入れ替わるので、最初の候補（標準の設定）より 0.001 以上良いときだけ乗り換える
+const standard = cv.results.find((r) => r.cfg === JSON.stringify(CANDIDATES[0])) || cv.results[0];
+const best = cv.results[0].ll - standard.ll >= 0.001 ? cv.results[0] : standard;
+if (best !== cv.results[0]) log(`最良の候補 ${cv.results[0].cfg} との差が小さいので標準の設定を使う`);
 const cfg = JSON.parse(best.cfg);
 const rounds = Math.max(10, Math.round(best.round * 1.2));
 log(`選んだ設定 ${best.cfg}・木 ${best.round}本（判定 LL ${best.ll.toFixed(4)}、出発点との差 ${(best.gain >= 0 ? '+' : '') + best.gain.toFixed(4)}）→ 全部で学習するので ${rounds}本`);
