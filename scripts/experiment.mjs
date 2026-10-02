@@ -14,6 +14,7 @@
 //   smax  … 同じ芝ダでの最高スピード指数、slast … 前走のスピード指数
 //   mplace … 複勝オッズ（単勝とは別の投票）から見た評価
 //   smean … 以前のスピード指数（平均型）。DROP=speed EXTRA=smean で今の最高値型と比べる
+//   mkt_new / mkt_mdn … 新馬・未勝利のレースでの人気の効き方の違い（交互作用）
 // 出力の winLL は勝ち馬の対数尤度、2-3着LL は2・3着の対数尤度（どちらも大きいほど良い）、top1 は最上位の馬が勝った割合。
 import { loadHistory } from '../src/collector/store.js';
 import { statsForEngine, usable, PERIODS } from './calibrate.mjs';
@@ -152,6 +153,14 @@ const build = (recs) =>
         const v = ex[i][key];
         r.z[key] = v == null ? MISS[key] : Math.max(-3, Math.min(3, (v - m) / UNIT[key]));
       });
+    }
+    // レースの種類との交互作用（新馬・未勝利で人気の効き方が違うか）
+    const debut = rec.grade === '新馬' ? 1 : 0;
+    const maiden = rec.grade === '未勝利' ? 1 : 0;
+    for (const r of s.rows) {
+      r.z.mkt_new = debut * r.z.market;
+      r.z.mkt_mdn = maiden * r.z.market;
+      r.z.spd_new = debut * r.z.speed;
     }
     const idxOf = new Map(s.rows.map((r, i) => [r.entry.number, i]));
     return { z: s.rows.map((r) => r.z), order: card.result.map((n) => idxOf.get(n)).filter((v) => v != null), grade: rec.grade };

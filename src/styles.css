@@ -2681,6 +2681,43 @@ table.bt-table {
   color: inherit;
 }
 
+.track-record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 1px dashed var(--line-strong);
+  border-radius: 9px;
+  background: none;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.track-record:hover {
+  border-style: solid;
+  background: var(--surface);
+}
+
+.tr-title {
+  font-weight: 700;
+}
+
+.tr-title small,
+.tr-body small {
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.tr-body b {
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .day-score {
   border: 1px solid var(--line);
   border-radius: 9px;

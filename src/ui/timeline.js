@@ -2,6 +2,7 @@
 
 import { raceStatus, STATUS_LABEL, untilText, startMs } from '../engine/raceTime.js';
 import { esc, frameBadge, pct } from './format.js';
+import { REAL_BACKTEST } from '../data/realBacktest.js';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -147,7 +148,15 @@ export function renderRail(ctx) {
     ? races.map((r) => raceItem(r, ctx)).join('')
     : `<li class="rail-empty">${state.day === 'import' ? '取り込んだレースはありません。' : 'この日のレースはありません。'}</li>`;
   const allDay = racesOf(state.day, null);
-  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>
+  // 予想の実績（学習に使っていない期間の検証結果）
+  const vb = REAL_BACKTEST?.presets?.[state.preset] || REAL_BACKTEST?.presets?.balance;
+  const record = vb
+    ? `<button type="button" class="track-record" data-tab="backtest" title="検証の詳しい結果を見る">
+        <span class="tr-title">予想の実績 <small>学習に使っていない${esc(REAL_BACKTEST.races.toLocaleString('ja-JP'))}レース</small></span>
+        <span class="tr-body">◎の勝率 <b class="num">${pct(vb.ai.winRate)}</b>・複勝率 <b class="num">${pct(vb.ai.top3Rate)}</b><small>（1番人気 ${pct(vb.fav.winRate)}・${pct(vb.fav.top3Rate)}）</small></span>
+      </button>`
+    : '';
+  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>${record}
     ${venueBtns}
     ${state.day !== 'import' ? renderDayScore(allDay, quickPicks) : ''}
     <ol class="race-list">${items}</ol>`;
