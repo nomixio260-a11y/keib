@@ -55,12 +55,15 @@ export async function appendOddsSnapshot(race, dir = ODDS_DIR) {
   if (!race?.id || !race.oddsAt || !race.entries?.some((e) => e.odds > 1)) return false;
   const file = path.join(dir, String(race.date || '').slice(0, 4) || 'unknown', `${race.id}.json`);
   const doc = (await readJson(file)) || { id: race.id, date: race.date, course: race.course, raceNo: race.raceNo, startTime: race.startTime, snapshots: [] };
-  if (doc.snapshots.at(-1)?.at === race.oddsAt) return false;
-  doc.snapshots.push({
+  const snap = {
     at: race.oddsAt,
     win: Object.fromEntries(race.entries.filter((e) => e.odds > 1).map((e) => [e.number, e.odds])),
     place: Object.fromEntries(race.entries.filter((e) => e.placeMin > 1).map((e) => [e.number, [e.placeMin, e.placeMax]])),
-  });
+  };
+  const last = doc.snapshots.at(-1);
+  // 同じ時刻、またはオッズがまったく同じなら記録しない（キャッシュから読み直しただけのとき）
+  if (last && (last.at === snap.at || (JSON.stringify(last.win) === JSON.stringify(snap.win) && JSON.stringify(last.place) === JSON.stringify(snap.place)))) return false;
+  doc.snapshots.push(snap);
   await writeJson(file, doc);
   return true;
 }

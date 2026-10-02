@@ -239,6 +239,8 @@ test('オッズの推移を記録する（同じ時刻は重ねない）', async
   const race = { id: '202605040211', date: '2026-10-04', course: '東京', raceNo: 11, oddsAt: '2026-10-04T05:00:00Z', entries: [{ number: 1, odds: 3.2, placeMin: 1.3, placeMax: 1.6 }, { number: 2, odds: null }] };
   assert.equal(await appendOddsSnapshot(race, dir), true);
   assert.equal(await appendOddsSnapshot(race, dir), false);
+  // 時刻が違ってもオッズが同じなら記録しない
+  assert.equal(await appendOddsSnapshot({ ...race, oddsAt: '2026-10-04T05:00:00.003Z' }, dir), false);
   assert.equal(await appendOddsSnapshot({ ...race, oddsAt: '2026-10-04T05:10:00Z', entries: [{ number: 1, odds: 2.9 }] }, dir), true);
   const doc = await readJson(path.join(dir, '2026', '202605040211.json'));
   assert.equal(doc.snapshots.length, 2);
@@ -258,4 +260,21 @@ test('開催日ごとの馬場差は前回の分も引き継ぐ', async () => {
   // 古すぎる日は落とす
   attachDayVariants(bundle, [], stats, { today: '2027-06-01' });
   assert.equal(bundle.dayVariant['2026-09-27|東京|芝'], undefined);
+});
+
+test('プラケット・ルースのシミュレーションは解析的な確率と一致する', async () => {
+  const { simulatePL, comboProbs } = await import('../src/engine/simulate.js');
+  const s = [0, Math.log(2), Math.log(3)];
+  const sim = simulatePL(s, { sims: 60000, seed: 3, temps: [1, 1, 1] });
+  [1 / 6, 2 / 6, 3 / 6].forEach((p, i) => assert.ok(Math.abs(sim.win[i] - p) < 0.01, `${i}: ${sim.win[i]}`));
+  // 2着の温度を上げると、1着が決まったあとの残りは平らになる
+  const flat = simulatePL(s, { sims: 60000, seed: 4, temps: [1, 100, 100] });
+  const c = comboProbs(flat);
+  // 3番が勝ったあと、0番と1番が2着になる確率はほぼ半々
+  const n = 3;
+  const p20 = c.exacta[2 * n + 0];
+  const p21 = c.exacta[2 * n + 1];
+  assert.ok(Math.abs(p20 / (p20 + p21) - 0.5) < 0.02, String(p20 / (p20 + p21)));
+  // 着順の分布は各馬で合計1
+  for (let i = 0; i < n; i++) assert.ok(Math.abs(Array.from(sim.posDist.subarray(i * n, i * n + n)).reduce((a, b) => a + b, 0) - 1) < 1e-9);
 });

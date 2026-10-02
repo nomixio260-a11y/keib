@@ -56,17 +56,26 @@ export function simulatePL(scores, { sims = 20000, seed = 1, temps = [1, 1, 1] }
   const rng = createRng(seed);
   const mx = Math.max(...scores);
   const w = [0, 1, 2].map((k) => Float64Array.from(scores, (v) => Math.exp((v - mx) / Math.max(0.05, temps[k] ?? 1))));
+  const sum0 = w.map((arr) => arr.reduce((a, b) => a + b, 0));
   const used = new Uint8Array(n);
   const posCount = new Float64Array(n * n);
   const top = new Int16Array(sims * 3).fill(-1);
+  const rest = new Float64Array(3);
 
   for (let s = 0; s < sims; s++) {
     used.fill(0);
+    rest[0] = sum0[0];
+    rest[1] = sum0[1];
+    rest[2] = sum0[2];
     for (let r = 0; r < n; r++) {
-      const wk = w[r < 2 ? r : 2];
-      let total = 0;
-      for (let i = 0; i < n; i++) if (!used[i]) total += wk[i];
-      let u = rng.next() * total;
+      const k = r < 2 ? r : 2;
+      const wk = w[k];
+      // 残りの馬の重みの合計は引き算で更新（誤差がたまったら数え直す）
+      if (!(rest[k] > 1e-12)) {
+        rest[k] = 0;
+        for (let i = 0; i < n; i++) if (!used[i]) rest[k] += wk[i];
+      }
+      let u = rng.next() * rest[k];
       let pick = -1;
       for (let i = 0; i < n; i++) {
         if (used[i]) continue;
@@ -75,6 +84,9 @@ export function simulatePL(scores, { sims = 20000, seed = 1, temps = [1, 1, 1] }
         if (u <= 0) break;
       }
       used[pick] = 1;
+      rest[0] -= w[0][pick];
+      rest[1] -= w[1][pick];
+      rest[2] -= w[2][pick];
       posCount[pick * n + r]++;
       if (r < 3) top[s * 3 + r] = pick;
     }
