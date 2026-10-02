@@ -4,7 +4,7 @@
 import { daysBetween } from '../engine/util.js';
 
 // 出馬表（レース前時点）に載せる過去走の数。JRA の出馬表は前4走だが、馬のデータベースから足して増やせる（MAX_PAST）
-const MAX_PAST = Number(process.env.KEIB_MAX_PAST || 4);
+const MAX_PAST = Number(globalThis.process?.env?.KEIB_MAX_PAST || 4);
 
 /** 結果の記録から、出馬表の「過去走」1走分を作る */
 export function runFromRecord(record, runner) {

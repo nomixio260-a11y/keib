@@ -9,7 +9,7 @@ import { clamp, daysBetween, mean } from './util.js';
 // 直近の走ほど重視する（出馬表の前4走に、馬のデータベースにある古い走を足した分も使える）
 const RECENCY = [1, 0.8, 0.65, 0.5, 0.4, 0.33, 0.28, 0.24];
 /** 予想に使う過去走の最大数 */
-export const MAX_RUNS = Number(process.env.KEIB_MAX_RUNS || 8);
+export const MAX_RUNS = Number(globalThis.process?.env?.KEIB_MAX_RUNS || 8);
 
 const isHeavy = (going) => going === '重' || going === '不良';
 
