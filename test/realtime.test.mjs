@@ -160,3 +160,17 @@ test('障害レースは予想の対象外', () => {
   assert.equal(pred.empty, true);
   assert.equal(pred.jump, true);
 });
+
+test('開催日ごとの馬場差：時計がかかった日は指数が上がる', async () => {
+  const { computeDayVariants } = await import('../src/data/history.js');
+  const stats = { baseTimes: { '東京|芝|1600': [94, 30] }, goingAdj: { '芝|良': 0 }, classAdj: { '芝|2勝': 0 } };
+  const rec = (id, date, t) => ({ id, date, course: '東京', surface: '芝', distance: 1600, going: '良', grade: '2勝', runners: [{ number: 1, finish: 1, time: t }] });
+  // 遅い日（+0.8秒×4レース）と標準の日
+  const v = computeDayVariants([rec('a', '2026-09-05', 94.8), rec('b', '2026-09-05', 94.8), rec('c', '2026-09-05', 94.8), rec('d', '2026-09-05', 94.8), rec('e', '2026-09-06', 94)], stats);
+  assert.ok(v['2026-09-05|東京|芝'] > 0.3, String(v['2026-09-05|東京|芝']));
+  assert.equal(v['2026-09-06|東京|芝'], 0);
+  const run = { date: '2026-09-05', course: '東京', surface: '芝', distance: 1600, going: '良', time: 95, weight: 55 };
+  const withVar = speedFigure(run, { ...stats, dayVariant: v });
+  const without = speedFigure(run, stats);
+  assert.ok(withVar > without, `${withVar} > ${without}`);
+});

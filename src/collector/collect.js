@@ -45,8 +45,9 @@ export async function fetchCard(client, cname, ttlMs = 2 * MIN) {
   return parseRaceCard(await client.page(cname, { cache: 'ttl', ttlMs }));
 }
 
-export async function fetchResult(client, cname) {
-  return parseRaceResult(await client.page(cname, { cache: 'forever' }));
+/** レース結果。live：当日の結果は確定直後に変わることがあるので、しばらくは取り直せるようにする */
+export async function fetchResult(client, cname, { live = false } = {}) {
+  return parseRaceResult(await client.page(cname, live ? { cache: 'ttl', ttlMs: 5 * MIN } : { cache: 'forever' }));
 }
 
 export async function fetchOdds(client, cname, { final = false, ttlMs = MIN } = {}) {

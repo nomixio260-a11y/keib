@@ -143,8 +143,9 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
         const race = pending.find((r) => r.id === link.raceId);
         if (!race || !link.resultCname) continue;
         try {
-          const result = await fetchResult(client, link.resultCname);
-          if (!result.rows.length) continue;
+          const result = await fetchResult(client, link.resultCname, { live: true });
+          // 払戻まで出そろってから取り込む
+          if (!result.rows.length || !Object.keys(result.payouts || {}).length) continue;
           const odds = link.oddsCname ? await fetchOdds(client, link.oddsCname, { final: true }) : null;
           const record = resultToRecord(result, odds, raceKeyFromCname(link.resultCname));
           // オッズのページが取れなかったときは出馬表の最終オッズで補う
