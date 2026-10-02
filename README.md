@@ -31,6 +31,12 @@ npm run serve     # http://localhost:8080 で開く
 
 ## 公開する
 
+### claude.ai の Artifact（公開済み）
+
+ビルドで作られる `dist/artifact.html` を claude.ai の Artifact として公開しています：<https://claude.ai/artifact/SEpXBGjVE5ftK8aWq191x4>
+
+最初は持ち主だけが開けます。ほかの人に見せるときは、ページ右上の共有メニューから共有してください。
+
 ### Cloudflare Tunnel（手元の PC から一時的に公開）
 
 1. [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) をインストール（macOS: `brew install cloudflared`、Windows: `winget install --id Cloudflare.cloudflared`）
@@ -41,9 +47,9 @@ PC を閉じたり Ctrl+C で止めたりすると見られなくなります。
 
 ### GitHub Pages（常設の URL）
 
-1. この内容を `main` ブランチに入れる
-2. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする
-3. `.github/workflows/pages.yml` が `main` への push ごとにテスト・ビルドして公開します（Actions タブから手動実行も可）
+1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする
+2. **Actions** タブの「GitHub Pages」→ **Run workflow** で、公開したいブランチを選んで実行する
+3. 以後は `main` ブランチへの push ごとに、`.github/workflows/pages.yml` が自動でテスト・ビルドして公開します
 
 公開先は `https://<ユーザー名>.github.io/keib/` です。
 
