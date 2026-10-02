@@ -43,7 +43,7 @@ npm run server     # http://localhost:8080
 `.github/workflows/pages.yml` が、開催日（土日・月曜）の 9:00〜17:59 JST は10分ごと、金土日の夜（前日発売のオッズ）は30分ごと、木曜（出馬表の発表）に2回、JRA 公式サイトから最新の出馬表・オッズ・結果を取り込み、変わったときだけ GitHub Pages に公開し直します。前回公開した `data.json` を引き継ぐので、サーバーもデータベースもなしで直近4開催日の結果（予想の答え合わせ）が貯まっていきます。
 
 1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする（ワークフローが自動で有効にできることもあります）
-2. **Actions → Pages → Run workflow** で一度実行する。以後は上の予定で自動更新。予定（`schedule`）は **既定ブランチ（main）にあるワークフローだけ**が動くので、このブランチの内容を main に入れてください
+2. **Actions → Pages → Run workflow** で一度実行する。以後は上の予定で自動更新。予定（`schedule`）は **既定ブランチにあるワークフローだけ**が動く（このリポジトリの既定ブランチは `ccr-5f5023aa-ovwgr9` で、すでに予定どおり動いている）
 3. 公開先：`https://<ユーザー名>.github.io/keib/`（このリポジトリなら <https://nomixio260-a11y.github.io/keib/>）
 
 **1分ごとの本当のリアルタイム版を外から見たいとき**は、**Actions → Live → Run workflow**（最大5.5時間）。GitHub Actions のランナー上でリアルタイム版のサーバーを動かし、Cloudflare Tunnel（Quick Tunnel、アカウント不要）で公開します。URL（`https://xxxx.trycloudflare.com`、実行のたびに変わる）は実行の Summary と、GitHub Pages の画面上部の「リアルタイム版を開く」に出ます。公開中は GitHub Pages 側の10分ごとの更新も動き続け、Live が終わると案内は消えます。
@@ -195,12 +195,12 @@ test/          テスト（入力は手で書いた最小限のデータ）
 <!-- status -->
 **2026-10-03 07:15 JST 更新**
 
-- **GitHub Pages で公開中**：<https://nomixio260-a11y.github.io/keib/>。**自動更新（schedule）は main に取り込んでから動く**（それまでは Actions → Pages → Run workflow で手動）。
+- **GitHub Pages で公開中**：<https://nomixio260-a11y.github.io/keib/>。リポジトリの既定ブランチは `ccr-5f5023aa-ovwgr9`（main はない）なので、**自動更新（schedule）はすでに動いている**（10/2 19:27 UTC の予定実行が成功）。Live ワークフローも Actions → Live → Run workflow から使える。
 - **進行中（精度向上の作業）**：
   1. 機械学習モデル（勾配ブースティング、`src/engine/gbdtModel.js`）を追加。情報漏れ（結果の記録が着順で並んでいた）を見つけて修正し、正直な成績に直した（下の日記 2026-10-03 07:00）。
   2. 学習データを増やすため、JRA からもう1年分（2024-10〜2025-09、約3,450レース）を収集中（2本の収集を並行、合計で約1リクエスト/1.5秒）。
   3. 収集が終わったら：`CAL_START=2025-10-01 TEST_START=2026-07-01 npm run calibrate` → `npm run horses` → `npm run ml` → `npm run evaluate` の順に回し、検証結果の表と「◎の勝率が低い」の数字、`src/data/realBacktest.js` を更新する。既定の重み付けは、検証期間で総合より良いほうにする。
-- **次にやること**：main への取り込み（PR）→ Pages の自動更新と Live ワークフロー。週末の自動更新で実オッズ（馬連・ワイド・3連複）の取り込みを確認。オッズの推移・調教・血統など、オッズに織り込まれていない情報の検討。
+- **次にやること**：週末（10/4〜5）の自動更新で、発走2時間前からの実オッズ（馬連・ワイド・3連複）の取り込みと機械学習の予想が Pages で動くかを確認。オッズの推移・調教・血統など、オッズに織り込まれていない情報の検討。
 <!-- /status -->
 
 ### 全体の構成（データの流れ）
@@ -421,7 +421,7 @@ data/history/{年}/{レースID}.json … 過去の結果＋確定オッズ（�
 - 新しい特徴量は `src/engine/features.js` に足し（学習と画面で同じ関数）、`npm run dataset` → `npm run cv` で「出発点との差」が増えるか見てから採用する。試して効果がなかったもの：1〜3着の順位で学ぶ Plackett–Luce 目的関数（`TOPK=3`。1着だけより悪い）、深い木（深さ3〜4）、馬体重。わずかに効いたもの：複勝オッズのずれ、対戦成績の評価（+0.0005）。
 - 市場（オッズ）に対する上積みは、学習 2,000レース・特徴量 80 で対数損失 +0.004 程度。大きく伸ばすには「オッズに織り込まれていない情報」（締切前のオッズの動き、調教、血統）が必要で、公開情報の加工だけでは限界がある。
 - 公開してはいけないもの：`data/`、`dist/data.json`、実データを埋め込んだ `dist/*.html`（Artifact は非公開で共有する）。
-- ルーティン（`trig_01CVLwcTdR1ieZxhbXh2H3Gj`、いまは無効）はブランチ `ccr-5f5023aa-ovwgr9` を使っている。有効に戻すなら、main にマージしたあとで指示文のブランチ名も変える。
+- ルーティン（`trig_01CVLwcTdR1ieZxhbXh2H3Gj`、いまは無効）はブランチ `ccr-5f5023aa-ovwgr9` を使っている（このブランチがリポジトリの既定ブランチ。main はない）。
 - Pages の `schedule` は既定ブランチでしか動かない。ブランチで試すときは **Actions → Pages → Run workflow** でブランチを選ぶ。`live.yml` のような新しいワークフローは、既定ブランチにファイルが入るまで Run workflow の一覧に出ない。
 - GitHub Pages を有効にするのはワークフローの権限（GITHUB_TOKEN）ではできない（`configure-pages` の `enablement: true` は `Resource not accessible by integration` で失敗）。Settings → Pages で1回だけ手で設定する。
 - Live ワークフローの trycloudflare の URL は毎回変わり、誰でも開ける。終了時に `dist/live.json` を消して公開し直すので案内は消える（Pages 側の更新も `until` を過ぎた案内は載せない）。
