@@ -1,0 +1,39 @@
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#predict" data-tab="predict" aria-label="KEIB 競馬予想（予想画面へ）">
+        <span class="brand-mark">KEIB</span><span class="brand-sub">競馬予想</span>
+      </a>
+      <nav class="tabs" aria-label="画面の切り替え">
+        <button type="button" class="tab" data-tab="predict">予想</button>
+        <button type="button" class="tab" data-tab="backtest">バックテスト</button>
+        <button type="button" class="tab" data-tab="data">データ</button>
+        <button type="button" class="tab" data-tab="logic">しくみ</button>
+      </nav>
+      <div class="meet"><span id="meet-date"></span></div>
+    </div>
+  </header>
+  <main class="main">
+    <section class="view" id="view-predict" aria-label="予想">
+      <div class="predict-layout">
+        <aside class="rail" id="race-rail" aria-label="レース一覧"></aside>
+        <div class="race-main" id="race-main"></div>
+        <div class="race-side">
+          <div id="slot-pace"></div>
+          <div id="slot-bets"></div>
+          <div id="slot-weights"></div>
+        </div>
+      </div>
+    </section>
+    <section class="view" id="view-backtest" aria-label="バックテスト" hidden></section>
+    <section class="view" id="view-data" aria-label="データ" hidden></section>
+    <section class="view" id="view-logic" aria-label="予想のしくみ" hidden></section>
+  </main>
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>サンプルの馬・騎手・レースはすべて架空です。予想は参考情報であり、的中や利益を保証しません。馬券の購入は20歳から。</p>
+      <p>KEIB 競馬予想</p>
+    </div>
+  </footer>
+</div>
+<noscript><p style="padding:16px">このアプリを使うには JavaScript を有効にしてください。</p></noscript>
