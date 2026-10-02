@@ -41,6 +41,8 @@ for (const key of ['balance', 'ai']) {
   for (const s of res.strategies) {
     console.log(`  ${s.label.padEnd(18, '　')} 購入 ${String(s.bets).padStart(5)}点  的中率 ${pct(s.hitRate).padStart(6)}  回収率 ${pct(s.roi).padStart(6)}  最高払戻 ${s.maxPay.toLocaleString('ja-JP')}円`);
   }
+  console.log('  自信度ごとの◎（レース数・勝率・複勝率・単勝回収率・複勝回収率）');
+  for (const [g, v] of Object.entries(res.byGrade)) if (v.n) console.log(`    ${g}: ${String(v.n).padStart(4)}R  ${pct(v.winRate).padStart(6)}  ${pct(v.top3Rate).padStart(6)}  ${pct(v.winRoi).padStart(6)}  ${pct(v.placeRoi).padStart(6)}`);
   if (key === 'balance') {
     console.log('  キャリブレーション（予測勝率 → 実際の勝率）');
     for (const b of res.calibration.ai) if (b.n) console.log(`    ${pct(b.lo)}〜${pct(Math.min(1, b.hi))}: 予測 ${pct(b.sumP / b.n)} 実際 ${pct(b.wins / b.n)} (${b.n}頭)`);
@@ -51,6 +53,7 @@ for (const key of ['balance', 'ai']) {
     label: preset.label,
     ai: res.ai,
     fav: res.fav,
+    byGrade: res.byGrade,
     calibration: res.calibration,
     strategies: res.strategies.map((s) => ({ ...s, curve: s.curve.filter((_, i) => i % step === step - 1 || i === s.curve.length - 1) })),
     curveStep: step,
@@ -67,6 +70,9 @@ for (const key of ['balance', 'ai']) {
   lines.push(`| 総合（AI＋人気） | ${pct(b.ai.winRate)} | ${pct(b.ai.top3Rate)} | ${b.ai.logLoss.toFixed(3)} |`);
   lines.push(`| AI単独 | ${pct(a.ai.winRate)} | ${pct(a.ai.top3Rate)} | ${a.ai.logLoss.toFixed(3)} |`);
   lines.push(`| 1番人気（単勝オッズ） | ${pct(b.fav.winRate)} | ${pct(b.fav.top3Rate)} | ${b.fav.logLoss.toFixed(3)} |`, '');
+  lines.push('| 自信度（総合） | レース数 | ◎の勝率 | ◎の複勝率 | 単勝◎の回収率 | 複勝◎の回収率 |', '| --- | --- | --- | --- | --- | --- |');
+  for (const [g, v] of Object.entries(b.byGrade)) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.winRate)} | ${pct(v.top3Rate)} | ${pct(v.winRoi)} | ${pct(v.placeRoi)} |`);
+  lines.push('');
   lines.push('| 買い方（総合） | 購入点数 | 的中率 | 回収率 |', '| --- | --- | --- | --- |');
   for (const st of b.strategies) lines.push(`| ${st.label} | ${st.bets.toLocaleString('ja-JP')} | ${pct(st.hitRate)} | ${pct(st.roi)} |`);
   console.log(`\n--- README 用 ---\n${lines.join('\n')}\n--- ここまで ---`);

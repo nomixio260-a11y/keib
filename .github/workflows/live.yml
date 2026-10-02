@@ -1,0 +1,103 @@
+# リアルタイム版（1分ごとに JRA から更新するサーバー）を GitHub Actions 上で動かし、
+# Cloudflare Tunnel（Quick Tunnel）で一時的に公開する。PC を立ち上げておかなくてよい。
+#
+#   Actions → Live → Run workflow（公開する時間を指定、最大 5.5 時間）
+#   公開 URL（https://xxxx.trycloudflare.com）は、実行の Summary と、GitHub Pages の画面上部の案内に出る。
+#   URL を知っている人は誰でも見られる。URL は実行のたびに変わる。
+name: Live
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: '公開する時間（時間、最大 5.5）'
+        default: '5.5'
+        required: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: live
+  cancel-in-progress: true
+
+env:
+  PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 前回公開したデータを引き継ぐ
+        run: |
+          mkdir -p data
+          curl -fsSL "$PAGES_URL/data.json" -o data/bundle.json || echo "前回のデータなし"
+      - name: cloudflared を用意
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          ./cloudflared --version
+      - name: サーバーとトンネルを起動
+        id: tunnel
+        run: |
+          npm run build
+          PORT=8080 HOST=127.0.0.1 nohup node scripts/server.mjs > server.log 2>&1 &
+          nohup ./cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate > tunnel.log 2>&1 &
+          for i in $(seq 1 60); do
+            url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+            [ -n "$url" ] && break
+            sleep 2
+          done
+          if [ -z "$url" ]; then echo "トンネルの URL を取得できませんでした"; cat tunnel.log; exit 1; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          hours="${{ github.event.inputs.hours }}"
+          until=$(node -e "console.log(new Date(Date.now() + Math.min(5.5, Number('$hours') || 5.5) * 3600e3).toISOString())")
+          echo "until=$until" >> "$GITHUB_OUTPUT"
+          echo "{\"url\":\"$url\",\"from\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"until\":\"$until\"}" > dist/live.json
+          {
+            echo "## リアルタイム版を公開中"
+            echo
+            echo "- URL: $url"
+            echo "- 終了予定（UTC）: $until"
+            echo "- 1分ごとに JRA から出馬表・オッズ・結果を取り込みます。発走後のレースは10分ほどで結果が入ります。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          sleep 5
+          curl -fsS "$url/api/bundle" -o /dev/null && echo "トンネル経由で応答を確認" || echo "まだ応答がありません（数十秒で通ります）"
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - name: 公開を続ける
+        run: |
+          hours="${{ github.event.inputs.hours }}"
+          secs=$(node -e "console.log(Math.round(Math.min(5.5, Number('$hours') || 5.5) * 3600))")
+          echo "$secs 秒のあいだ公開します（${{ steps.tunnel.outputs.url }}）"
+          end=$(( $(date +%s) + secs ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            sleep 300
+            if ! kill -0 $(pgrep -f 'scripts/server.mjs' | head -1) 2>/dev/null; then echo "サーバーが止まりました"; tail -20 server.log; exit 1; fi
+            tail -1 server.log
+          done
+      - name: 最後のデータを公開に反映
+        if: always()
+        run: |
+          pkill -f cloudflared || true
+          pkill -f 'scripts/server.mjs' || true
+          rm -f dist/live.json
+          npm run build

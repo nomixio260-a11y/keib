@@ -73,7 +73,7 @@ if (!FACTORS.every((f) => Number.isFinite(Number(state.weights[f.key])))) state.
 let imported = Array.isArray(saved.imported) ? saved.imported.filter((r) => r && Array.isArray(r.entries)) : [];
 
 // 実データ
-const data = { bundle: null, loadState: 'loading', loadError: '', lastFetch: null, live: false };
+const data = { bundle: null, loadState: 'loading', loadError: '', lastFetch: null, live: false, liveUrl: null };
 let raceIndex = new Map();
 // 利用者がレースを選ぶまでは「次に発走するレース」を自動で追いかける
 let userPicked = false;
@@ -197,6 +197,19 @@ function inlineBundle() {
     return json && Array.isArray(json.days) ? json : null;
   } catch {
     return null;
+  }
+}
+
+/** リアルタイム版（GitHub Actions の Live ワークフロー）が公開中なら、その URL（live.json） */
+async function fetchLiveInfo() {
+  if (data.live) return;
+  try {
+    const res = await fetch('live.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error();
+    const info = await res.json();
+    data.liveUrl = info?.url && Date.parse(info.until) > Date.now() && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(info.url) ? info.url : null;
+  } catch {
+    data.liveUrl = null;
   }
 }
 
@@ -325,7 +338,8 @@ function statusHtml() {
   const at = data.bundle.checkedAt || data.bundle.generatedAt;
   const gen = at ? new Date(Date.parse(at) + 9 * 3600 * 1000).toISOString() : '';
   const genText = gen ? `${Number(gen.slice(5, 7))}/${Number(gen.slice(8, 10))} ${gen.slice(11, 16)}` : '';
-  return `<span class="live-dot${data.live ? ' is-live' : ''}" aria-hidden="true"></span>${esc(label)}<span class="meet-sub">JRA ${esc(genText)} 更新${data.live ? '・自動更新中' : ''}</span>`;
+  const liveLink = data.liveUrl ? `<a class="live-link" href="${esc(data.liveUrl)}" target="_blank" rel="noopener">リアルタイム版（1分更新）を開く</a>` : '';
+  return `<span class="live-dot${data.live ? ' is-live' : ''}" aria-hidden="true"></span>${esc(label)}<span class="meet-sub">JRA ${esc(genText)} 更新${data.live ? '・自動更新中' : ''}</span>${liveLink}`;
 }
 
 function renderTopStatus() {
@@ -429,7 +443,7 @@ function refreshBets() {
   current.rec = recommendBets(current.pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
   setHTML($('#slot-bets'), renderBetsPanel(current.pred, current.rec, ctx()));
   const sum = $('#slot-summary');
-  if (sum) setHTML(sum, renderSummary(current.pred, current.rec));
+  if (sum) setHTML(sum, renderSummary(current.pred, current.rec, state.preset));
   if (current.pred.race.result?.length) {
     // 答え合わせも今の買い方で作り直す
     const scrollY = window.scrollY;
@@ -641,7 +655,9 @@ function applyDataUpdate() {
 }
 
 async function poll() {
-  const changed = await fetchBundle();
+  const liveBefore = data.liveUrl;
+  await fetchLiveInfo();
+  const changed = (await fetchBundle()) || liveBefore !== data.liveUrl;
   if (changed) applyDataUpdate();
   else if (state.tab === 'data') renderDataView();
   setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
@@ -1019,7 +1035,7 @@ async function start() {
   window.addEventListener('hashchange', () => applyRoute(routeFromHash()));
   const route = routeFromHash();
   showTab(route.tab, { updateHash: false });
-  await fetchBundle();
+  await Promise.all([fetchBundle(), fetchLiveInfo()]);
   applyRoute(route);
   setInterval(tickClock, 30 * 1000);
   setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);

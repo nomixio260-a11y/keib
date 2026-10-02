@@ -102,6 +102,8 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const fav = { n: 0, win: 0, top2: 0, top3: 0, logLoss: 0 };
   const calAi = emptyCal();
   const calMkt = emptyCal();
+  // 自信度（S/A/B/C）ごとの◎の成績
+  const byGrade = Object.fromEntries(['S', 'A', 'B', 'C'].map((g) => [g, { n: 0, win: 0, top3: 0, winRet: 0, placeRet: 0 }]));
   const log = [];
 
   for (let ri = 0; ri < races.length; ri++) {
@@ -125,13 +127,22 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
     };
     tally(ai, honmei, winnerRow?.pWin ?? 1e-4);
     tally(fav, favRow, winnerRow?.marketProb ?? 1e-4);
+    if (honmei) {
+      const g = byGrade[pred.confidence.grade] || byGrade.C;
+      const f = finishOf.get(honmei.entry.number) ?? 99;
+      g.n++;
+      if (f === 1) g.win++;
+      if (f <= 3) g.top3++;
+      g.winRet += payoutOf(race, 'win', [honmei.entry.number]);
+      g.placeRet += pred.placeCount ? payoutOf(race, 'place', [honmei.entry.number]) : 0;
+    }
     for (const r of pred.rows) {
       const won = r.entry.number === race.result[0];
       addCal(calAi, r.pWin, won);
       addCal(calMkt, r.marketProb, won);
     }
 
-    const raceLog = { id: race.id, label: `${race.course}${race.raceNo}R ${race.name}`, honmei: honmei?.entry.number, finish: finishOf.get(honmei?.entry.number) ?? null, profit: {} };
+    const raceLog = { id: race.id, label: `${race.course}${race.raceNo}R ${race.name}`, honmei: honmei?.entry.number, grade: pred.confidence.grade, finish: finishOf.get(honmei?.entry.number) ?? null, profit: {} };
     for (const s of BT_STRATEGIES) {
       const a = acc[s.key];
       const tickets = s.build(pred, m, settings).filter((t) => t.idx.every((i) => i >= 0) && t.stake > 0);
@@ -169,5 +180,8 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
     return { ...a, hitRate: a.bets ? a.hits / a.bets : 0, roi: a.stake ? a.ret / a.stake : 0, profit: a.ret - a.stake };
   });
   const rate = (o) => ({ ...o, winRate: o.n ? o.win / o.n : 0, top2Rate: o.n ? o.top2 / o.n : 0, top3Rate: o.n ? o.top3 / o.n : 0, logLoss: o.n ? o.logLoss / o.n : 0 });
-  return { races: log.length, strategies, ai: rate(ai), fav: rate(fav), calibration: { ai: calAi, market: calMkt }, log };
+  const grades = Object.fromEntries(
+    Object.entries(byGrade).map(([g, v]) => [g, { ...v, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0 }]),
+  );
+  return { races: log.length, strategies, ai: rate(ai), fav: rate(fav), byGrade: grades, calibration: { ai: calAi, market: calMkt }, log };
 }

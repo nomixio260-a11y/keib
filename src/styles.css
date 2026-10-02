@@ -2615,6 +2615,14 @@ table.bt-table {
   background: var(--bad);
 }
 
+.live-link {
+  margin-left: 10px;
+  font-weight: 700;
+  color: var(--turf);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+
 .rail-status {
   display: none;
   align-items: center;
@@ -2716,6 +2724,28 @@ table.bt-table {
 .tr-body b {
   color: var(--ink);
   font-size: 13px;
+}
+
+.tr-grades {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 2px;
+}
+
+.tr-grade {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tr-grade .ri-grade {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
 }
 
 .day-score {

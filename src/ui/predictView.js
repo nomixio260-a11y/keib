@@ -6,6 +6,7 @@ import { BLEND_OPTIONS, STRATEGIES, ESTIMATED_TYPES, ticketLabel, evaluateFormat
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
+import { REAL_BACKTEST } from '../data/realBacktest.js';
 import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
 import { esc, fixed, frameBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
@@ -63,10 +64,18 @@ function renderHead(race, ctx) {
   </div>`;
 }
 
-export function renderSummary(pred, rec) {
+/** 検証（学習に使っていない期間）で、同じ自信度のときの◎の成績 */
+export function gradeRecord(grade, preset = 'balance') {
+  const p = REAL_BACKTEST?.presets?.[preset] || REAL_BACKTEST?.presets?.balance;
+  const g = p?.byGrade?.[grade];
+  return g && g.n >= 20 ? g : null;
+}
+
+export function renderSummary(pred, rec, preset = 'balance') {
   const h = pred.order[0];
   const e = h.entry;
   const c = pred.confidence;
+  const gr = gradeRecord(c.grade, preset);
   const pc = paceComment(pred);
   const dots = Array.from({ length: 5 }, (_, i) => `<span class="meter-dot${i < c.upset ? ' is-on' : ''}"></span>`).join('');
   const nige = pred.rows.filter((r) => r.style.style === '逃げ').length;
@@ -85,7 +94,7 @@ export function renderSummary(pred, rec) {
     <div class="tile tile-conf">
       <div class="tile-label">自信度・波乱度</div>
       <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="meter" role="img" aria-label="波乱度 ${c.upset} / 5">${dots}</span></div>
-      <div class="tile-sub">◎と○の勝率差 <b class="num">${((c.top - c.second) * 100).toFixed(1)}</b>pt</div>
+      <div class="tile-sub">${gr ? `自信度${esc(c.grade)}の◎は実績で勝率 <b class="num">${pct(gr.winRate, 0)}</b>・複勝率 <b class="num">${pct(gr.top3Rate, 0)}</b><small>（${gr.n}R）</small>` : `◎と○の勝率差 <b class="num">${((c.top - c.second) * 100).toFixed(1)}</b>pt`}</div>
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>
@@ -379,7 +388,7 @@ export function renderWeightsPanel(ctx) {
 export function renderRaceMain(pred, rec, ctx) {
   const race = pred.race;
   const result = race.result?.length ? renderResultPanel(pred, rec, ctx) : '';
-  return `${renderHead(race, ctx)}<div id="slot-summary">${renderSummary(pred, rec)}</div>${result}<div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
+  return `${renderHead(race, ctx)}<div id="slot-summary">${renderSummary(pred, rec, ctx.state.preset)}</div>${result}<div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
 }
 
 /** 障害レース：予想の対象外（出馬表と結果だけ表示） */

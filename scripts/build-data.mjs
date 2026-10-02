@@ -3,7 +3,7 @@
 //
 //   node scripts/build-data.mjs                      … 過去の開催日（data/history）＋今週の出馬表・オッズ・結果（JRA）
 //   node scripts/build-data.mjs --offline            … JRAに接続せず、手元のデータだけで作る
-//   node scripts/build-data.mjs --previous old.json  … 前回のバンドルを引き継ぐ（data/history がない環境用）
+//   node scripts/build-data.mjs --previous old.json  … 前回のバンドルを引き継ぐ（data/history がない環境用。URL も可）
 //   node scripts/build-data.mjs --skip-if-idle       … 今日が開催日でなく、結果待ちも新しい出馬表もなければ「IDLE」と出して何もしない
 //                                                     （自動更新のルーティンを祝日の月曜などにも動かすため）
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
@@ -41,10 +41,14 @@ if (records.length) {
   log(`過去の開催日：${dates.join(', ') || 'なし'}（data/history ${records.length}レースから）`);
 }
 
-// 2) 前回のバンドル
+// 2) 前回のバンドル（ファイルか URL。GitHub Pages で公開中の data.json を引き継ぐときは URL）
 const prevPath = opt('previous', null);
 if (prevPath) {
-  const prev = await readJson(path.resolve(prevPath));
+  const prev = /^https?:/.test(prevPath)
+    ? await fetch(prevPath, { signal: AbortSignal.timeout(30000) })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+    : await readJson(path.resolve(prevPath));
   if (prev) {
     mergeBundle(bundle, prev);
     log(`前回のバンドルを引き継ぎ：${prev.days?.length ?? 0}日分（${prev.generatedAt ?? '日時不明'}）`);
@@ -59,14 +63,17 @@ if (!flag('offline')) {
     const meetings = await listCardMeetings(client);
     const known = new Set(bundle.days.map((d) => d.date));
     const now = Date.now();
-    const pending = bundle.days.flatMap((d) => d.races).filter((r) => r.status !== 'result' && startMs(r) && startMs(r) < now).length;
+    const races = bundle.days.flatMap((d) => d.races);
+    const pending = races.filter((r) => r.status !== 'result' && startMs(r) && startMs(r) < now).length;
+    // 24時間以内に発走するレース（前日発売のオッズが動く）
+    const soon = races.filter((r) => r.status !== 'result' && startMs(r) && startMs(r) > now && startMs(r) - now < 24 * 3600 * 1000).length;
     const racingToday = meetings.some((m) => m.date === today);
     const newDates = meetings.filter((m) => !known.has(m.date)).length;
-    if (!racingToday && !pending && !newDates) {
-      log('IDLE：今日は開催がなく、結果待ちのレースも新しい出馬表もありません。更新しません。');
+    if (!racingToday && !pending && !newDates && !soon) {
+      log('IDLE：今日は開催がなく、結果待ちのレース・24時間以内のレース・新しい出馬表もありません。更新しません。');
       process.exit(0);
     }
-    log(`更新します（今日の開催 ${racingToday ? 'あり' : 'なし'}・結果待ち ${pending}レース・新しい開催日 ${newDates}）`);
+    log(`更新します（今日の開催 ${racingToday ? 'あり' : 'なし'}・結果待ち ${pending}・24時間以内 ${soon}・新しい開催日 ${newDates}）`);
   }
   const { cards, results } = await refreshLive(client, bundle, {
     log,

@@ -6,8 +6,10 @@ import { impliedWinProbs } from './market.js';
 import { REAL_STATS } from './realStats.js';
 import { clamp, daysBetween, mean } from './util.js';
 
-// 直近の走ほど重視する
-const RECENCY = [1, 0.8, 0.65, 0.5, 0.4];
+// 直近の走ほど重視する（出馬表の前4走に、馬のデータベースにある古い走を足した分も使える）
+const RECENCY = [1, 0.8, 0.65, 0.5, 0.4, 0.33, 0.28, 0.24];
+/** 予想に使う過去走の最大数 */
+export const MAX_RUNS = Number(process.env.KEIB_MAX_RUNS || 8);
 
 const isHeavy = (going) => going === '重' || going === '不良';
 
@@ -260,7 +262,7 @@ export function computeRaceFactors(race, opts = {}) {
   const jockeyAvg = stats.jockeyAverage || JOCKEY_DEFAULT;
   const sires = opts.sires || {};
   const rows = entries.map((entry) => {
-    const runs = (entry.past || []).filter((r) => r && r.date).slice(0, 5);
+    const runs = (entry.past || []).filter((r) => r && r.date).slice(0, MAX_RUNS);
     const an = runs.map((run, k) => analyzeRun(run, k, race, stats));
     const style = runningStyle(an);
     const sire = sires[entry.sire] || null;
