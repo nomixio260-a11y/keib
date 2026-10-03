@@ -30,7 +30,7 @@ const LEAN = [...NO_BW, ...NO_GAIN];
 const BETA = Number(process.env.BETA || 1);
 // 利得の大きい 16 項目に絞ると交差検証でも検証期間でも良くなった（77項目 → 16項目：検証期間で +0.0033±0.0018）
 const TOP16 = ['logq', 'logqGap', 'popRank', 'placeLog', 'placeVsWin', 'placeSpread', 'weightRel', 'jTop3', 'tWin', 'fFormRel', 'siBest4Rel', 'siLast4Rel', 'fSpeedRel', 'closingBest', 'daysSince', 'cEloRel'];
-// 血統（競走馬ページから集めた父・母の父の芝ダ別成績）：半分の馬の収集時点で +0.0013（交差検証）
+// 血統（競走馬ページから集めた父・母の父の芝ダ別成績）：交差検証 +0.0006、検証期間 −0.0024±0.0014 → 不採用（候補としては残す）
 const PEDIGREE = ['sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'damSireWinSurf'];
 const CANDIDATES = [
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
@@ -49,9 +49,11 @@ const cvOut = path.join(tmp, 'cv.json');
 log('交差検証で設定を選ぶ');
 run([path.join(ROOT, 'scripts/cv-gbdt.mjs')], { CONFIGS: JSON.stringify(CANDIDATES), CV_OUT: cvOut, FOLDS: process.env.FOLDS || '5' });
 const cv = JSON.parse(await readFile(cvOut, 'utf8'));
-// 候補どうしの差は ±0.001 くらいの偶然で入れ替わるので、最初の候補（標準の設定）より 0.001 以上良いときだけ乗り換える
+// 候補どうしの差は ±0.001 くらいの偶然で入れ替わり、交差検証で +0.0014 良かった 85項目や血統つき 21項目は検証期間
+// （2026-07〜09）では 16項目より悪かった（−0.0022±0.0025、−0.0024±0.0014）。標準の設定より 0.002 以上良いときだけ乗り換える
+const SWITCH_MARGIN = Number(process.env.SWITCH_MARGIN || 0.002);
 const standard = cv.results.find((r) => r.cfg === JSON.stringify(CANDIDATES[0])) || cv.results[0];
-const best = cv.results[0].ll - standard.ll >= 0.001 ? cv.results[0] : standard;
+const best = cv.results[0].ll - standard.ll >= SWITCH_MARGIN ? cv.results[0] : standard;
 if (best !== cv.results[0]) log(`最良の候補 ${cv.results[0].cfg} との差が小さいので標準の設定を使う`);
 const cfg = JSON.parse(best.cfg);
 const rounds = Math.max(10, Math.round(best.round * 1.2));
