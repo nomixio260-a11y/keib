@@ -6,6 +6,7 @@
 //   node scripts/build-data.mjs --previous old.json  … 前回のバンドルを引き継ぐ（data/history がない環境用。URL も可）
 //   node scripts/build-data.mjs --skip-if-idle       … 今日が開催日でなく、結果待ちも新しい出馬表もなければ「IDLE」と出して何もしない
 //                                                     （自動更新のルーティンを祝日の月曜などにも動かすため）
+//   最後に「NEXT=秒」を出す：次の取り込みまでの目安（発走が近いと 300、前日発売中は 1200、それ以外は 3600。Race day ワークフローが読む）
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
 //             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
 //
@@ -73,6 +74,7 @@ if (!flag('offline')) {
     const newDates = meetings.filter((m) => !known.has(m.date)).length;
     if (!racingToday && !pending && !newDates && !soon) {
       log('IDLE：今日は開催がなく、結果待ちのレース・24時間以内のレース・新しい出馬表もありません。更新しません。');
+      console.log('NEXT=3600');
       process.exit(0);
     }
     log(`更新します（今日の開催 ${racingToday ? 'あり' : 'なし'}・結果待ち ${pending}・24時間以内 ${soon}・新しい開催日 ${newDates}）`);
@@ -101,6 +103,21 @@ await writeJson(out, bundle);
 const races = bundle.days.reduce((a, d) => a + d.races.length, 0);
 log(`書き出しました：${path.relative(ROOT, out)}（${bundle.days.length}日・${races}レース）`);
 for (const d of bundle.days) log(`  ${d.date} ${d.venues.join('・')} ${d.races.length}R（結果 ${d.races.filter((r) => r.status === 'result').length}）`);
+console.log(`NEXT=${nextInterval(bundle)}`);
+
+/** 次の取り込みまでの目安（秒）。今日の未確定レースの発走 90分前〜結果待ちは 300、それ以外の開催日と前日発売中は 1200、深夜（JST 0〜7時）と開催のない日は 3600 */
+function nextInterval(b, now = Date.now()) {
+  const all = b.days.flatMap((d) => d.races);
+  const jstHour = new Date(now + 9 * 3600 * 1000).getUTCHours();
+  if (jstHour < 7) return 3600;
+  const pendingToday = all.filter((r) => r.date === today && r.status !== 'result');
+  if (pendingToday.length) {
+    const first = Math.min(...pendingToday.map((r) => startMs(r) || Infinity));
+    return !Number.isFinite(first) || first - now < 90 * 60 * 1000 ? 300 : 1200;
+  }
+  const soon = all.some((r) => r.status !== 'result' && startMs(r) && startMs(r) > now && startMs(r) - now < 24 * 3600 * 1000);
+  return soon ? 1200 : 3600;
+}
 
 if (flag('copy-dist')) {
   await mkdir(path.join(ROOT, 'dist'), { recursive: true });
