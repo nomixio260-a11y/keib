@@ -7,6 +7,7 @@
 //   node scripts/build-data.mjs --skip-if-idle       … 今日が開催日でなく、結果待ちも新しい出馬表もなければ「IDLE」と出して何もしない
 //                                                     （自動更新のルーティンを祝日の月曜などにも動かすため）
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
+//             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
 //
 // 集めたデータは個人の分析用です。不特定多数が見られる場所には置かないでください。
 
@@ -76,10 +77,12 @@ if (!flag('offline')) {
     }
     log(`更新します（今日の開催 ${racingToday ? 'あり' : 'なし'}・結果待ち ${pending}・24時間以内 ${soon}・新しい開催日 ${newDates}）`);
   }
+  const snapDir = opt('snapshots', null);
+  const recDir = opt('records', null);
   const { cards, results } = await refreshLive(client, bundle, {
     log,
-    onRecord: records.length ? (rec) => saveRecord(rec) : null,
-    onOdds: records.length ? (race) => appendOddsSnapshot(race) : null,
+    onRecord: records.length ? (rec) => saveRecord(rec) : recDir ? (rec) => saveRecord(rec, path.resolve(recDir)) : null,
+    onOdds: records.length ? (race) => appendOddsSnapshot(race) : snapDir ? (race) => appendOddsSnapshot(race, path.resolve(snapDir)) : null,
   });
   log(`JRA：出馬表 ${cards}件・結果 ${results}件（通信 ${client.stats().requests}回）`);
 } else bundle.generatedAt = new Date().toISOString();

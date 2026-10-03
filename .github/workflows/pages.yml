@@ -1,9 +1,9 @@
 # GitHub Pages に、実データ（JRA の出馬表・オッズ・結果）つきで公開する。
 #
-#   - 開催日（土日・月曜）の 9:00〜17:59 JST は10分ごと、金土日の夜（前日オッズ）は30分ごと、木曜（出馬表の発表）に2回、
-#     JRA 公式サイトから最新のデータを取り込み、変わったときだけ公開し直す（schedule は既定ブランチでだけ動く）
-#   - main への push と手動実行（Run workflow）でも公開する
-#   - 前回公開した data.json を引き継ぐので、サーバーもデータベースもなしで過去4開催日の結果が貯まっていく
+#   - 既定ブランチへの push と手動実行（Run workflow）で公開する（アプリ本体の更新用）
+#   - 開催日のデータの更新は race-day.yml が data ブランチに data.json を push し、画面がそれを読む
+#     （GitHub の schedule は 10分ごとの実行を頻繁に落とすため、Pages の公開し直しでは追いつかない）
+#   - ビルド時は data ブランチ（なければ公開中）の data.json を引き継ぐので、過去の開催日の結果も残る
 #
 # 初回だけ：リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にする
 # （configure-pages が自動で有効にできなかった場合）。公開先は https://<ユーザー名>.github.io/keib/
@@ -11,11 +11,7 @@ name: Pages
 
 on:
   push:
-    branches: [main]
-  schedule:
-    - cron: '*/10 0-8 * * 0,1,6' # 土日月 9:00〜17:59 JST
-    - cron: '*/30 9-14 * * 0,5,6' # 金土日 18:00〜23:59 JST（前日発売のオッズ）
-    - cron: '5 3,9 * * 4' # 木 12:05・18:05 JST（出馬表の発表）
+    branches: [main, ccr-5f5023aa-ovwgr9]
   workflow_dispatch:
 
 permissions:
@@ -46,7 +42,8 @@ jobs:
       - name: 前回公開したデータを引き継ぐ
         run: |
           mkdir -p prev
-          if curl -fsSL "$PAGES_URL/data.json" -o prev/data.json; then echo "前回の data.json を取得"; else echo "前回のデータなし（初回）"; fi
+          if curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/data/data.json" -o prev/data.json; then echo "data ブランチの data.json を取得"
+          elif curl -fsSL "$PAGES_URL/data.json" -o prev/data.json; then echo "公開中の data.json を取得"; else echo "前回のデータなし（初回）"; fi
           curl -fsSL "$PAGES_URL/live.json" -o prev/live.json || true
       - name: JRA から実データを取り込む
         id: data

@@ -1,0 +1,107 @@
+# 開催日の自動更新（確実に動く版）。GitHub の schedule は 10分ごとの実行を頻繁に落とすので、
+# 1回の実行の中で「JRA から取り込み → data ブランチに data.json を push」を数分ごとに繰り返す。
+# 画面（GitHub Pages）は data ブランチの data.json を読むので、Pages を公開し直さなくても更新される。
+#
+#   - 土日：8:35 JST に開始して 17:20 JST まで 5分ごと（1回の実行は最長 5時間45分なので 13:55 JST に次の実行が引き継ぐ）
+#   - 金土の夜：18:05 JST から 23:40 JST まで 20分ごと（前日発売のオッズ）
+#   - 木：12:05・18:05 JST に1回ずつ（出馬表の発表）
+#   - 手動：Actions → Race day → Run workflow（分と間隔を指定）
+#   data ブランチには data.json のほか、オッズの推移（odds/）と結果の記録（history/）も貯める（1コミットを上書き）
+name: Race day
+
+on:
+  schedule:
+    - cron: '35 23 * * 5,6' # 土日 08:35 JST（前日 23:35 UTC）
+    - cron: '55 4 * * 6,0' # 土日 13:55 JST（後半）
+    - cron: '35 0 * * 6,0' # 予備（最初の実行が落ちたとき）
+    - cron: '5 9 * * 5,6' # 金土 18:05 JST（前日オッズ）
+    - cron: '5 3,9 * * 4' # 木 12:05・18:05 JST（出馬表）
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: '動かす時間（分、最大 345）'
+        default: '60'
+        required: true
+      interval:
+        description: '取り込みの間隔（秒）'
+        default: '300'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: race-day
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: data ブランチを用意する
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin data:data 2>/dev/null; then
+            git worktree add out data
+            echo "data ブランチを取得しました"
+          else
+            git worktree add --detach out
+            git -C out checkout -q --orphan data
+            git -C out rm -rfq . || true
+            echo "data ブランチを新しく作ります"
+          fi
+          # 前回のデータがなければ公開先の data.json を引き継ぐ
+          if [ ! -s out/data.json ]; then
+            curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data.json" -o out/data.json || true
+          fi
+      - name: 取り込みと公開を繰り返す
+        env:
+          INPUT_MINUTES: ${{ github.event.inputs.minutes }}
+          INPUT_INTERVAL: ${{ github.event.inputs.interval }}
+        run: |
+          now=$(date -u +%s)
+          H=$(date -u +%H | sed 's/^0//')
+          DOW=$(date -u +%u)
+          if [ -n "$INPUT_MINUTES" ]; then
+            end=$((now + INPUT_MINUTES * 60)); interval=${INPUT_INTERVAL:-300}
+          elif [ "$DOW" = "4" ]; then
+            end=$now; interval=60
+          elif [ "$H" -ge 23 ] || [ "$H" -lt 9 ]; then
+            day=today; [ "$H" -ge 23 ] && day=tomorrow
+            end=$(date -u -d "$day 08:20" +%s); interval=300
+          else
+            end=$(date -u -d "today 14:40" +%s); interval=1200
+          fi
+          cap=$((now + 345 * 60)); [ "$end" -gt "$cap" ] && end=$cap
+          echo "終了予定 $(date -u -d @$end +%FT%TZ)（$(( (end - now) / 60 ))分）・間隔 ${interval}秒"
+          n=0
+          while :; do
+            n=$((n + 1))
+            echo "== $n 回目 $(date -u +%FT%TZ)"
+            args="--out out/data.json --snapshots out/odds --records out/history"
+            [ -s out/data.json ] && args="$args --previous out/data.json"
+            node scripts/build-data.mjs $args 2>&1 | tail -20 || echo "取り込みに失敗（次の回で再試行）"
+            if [ -n "$(git -C out status --porcelain)" ]; then
+              git -C out add -A
+              if git -C out rev-parse --verify HEAD >/dev/null 2>&1; then
+                git -C out commit -q --amend -m "data $(date -u +%FT%TZ)"
+              else
+                git -C out commit -q -m "data $(date -u +%FT%TZ)"
+              fi
+              for i in 1 2 3; do git -C out push -q -f origin HEAD:data && break || sleep 10; done
+              echo "data ブランチを更新しました"
+            else
+              echo "変化なし"
+            fi
+            [ "$(date -u +%s)" -ge "$end" ] && break
+            sleep "$interval"
+          done
+          echo "終了 $(date -u +%FT%TZ)（$n 回）"

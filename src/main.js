@@ -51,6 +51,19 @@ const saved = loadSaved();
 const sameCal = saved.calId === CALIBRATION_ID;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
+// GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
+// （Pages 自体は code の push でしか更新しない。raw.githubusercontent.com は CORS を許可している）
+const REMOTE_DATA_URL = (() => {
+  try {
+    const host = globalThis.location?.hostname || '';
+    if (!host.endsWith('.github.io')) return null;
+    const owner = host.split('.')[0];
+    const repo = (globalThis.location.pathname || '/').split('/').filter(Boolean)[0];
+    return owner && repo ? `https://raw.githubusercontent.com/${owner}/${repo}/data/data.json` : null;
+  } catch {
+    return null;
+  }
+})();
 
 const state = {
   tab: 'predict',
@@ -216,10 +229,24 @@ async function fetchLiveInfo() {
 /** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
 async function fetchBundle() {
   try {
-    const res = await fetch(DATA_URL, { cache: 'no-store' });
-    if (!res.ok) throw Object.assign(new Error(`data.json を取得できません（HTTP ${res.status}）`), { missing: res.status === 404 });
-    const json = await res.json();
-    if (!json || !Array.isArray(json.days)) throw new Error('data.json の形式が違います');
+    // 候補を順に試す：data ブランチ（あれば）→ 公開先の data.json。古いほうは採用しない
+    const urls = REMOTE_DATA_URL ? [`${REMOTE_DATA_URL}?t=${Date.now()}`, DATA_URL] : [DATA_URL];
+    let json = null;
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw Object.assign(new Error(`data.json を取得できません（HTTP ${res.status}）`), { missing: res.status === 404 });
+        const j = await res.json();
+        if (!j || !Array.isArray(j.days)) throw new Error('data.json の形式が違います');
+        if (!json || String(j.generatedAt || '') > String(json.generatedAt || '')) json = j;
+        if (url !== DATA_URL && json) break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!json) throw lastErr || new Error('data.json を取得できません');
+    if (data.bundle && String(json.generatedAt || '') < String(data.bundle.generatedAt || '')) return false;
     data.lastFetch = new Date().toISOString();
     if (data.bundle && json.generatedAt === data.bundle.generatedAt && !!json.live === data.live) {
       // 中身は同じ：確認した時刻だけ更新
