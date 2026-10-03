@@ -2,6 +2,7 @@
 // JRA の競走馬情報ページから血統（父・母・母の父）と生年月日などを集める。
 //   node scripts/collect-horses.mjs            … data/history に出てくる全馬（まだ取っていない馬だけ）
 //   node scripts/collect-horses.mjs --limit 500
+//   node scripts/collect-horses.mjs --shard 0/2    … 馬IDを 2 つに分けた 0 番目だけ（2 本並行で動かすとき）
 // 馬ページの CNAME（チェックサムつき）は、キャッシュ済みの結果ページのリンクから拾う（新しい通信は馬ページの分だけ）。
 // 保存先：data/horses/{馬ID}.json。取得間隔は 1.2 秒。
 
@@ -15,7 +16,9 @@ import { loadHistory, DATA_DIR, CACHE_DIR } from '../src/collector/store.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const args = process.argv.slice(2);
-const limit = Number(args[args.indexOf('--limit') + 1]) || Infinity;
+const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity;
+const shard = args.includes('--shard') ? args[args.indexOf('--shard') + 1].split('/').map(Number) : null;
+const inShard = (id) => !shard || Number(id.slice(-6)) % shard[1] === shard[0];
 const OUT = path.join(DATA_DIR, 'horses');
 const MAP_FILE = path.join(DATA_DIR, 'horse-cnames.json');
 await mkdir(OUT, { recursive: true });
@@ -42,12 +45,13 @@ if (missing.length) {
   log(`CNAME が見つかった馬：${Object.keys(map).length}頭`);
 }
 
-const todo = [...ids].filter((id) => map[id] && !existsSync(path.join(OUT, `${id}.json`))).slice(0, limit);
+const todo = [...ids].filter((id) => map[id] && inShard(id) && !existsSync(path.join(OUT, `${id}.json`))).slice(0, limit);
 log(`取得する馬：${todo.length}頭（取得済み ${ids.size - todo.length}）`);
 const client = createJraClient({ minIntervalMs: Number(process.env.KEIB_INTERVAL_MS || 1200), cacheDir: null, log });
 let done = 0;
 let failed = 0;
 for (const id of todo) {
+  if (existsSync(path.join(OUT, `${id}.json`))) continue; // ほかの実行が先に保存した
   try {
     const html = await client.page(map[id], { cache: 'none' });
     const info = parseHorsePage(html);
