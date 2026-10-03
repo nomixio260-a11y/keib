@@ -9,6 +9,20 @@ export const GBDT_INFO = GBDT_MODEL ? { trainedOn: GBDT_MODEL.trainedOn, test: G
 
 const iLogq = FEATURE_NAMES.indexOf('logq');
 
+/** 出発点：倍率つきの log(市場確率) に、市場確率の帯ごとの補正（学習時に推定）を足す */
+export function baseOf(logq, model = GBDT_MODEL) {
+  if (model.base !== 'logq') return 0;
+  let v = (model.baseScale || 1) * logq;
+  const c = model.calib;
+  if (c?.edges && c.logRatio) {
+    const q = Math.exp(logq);
+    let k = 0;
+    while (k < c.edges.length - 2 && q >= c.edges[k + 1]) k++;
+    v += c.logRatio[k] || 0;
+  }
+  return v;
+}
+
 /** 木の合計（市場の分は含まない） */
 export function treeSum(x, model = GBDT_MODEL) {
   let s = 0;
@@ -34,7 +48,7 @@ export function gbdtScores(race, opts = {}) {
   const fx = raceFeatures(race, opts);
   const rows = fx.rows.map((r) => {
     const adj = treeSum(r.x);
-    return { ...r, adj, score: (GBDT_MODEL.base === 'logq' ? (GBDT_MODEL.baseScale || 1) * r.x[iLogq] : 0) + adj };
+    return { ...r, adj, score: baseOf(r.x[iLogq]) + adj };
   });
   return { rows, pace: fx.pace, temps: GBDT_MODEL.temps || [1, 1, 1] };
 }

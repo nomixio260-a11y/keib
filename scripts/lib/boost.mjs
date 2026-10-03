@@ -347,3 +347,32 @@ export function dateFolds(races, k) {
   for (const rs of races) folds[foldOfDate.get(rs[0].date)].push(rs);
   return folds;
 }
+
+/** 市場確率の帯の境界（人気薄ほど細かく） */
+export const CALIB_EDGES = [0, 0.005, 0.01, 0.02, 0.04, 0.07, 0.1, 0.15, 0.2, 0.3, 0.45, 1.01];
+
+/**
+ * 市場の帯ごとの補正：帯ごとに 実際の勝ち数 / 市場確率の合計 を求める（擬似カウントで 1 に寄せる）。
+ * 市場は人気薄（1%未満）を過大評価しているので、そこだけ下げる形になる。返り値は log(比) の配列
+ */
+export function fitBandCalib(d, { prior = 20, clampLo = 0.4, clampHi = 1.6 } = {}) {
+  const sumQ = new Float64Array(CALIB_EDGES.length - 1);
+  const sumY = new Float64Array(CALIB_EDGES.length - 1);
+  for (let i = 0; i < d.n; i++) {
+    const q = Math.exp(d.base0[i]);
+    const k = bandOf(q);
+    sumQ[k] += q;
+    sumY[k] += d.y[i];
+  }
+  // 比 = (勝ち数 + prior) / (市場確率の合計 + prior)：出走の少ない帯は 1 に寄る
+  return [...sumQ].map((sq, k) => Math.round(Math.log(Math.min(clampHi, Math.max(clampLo, (sumY[k] + prior) / (sq + prior)))) * 1e4) / 1e4);
+}
+export function bandOf(q) {
+  let k = 0;
+  while (k < CALIB_EDGES.length - 2 && q >= CALIB_EDGES[k + 1]) k++;
+  return k;
+}
+/** 出発点に帯の補正を足す（base0 × beta + log比） */
+export function applyBase(d, { beta = 1, calib = null } = {}) {
+  for (let i = 0; i < d.n; i++) d.base[i] = d.base0[i] * beta + (calib ? calib[bandOf(Math.exp(d.base0[i]))] : 0);
+}

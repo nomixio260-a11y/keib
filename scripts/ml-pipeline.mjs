@@ -63,5 +63,6 @@ run([path.join(ROOT, 'scripts/train-gbdt.mjs')], {
   FEATS_DROP: (cfg.drop || []).join(','),
   FEATS_ONLY: (cfg.only || []).join(','),
   BETA: String(cfg.beta ?? 1),
+  CALIB: cfg.calib ? '1' : '0',
 });
 log('完了。次は CAL_START=… TEST_START=… node scripts/evaluate.mjs で検証期間の成績を確認してください');

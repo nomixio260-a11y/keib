@@ -15,7 +15,7 @@
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { readJson, DATA_DIR, ROOT } from '../src/collector/store.js';
-import { DEFAULT_PARAMS, groupRaces, flatten, makeThresholds, binize, softmax, trainBoost, evalTrees, fitTemps, importance, compactTrees } from './lib/boost.mjs';
+import { DEFAULT_PARAMS, groupRaces, flatten, makeThresholds, binize, softmax, trainBoost, evalTrees, fitTemps, importance, compactTrees, fitBandCalib, applyBase, CALIB_EDGES } from './lib/boost.mjs';
 
 const TEST_START = process.env.TEST_START || '2026-07-01';
 const NO_MARKET = process.env.NO_MARKET === '1';
@@ -23,6 +23,7 @@ const FIXED_ROUNDS = Number(process.env.FIXED_ROUNDS || 0);
 const BAGS = Math.max(1, Number(process.env.BAGS || 1));
 const SEED = Number(process.env.SEED || 12345);
 const BETA = Number(process.env.BETA || 1);
+const CALIB = process.env.CALIB === '1';
 const params = {
   ...DEFAULT_PARAMS,
   rounds: Number(process.env.ROUNDS || (FIXED_ROUNDS || DEFAULT_PARAMS.rounds)),
@@ -61,7 +62,10 @@ const thresholds = makeThresholds(fit);
 binize(fit, thresholds);
 const valid = validRaces.length ? binize(flatten(validRaces, Fn, { baseIndex }), thresholds) : null;
 const test = binize(flatten(testRaces, Fn, { baseIndex }), thresholds);
-if (BETA !== 1) for (const d of [fit, valid, test]) if (d) for (let i = 0; i < d.n; i++) d.base[i] = d.base0[i] * BETA;
+// 出発点：BETA × log(市場確率) ＋（CALIB なら）市場確率の帯ごとの補正（学習データで推定）
+const calib = CALIB ? fitBandCalib(fit) : null;
+if (BETA !== 1 || calib) for (const d of [fit, valid, test]) if (d) applyBase(d, { beta: BETA, calib });
+if (calib) log(`帯の補正 log(実際/市場)：${calib.map((v) => v.toFixed(3)).join(' ')}`);
 
 const base0 = { fit: evalTrees([], fit), valid: valid ? evalTrees([], valid) : null, test: evalTrees([], test) };
 log(`出発点（${NO_MARKET ? '一様' : '市場のみ'}）：学習 ${base0.fit.ll.toFixed(4)}${valid ? ` 判定 ${base0.valid.ll.toFixed(4)}` : ''} 検証 ${base0.test.ll.toFixed(4)} top1 ${(base0.test.top1 * 100).toFixed(1)}%`);
@@ -117,6 +121,7 @@ if (!process.argv.includes('--dry')) {
     names,
     base: NO_MARKET ? 'none' : 'logq',
     baseScale: BETA,
+    calib: calib ? { edges: CALIB_EDGES, logRatio: calib } : null,
     trees: compactTrees(all),
     trainedOn: { races: fitRaces.length + validRaces.length, from: trainRaces[0]?.[0].date, to: trainRaces[trainRaces.length - 1]?.[0].date },
     test: { from: TEST_START, races: testRaces.length, ll: +res.test.ll.toFixed(4), baseLL: +base0.test.ll.toFixed(4), top1: +res.test.top1.toFixed(4), baseTop1: +base0.test.top1.toFixed(4) },
