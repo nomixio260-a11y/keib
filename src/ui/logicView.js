@@ -1,7 +1,7 @@
 // ロジック画面：予想の仕組みの説明
 
 import { PAYOUT_RATE, BET_LABEL } from '../engine/constants.js';
-import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor } from '../engine/model.js';
+import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor, VOLATILITY_CUTS } from '../engine/model.js';
 import { CALIBRATION } from '../engine/calibration.js';
 import { REAL_STATS } from '../engine/realStats.js';
 import { GBDT_READY, GBDT_INFO } from '../engine/gbdt.js';
@@ -88,6 +88,10 @@ export function renderLogic(ctx) {
         <p>出馬表・オッズ・結果・払戻は JRA 公式サイトの公開情報です。リアルタイム版（<code>npm run server</code>）は、発走が近いレースほど短い間隔（2分〜30分）で出馬表とオッズを取り直し、発走から10分ほどで結果と払戻を取り込みます。画面は1分ごとに最新のデータを読み直します。確定したレースは、予想と実際の着順・払戻を並べて答え合わせできます。</p>
       </section>
     </div>
+    <section class="note-box">
+      <h2>荒れ度（堅い・普通・荒れ）</h2>
+      <p>レースごとに「人気3頭（単勝オッズ順）以外が勝つ確率」をモデルの勝率から計算し、学習期間の3分位（${(VOLATILITY_CUTS[0] * 100).toFixed(0)}%・${(VOLATILITY_CUTS[1] * 100).toFixed(0)}%）で 堅い・普通・荒れ に分けています。検証期間（887レース）では、この確率は実際の頻度とよく合い（堅い：予測 20% → 実際 18%、荒れ：47% → 42%）、1番人気の勝率は 堅い 50%・荒れ 26% と大きく違います。市場（オッズだけ）から同じ確率を出すより当てはまりがわずかに良く（二値の対数損失 0.600 対 0.602）、「荒れ」のレースで無理に単勝を買わない、といった使い方を想定しています。レースの条件（頭数・クラス・距離・馬場・人気の散らばりなど）からレースごとの「温度」を推定してモデルの確率を伸縮させる案も試しましたが、確率はすでに合っていて効果がありませんでした（<code>scripts/race-temp.mjs</code>）。</p>
+    </section>
     <section class="note-box">
       <h2>◎の勝率はなぜ 4割弱なのか</h2>
       <p>競馬は1レースに10頭以上が走り、いちばん人気の馬でも勝つのは3回に1回ほどです（JRA 全体でおよそ33%${vb ? `。検証期間の${REAL_BACKTEST.races}レースでは ${pct(vb.fav.winRate)}` : ''}）。単勝オッズには大勢の人の予想が織り込まれていて、公開されている情報だけでそれを大きく上回ることはできません。KEIB の◎も学習に使っていない期間で${vb ? ` ${pct(vb.ai.winRate)}` : ''}と、1番人気と同じ水準です${vb && vb.ai.logLoss < vb.fav.logLoss ? `（勝ち馬の確率の当てはまり＝対数損失では ${vb.ai.logLoss.toFixed(3)} と、オッズだけの ${vb.fav.logLoss.toFixed(3)} をわずかに上回ります）` : ''}。</p>

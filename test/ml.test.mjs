@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { GBDT_READY, treeSum, gbdtScores } from '../src/engine/gbdt.js';
 import { GBDT_MODEL } from '../src/engine/gbdtModel.js';
 import { raceFeatures, FEATURE_NAMES, careerSnapshot, careerFromRow } from '../src/engine/features.js';
-import { predictRace, PRESETS, DEFAULT_PRESET } from '../src/engine/model.js';
+import { predictRace, PRESETS, DEFAULT_PRESET, confidenceOf, VOLATILITY_CUTS } from '../src/engine/model.js';
 import { makeRace } from './fixtures/race.mjs';
 
 test('モデルと特徴量の並びが一致している', () => {
@@ -122,4 +122,18 @@ test('プラケット・ルースの厳密計算はシミュレーションと�
     assert.ok(Math.abs(sim.top3[i] - ex.top3[i]) < 0.012, `top3 ${i}`);
   }
   assert.ok(Math.abs(c.quinella[0 * 6 + 1] - ex.combos.quinella[0 * 6 + 1]) < 0.01);
+});
+
+test('荒れ度：人気3頭以外が勝つ確率で 堅い／普通／荒れ に分かれる', () => {
+  const mk = (pWins, qs) => pWins.map((pWin, i) => ({ pWin, marketProb: qs[i], entry: { number: i + 1 } }));
+  const solid = confidenceOf(mk([0.5, 0.25, 0.1, 0.05, 0.05, 0.05], [0.45, 0.25, 0.12, 0.08, 0.06, 0.04]));
+  assert.equal(solid.volatility, '堅い');
+  assert.ok(Math.abs(solid.upsetProb - 0.15) < 1e-9);
+  assert.ok(Math.abs(solid.favWinProb - 0.5) < 1e-9);
+  const wild = confidenceOf(mk([0.2, 0.15, 0.15, 0.15, 0.15, 0.1, 0.1], [0.3, 0.2, 0.15, 0.12, 0.1, 0.08, 0.05]));
+  assert.equal(wild.volatility, '荒れ');
+  assert.ok(wild.upsetProb >= VOLATILITY_CUTS[1]);
+  assert.ok(wild.upset > solid.upset);
+  // 3頭以下は荒れ度を出さない
+  assert.equal(confidenceOf(mk([0.5, 0.3, 0.2], [0.5, 0.3, 0.2])).upsetProb, 0);
 });

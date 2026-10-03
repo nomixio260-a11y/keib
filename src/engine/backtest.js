@@ -1,6 +1,6 @@
 // バックテスト：結果のわかっている過去レースで予想と買い方を検証する。
 
-import { predictRace } from './model.js';
+import { predictRace, VOLATILITY_LABELS } from './model.js';
 import { recommendBets, buildCandidates, marksToIndex, ticketLabel } from './bets.js';
 
 /** 払戻表のキー（馬番で表す） */
@@ -92,6 +92,42 @@ export const BT_STRATEGIES = [
             .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
         : [],
   },
+  // 荒れ度で買い方を切り替える（検証用）：堅いレースだけ単複・控えめ、荒れるレースだけ期待値のある馬連・ワイド・三連複
+  {
+    key: 'winSolid',
+    label: '単勝 ◎（荒れ度「堅い」だけ）',
+    build: (pred, m) => (pred.confidence?.volatility === '堅い' ? [{ type: 'win', idx: [m['◎']], stake: 100 }] : []),
+  },
+  {
+    key: 'placeSolid',
+    label: '複勝 ◎（荒れ度「堅い」だけ）',
+    build: (pred, m) => (pred.confidence?.volatility === '堅い' && pred.placeCount ? [{ type: 'place', idx: [m['◎']], stake: 100 }] : []),
+  },
+  {
+    key: 'carefulSolid',
+    label: '控えめ（自信度S かつ 荒れ度「堅い」・1R千円）',
+    build: (pred, m, settings) => (pred.confidence?.volatility === '堅い' ? recommendBets(pred, { budget: 1000, strategy: 'careful', blend: settings?.blend }).tickets : []),
+  },
+  {
+    key: 'exoticWild',
+    label: '馬連・ワイド・三連複 期待値1.1以上（荒れ度「荒れ」だけ）',
+    build: (pred, m, settings) =>
+      pred.race?.exoticOdds && pred.confidence?.volatility === '荒れ'
+        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], settings?.blend ?? 0.5)
+            .filter((c) => !c.estimated && c.ev >= 1.1 && c.pEv >= 0.02)
+            .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
+        : [],
+  },
+  {
+    key: 'wideWild',
+    label: 'ワイド 期待値1.0以上（荒れ度「荒れ」だけ）',
+    build: (pred, m, settings) =>
+      pred.race?.exoticOdds && pred.confidence?.volatility === '荒れ'
+        ? buildCandidates(pred, ['wide'], settings?.blend ?? 0.5)
+            .filter((c) => !c.estimated && c.ev >= 1.0 && c.pEv >= 0.1)
+            .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
+        : [],
+  },
   {
     key: 'fav',
     label: '1番人気の単勝（比較用）',
@@ -134,6 +170,8 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const calMkt = emptyCal();
   // 自信度（S/A/B/C）ごとの◎の成績
   const byGrade = Object.fromEntries(['S', 'A', 'B', 'C'].map((g) => [g, { n: 0, win: 0, top3: 0, winRet: 0, placeRet: 0 }]));
+  // 荒れ度（堅い／普通／荒れ）ごと：予測した「人気3頭以外が勝つ確率」と実際、1番人気の勝率、◎の成績、勝ち馬の単勝払戻
+  const byVolatility = Object.fromEntries(VOLATILITY_LABELS.map((g) => [g, { n: 0, predUpset: 0, upset: 0, favWin: 0, win: 0, top3: 0, winRet: 0, placeRet: 0, winnerPay: 0 }]));
   const log = [];
 
   for (let ri = 0; ri < races.length; ri++) {
@@ -170,6 +208,23 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
       const won = r.entry.number === race.result[0];
       addCal(calAi, r.pWin, won);
       addCal(calMkt, r.marketProb, won);
+    }
+    {
+      const c = pred.confidence;
+      const v = byVolatility[c.volatility] || byVolatility[VOLATILITY_LABELS[1]];
+      const top3 = [...pred.rows].sort((a, b) => (b.marketProb ?? 0) - (a.marketProb ?? 0) || a.entry.number - b.entry.number).slice(0, 3);
+      v.n++;
+      v.predUpset += c.upsetProb || 0;
+      if (!top3.some((r) => r.entry.number === race.result[0])) v.upset++;
+      if (top3[0]?.entry.number === race.result[0]) v.favWin++;
+      if (honmei) {
+        const f = finishOf.get(honmei.entry.number) ?? 99;
+        if (f === 1) v.win++;
+        if (f <= 3) v.top3++;
+        v.winRet += payoutOf(race, 'win', [honmei.entry.number]);
+        v.placeRet += pred.placeCount ? payoutOf(race, 'place', [honmei.entry.number]) : 0;
+      }
+      v.winnerPay += payoutOf(race, 'win', [race.result[0]]);
     }
 
     const raceLog = { id: race.id, label: `${race.course}${race.raceNo}R ${race.name}`, honmei: honmei?.entry.number, grade: pred.confidence.grade, finish: finishOf.get(honmei?.entry.number) ?? null, profit: {} };
@@ -213,5 +268,8 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const grades = Object.fromEntries(
     Object.entries(byGrade).map(([g, v]) => [g, { ...v, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0 }]),
   );
-  return { races: log.length, strategies, ai: rate(ai), fav: rate(fav), byGrade: grades, calibration: { ai: calAi, market: calMkt }, log };
+  const volatility = Object.fromEntries(
+    Object.entries(byVolatility).map(([g, v]) => [g, { ...v, predUpsetRate: v.n ? v.predUpset / v.n : 0, upsetRate: v.n ? v.upset / v.n : 0, favWinRate: v.n ? v.favWin / v.n : 0, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0, meanWinnerPay: v.n ? v.winnerPay / v.n : 0 }]),
+  );
+  return { races: log.length, strategies, ai: rate(ai), fav: rate(fav), byGrade: grades, byVolatility: volatility, calibration: { ai: calAi, market: calMkt }, log };
 }

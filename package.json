@@ -21,7 +21,11 @@
     "cv": "node scripts/cv-gbdt.mjs",
     "train": "node scripts/train-gbdt.mjs",
     "ml": "node scripts/ml-pipeline.mjs",
-    "horses": "node scripts/horses.mjs"
+    "horses": "node scripts/horses.mjs",
+    "retrain": "CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/calibrate.mjs && node scripts/horses.mjs && TEST_START=2026-07-01 node scripts/ml-pipeline.mjs && npm test && CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/evaluate.mjs",
+    "feat-search": "node scripts/feat-search.mjs",
+    "race-temp": "node scripts/race-temp.mjs",
+    "ensemble-lin": "node scripts/ensemble-lin.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

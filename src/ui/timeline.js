@@ -40,6 +40,13 @@ export function gradeChip(grade) {
   return `<span class="grade-chip ${GRADE_CLASS[grade]}">${esc(grade)}</span>`;
 }
 
+/** 荒れ度のチップ（堅い／荒れ だけ表示。普通は出さない） */
+export function volChip(vol, size = '') {
+  if (vol === '堅い') return `<span class="ri-vol v-solid${size}" title="荒れ度：堅い（人気3頭以外が勝つ確率が低い）">堅</span>`;
+  if (vol === '荒れ') return `<span class="ri-vol v-wild${size}" title="荒れ度：荒れ（人気3頭以外が勝つ確率が高い）">荒</span>`;
+  return '';
+}
+
 export function surfaceChip(race) {
   const cls = race.surface === '芝' ? 'is-turf' : race.surface === 'ダ' ? 'is-dirt' : 'is-jump';
   return `<span class="surf-chip ${cls}">${esc(race.surface)}${esc(race.distance)}</span>`;
@@ -121,7 +128,7 @@ function raceItem(r, ctx) {
       <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.filter((e) => !e.scratched).length}頭</span>${st === 'closing' || st === 'live' ? statusBadge(r, now) : timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
       <span class="ri-pick">${pickHtml}</span>
     </span>
-    <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>` : ''}</span>
+    <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>${volChip(pick.vol)}` : ''}</span>
   </button></li>`;
 }
 

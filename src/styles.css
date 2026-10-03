@@ -805,6 +805,51 @@ a {
   color: var(--turf);
 }
 
+/* 荒れ度：堅い（緑の枠）・荒れ（赤の枠） */
+.ri-vol {
+  font-weight: 700;
+  font-size: 11px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  margin-top: 3px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+.ri-vol.v-solid {
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.ri-vol.v-wild {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.vol-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line-strong);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.vol-badge.v-solid {
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.vol-badge.v-wild {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
 .rail-empty {
   color: var(--muted);
   font-size: 13px;

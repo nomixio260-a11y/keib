@@ -49,6 +49,8 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   }
   console.log('  自信度ごとの◎（レース数・勝率・複勝率・単勝回収率・複勝回収率）');
   for (const [g, v] of Object.entries(res.byGrade)) if (v.n) console.log(`    ${g}: ${String(v.n).padStart(4)}R  ${pct(v.winRate).padStart(6)}  ${pct(v.top3Rate).padStart(6)}  ${pct(v.winRoi).padStart(6)}  ${pct(v.placeRoi).padStart(6)}`);
+  console.log('  荒れ度ごと（レース数・予測した人気3頭以外の勝率 → 実際・1番人気の勝率・◎の勝率・単勝◎の回収率・勝ち馬の単勝払戻の平均）');
+  for (const [g, v] of Object.entries(res.byVolatility || {})) if (v.n) console.log(`    ${g}: ${String(v.n).padStart(4)}R  ${pct(v.predUpsetRate).padStart(6)} → ${pct(v.upsetRate).padStart(6)}  1番人気 ${pct(v.favWinRate).padStart(6)}  ◎ ${pct(v.winRate).padStart(6)}  単勝◎ ${pct(v.winRoi).padStart(6)}  払戻 ${Math.round(v.meanWinnerPay).toLocaleString('ja-JP')}円`);
   if (key === 'ml' || (key === 'balance' && !GBDT_READY)) {
     console.log('  キャリブレーション（予測勝率 → 実際の勝率）');
     for (const b of res.calibration.ai) if (b.n) console.log(`    ${pct(b.lo)}〜${pct(Math.min(1, b.hi))}: 予測 ${pct(b.sumP / b.n)} 実際 ${pct(b.wins / b.n)} (${b.n}頭)`);
@@ -60,6 +62,7 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
     ai: res.ai,
     fav: res.fav,
     byGrade: res.byGrade,
+    byVolatility: res.byVolatility,
     calibration: res.calibration,
     strategies: res.strategies.map((s) => ({ ...s, curve: s.curve.filter((_, i) => i % step === step - 1 || i === s.curve.length - 1) })),
     curveStep: step,
@@ -79,6 +82,9 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   lines.push(`| 1番人気（単勝オッズ） | ${pct(b.fav.winRate)} | ${pct(b.fav.top3Rate)} | ${b.fav.logLoss.toFixed(3)} |`, '');
   lines.push(`| 自信度（${mainLabel}） | レース数 | ◎の勝率 | ◎の複勝率 | 単勝◎の回収率 | 複勝◎の回収率 |`, '| --- | --- | --- | --- | --- | --- |');
   for (const [g, v] of Object.entries(b.byGrade)) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.winRate)} | ${pct(v.top3Rate)} | ${pct(v.winRoi)} | ${pct(v.placeRoi)} |`);
+  lines.push('');
+  lines.push(`| 荒れ度（${mainLabel}） | レース数 | 人気3頭以外が勝つ確率（予測 → 実際） | 1番人気の勝率 | ◎の勝率 | 単勝◎の回収率 | 勝ち馬の単勝払戻（平均） |`, '| --- | --- | --- | --- | --- | --- | --- |');
+  for (const [g, v] of Object.entries(b.byVolatility || {})) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.predUpsetRate)} → ${pct(v.upsetRate)} | ${pct(v.favWinRate)} | ${pct(v.winRate)} | ${pct(v.winRoi)} | ${Math.round(v.meanWinnerPay).toLocaleString('ja-JP')}円 |`);
   lines.push('');
   lines.push(`| 買い方（${mainLabel}） | 購入点数 | 的中率 | 回収率 |`, '| --- | --- | --- | --- |');
   for (const st of b.strategies) lines.push(`| ${st.label} | ${st.bets.toLocaleString('ja-JP')} | ${pct(st.hitRate)} | ${pct(st.roi)} |`);

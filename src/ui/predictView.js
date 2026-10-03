@@ -65,6 +65,13 @@ function renderHead(race, ctx) {
 }
 
 /** 検証（学習に使っていない期間）で、同じ自信度のときの◎の成績 */
+/** 荒れ度ごとの実績（検証期間）。20レース以上あるときだけ */
+export function volRecord(vol, preset = 'balance') {
+  const p = REAL_BACKTEST?.presets?.[preset] || REAL_BACKTEST?.presets?.balance;
+  const v = p?.byVolatility?.[vol];
+  return v && v.n >= 20 ? v : null;
+}
+
 export function gradeRecord(grade, preset = 'balance') {
   const p = REAL_BACKTEST?.presets?.[preset] || REAL_BACKTEST?.presets?.balance;
   const g = p?.byGrade?.[grade];
@@ -76,6 +83,7 @@ export function renderSummary(pred, rec, preset = 'balance') {
   const e = h.entry;
   const c = pred.confidence;
   const gr = gradeRecord(c.grade, preset);
+  const vr = volRecord(c.volatility, preset);
   const pc = paceComment(pred);
   const dots = Array.from({ length: 5 }, (_, i) => `<span class="meter-dot${i < c.upset ? ' is-on' : ''}"></span>`).join('');
   const nige = pred.rows.filter((r) => r.style.style === '逃げ').length;
@@ -92,9 +100,9 @@ export function renderSummary(pred, rec, preset = 'balance') {
       <div class="tile-sub">逃げ候補 ${nige}頭・直線${pred.straightBias > 0.4 ? '短め' : pred.straightBias < -0.4 ? '長め' : '標準'}</div>
     </div>
     <div class="tile tile-conf">
-      <div class="tile-label">自信度・波乱度</div>
-      <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="meter" role="img" aria-label="波乱度 ${c.upset} / 5">${dots}</span></div>
-      <div class="tile-sub">${gr ? `自信度${esc(c.grade)}の◎は実績で勝率 <b class="num">${pct(gr.winRate, 0)}</b>・複勝率 <b class="num">${pct(gr.top3Rate, 0)}</b><small>（${gr.n}R）</small>` : `◎と○の勝率差 <b class="num">${((c.top - c.second) * 100).toFixed(1)}</b>pt`}</div>
+      <div class="tile-label">自信度・荒れ度</div>
+      <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="vol-badge v-${['solid', 'mid', 'wild'][c.volatilityIndex ?? 1]}" title="人気3頭以外が勝つ確率 ${pct(c.upsetProb || 0)}">${esc(c.volatility || '普通')}</span><span class="meter" role="img" aria-label="荒れ度 ${c.upset} / 5">${dots}</span></div>
+      <div class="tile-sub">${gr ? `自信度${esc(c.grade)}の◎は実績で勝率 <b class="num">${pct(gr.winRate, 0)}</b>・複勝率 <b class="num">${pct(gr.top3Rate, 0)}</b><small>（${gr.n}R）</small>` : `◎と○の勝率差 <b class="num">${((c.top - c.second) * 100).toFixed(1)}</b>pt`}${vr ? `。人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b><small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : `。人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>`}</div>
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>

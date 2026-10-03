@@ -312,7 +312,7 @@ let view = 'race';
 function pickOf(pred, race) {
   if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
   const h = pred.order[0];
-  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, sig: raceSig(race) };
+  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, vol: pred.confidence.volatility, sig: raceSig(race) };
 }
 
 /** 一覧の◎（とその日の成績）を裏で少しずつ計算 */

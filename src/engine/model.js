@@ -198,6 +198,17 @@ export function assignMarks(rows) {
 }
 
 /** 自信度（S/A/B/C）と波乱度（1〜5） */
+/** 荒れ度の区切り：人気3頭以外が勝つ確率（学習期間の分割外の予測の3分位。scripts/race-temp.mjs） */
+export const VOLATILITY_CUTS = [0.28, 0.39];
+export const VOLATILITY_LABELS = ['堅い', '普通', '荒れ'];
+
+/**
+ * 自信度（◎の勝率と2番手との差）と荒れ度。
+ *   upsetProb … 人気3頭（単勝オッズ順）以外が勝つ確率（モデル）。荒れ度の元になる値
+ *   volatility … 堅い／普通／荒れ（upsetProb を VOLATILITY_CUTS で区切る）
+ *   favWinProb … 1番人気が勝つ確率（モデル）
+ *   upset … 1〜5 の目盛り（画面の表示用）
+ */
 export function confidenceOf(rows) {
   const p = rows.map((r) => r.pWin).sort((a, b) => b - a);
   const top = p[0] ?? 0;
@@ -209,8 +220,15 @@ export function confidenceOf(rows) {
   const n = p.length;
   const entropy = -p.reduce((acc, v) => acc + (v > 0 ? v * Math.log(v) : 0), 0);
   const evenness = n > 1 ? entropy / Math.log(n) : 0;
-  const upset = clamp(1 + Math.floor((evenness - 0.7) / 0.05), 1, 5);
-  return { grade, top, second, evenness, upset };
+  // 人気順（市場の確率。同率は馬番）の上位3頭が勝たない確率
+  const byPop = [...rows].sort((a, b) => (b.marketProb ?? 0) - (a.marketProb ?? 0) || (a.entry?.number ?? 0) - (b.entry?.number ?? 0));
+  const top3 = byPop.slice(0, 3);
+  const upsetProb = n >= 4 ? clamp(1 - top3.reduce((acc, r) => acc + (r.pWin || 0), 0), 0, 1) : 0;
+  const favWinProb = byPop[0]?.pWin ?? 0;
+  const vi = upsetProb < VOLATILITY_CUTS[0] ? 0 : upsetProb < VOLATILITY_CUTS[1] ? 1 : 2;
+  const volatility = VOLATILITY_LABELS[vi];
+  const upset = upsetProb < 0.2 ? 1 : upsetProb < VOLATILITY_CUTS[0] ? 2 : upsetProb < VOLATILITY_CUTS[1] ? 3 : upsetProb < 0.5 ? 4 : 5;
+  return { grade, top, second, evenness, upset, upsetProb, favWinProb, volatility, volatilityIndex: vi };
 }
 
 /** レースを予想する */
