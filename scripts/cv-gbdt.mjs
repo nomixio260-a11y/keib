@@ -65,16 +65,18 @@ for (const cfg of configs) {
   const drop = new Set(toIdx([...envDrop, ...(cfg.drop || [])]));
   const only = toIdx([...envOnly, ...(cfg.only || [])]);
   const feats = [...Array(Fn).keys()].filter((f) => !(NO_MARKET && marketCols.has(f)) && !drop.has(f) && (!only.length || only.includes(f)));
-  const params = { ...DEFAULT_PARAMS, rounds: MAX_ROUNDS, patience: Number(process.env.PATIENCE || 100), ...cfg };
+  const params = { ...DEFAULT_PARAMS, rounds: MAX_ROUNDS, patience: Number(process.env.PATIENCE || 250), ...cfg };
   delete params.drop;
   delete params.only;
   delete params.beta;
   // beta：出発点を beta × log(市場確率) にする（人気薄の過大評価の補正を出発点に入れる試み）
   const beta = cfg.beta ?? 1;
   for (const s of splits) for (const d of [s.fit, s.valid]) for (let i = 0; i < d.n; i++) d.base[i] = d.base0[i] * beta;
+  // 木なし（出発点だけ）の判定 LL：beta の効果がどれだけかを分けて見る
+  const betaOnly = splits.reduce((a, s) => a + softmax(s.valid, Float64Array.from(s.valid.base), new Float64Array(s.valid.n)).ll, 0) / splits.length;
   const curves = splits.map((s, k) => trainBoost({ fit: s.fit, valids: [s.valid], thresholds: s.thresholds, feats, params, seed: 1000 + k }).curve);
-  // ラウンドごとの平均（早く止まった分割は最後の値を引き継ぐ）
-  const R = Math.max(...curves.map((c) => c.length));
+  // ラウンドごとの平均。早く止まった分割がある先は比べられないので、いちばん短い分割の長さまで
+  const R = Math.min(...curves.map((c) => c.length));
   let best = { round: 0, ll: baseLL, top1: baseTop1 };
   for (let r = 0; r < R; r++) {
     const ll = curves.reduce((a, c) => a + c[Math.min(r, c.length - 1)].valid[0], 0) / curves.length;
@@ -85,7 +87,7 @@ for (const cfg of configs) {
   const perFold = curves.map((c, k) => (c[Math.min(best.round - 1, c.length - 1)]?.valid[0] ?? NaN) - splits[k].base.ll);
   const row = { cfg: JSON.stringify(cfg), feats: feats.length, round: best.round, ll: best.ll, gain: best.ll - baseLL, top1: best.top1, perFold, sec: (Date.now() - t0) / 1000 };
   results.push(row);
-  log(`${row.cfg} 特徴量${feats.length}: 最良 ${best.round}本 LL ${best.ll.toFixed(4)}（出発点との差 ${(best.ll - baseLL >= 0 ? '+' : '') + (best.ll - baseLL).toFixed(4)}） top1 ${(best.top1 * 100).toFixed(1)}%（出発点 ${(baseTop1 * 100).toFixed(1)}%） 分割ごと ${perFold.map((v) => (v >= 0 ? '+' : '') + v.toFixed(4)).join(' ')} ${row.sec.toFixed(0)}秒`);
+  log(`${row.cfg} 特徴量${feats.length}: 最良 ${best.round}本 LL ${best.ll.toFixed(4)}（出発点との差 ${(best.ll - baseLL >= 0 ? '+' : '') + (best.ll - baseLL).toFixed(4)}） top1 ${(best.top1 * 100).toFixed(1)}%（出発点 ${(baseTop1 * 100).toFixed(1)}%） 分割ごと ${perFold.map((v) => (v >= 0 ? '+' : '') + v.toFixed(4)).join(' ')}${beta !== 1 ? ` 出発点だけ ${(betaOnly - baseLL >= 0 ? '+' : '') + (betaOnly - baseLL).toFixed(4)}` : ''} ${row.sec.toFixed(0)}秒`);
 }
 results.sort((a, b) => b.ll - a.ll);
 console.log('\n設定 | 特徴量 | 木の本数 | 判定LL | 出発点との差 | top1');
