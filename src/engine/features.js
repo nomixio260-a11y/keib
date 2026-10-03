@@ -85,7 +85,7 @@ export function careerFromRow(row) {
 
 export const FEATURE_NAMES = [
   // 市場（単勝オッズ）と複勝オッズ（別の投票の市場。単勝から見込まれる複勝確率とのずれ）
-  'logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap',
+  'logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap', 'placeRankDiff',
   // エンジンのファクター（生の値とレース内の相対値）
   'fSpeed', 'fSpeedRel', 'fForm', 'fFormRel', 'fClosing', 'fClosingRel', 'fJockey', 'fTrainer', 'fApt', 'fAptRel', 'fPace', 'fDraw', 'fCond',
   // 馬
@@ -147,6 +147,10 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
   const placeOk = pmids.every((v) => v != null);
   const invSum = placeOk ? pmids.reduce((a, v) => a + 1 / v, 0) : 0;
   const placeProb = rows.map((r, i) => (placeOk ? clamp(((1 / pmids[i]) / invSum) * kPlace, 1e-3, 0.999) : hv[i]));
+  // 単勝の人気順と複勝の人気順のずれ（複勝のほうが買われている馬はプラス）
+  const placeOrder = [...rows.keys()].sort((a, b) => placeProb[b] - placeProb[a] || byNumber(a, b));
+  const placeRank = new Array(n);
+  placeOrder.forEach((i, k) => (placeRank[i] = k / Math.max(1, n - 1)));
   const siBest4 = rows.map((r) => {
     const sis = r.an.filter((a) => a.si != null).map((a) => a.si);
     return sis.length ? Math.max(...sis) : null;
@@ -211,6 +215,7 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
     set('placeLog', Math.log(placeProb[i]));
     set('placeVsWin', placeOk ? Math.log(placeProb[i]) - Math.log(Math.max(hv[i], 1e-3)) : 0);
     set('placeSpread', placeOk ? Math.log(Math.max(e.placeMax, 1) / Math.max(e.placeMin, 1)) : 0);
+    set('placeRankDiff', placeOk ? popRank[i] - placeRank[i] : 0);
     set('fSpeed', r.raw.speed ?? m.speed - 8);
     set('fSpeedRel', (r.raw.speed ?? m.speed - 8) - m.speed);
     set('fForm', r.raw.form ?? 0.3);

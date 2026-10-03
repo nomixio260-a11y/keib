@@ -26,13 +26,15 @@ const run = (args, env = {}) => execFileSync('node', args, { cwd: ROOT, stdio: '
 const NO_BW = ['bodyWeight', 'bwDiff', 'bwKnown'];
 const NO_GAIN = ['jWinCourse', 'tWinSurf', 'pairWin', 'pairStarts', 'h2h', 'h2hN', 'handicap', 'qFav', 'qEntropy'];
 const LEAN = [...NO_BW, ...NO_GAIN];
-const BETA = Number(process.env.BETA || 1.1);
+// beta（出発点の倍率）は交差検証では 1.3〜1.45 が良かったが検証期間では 1.0 より悪く（対の差 −0.0025±0.0017）、採用しない
+const BETA = Number(process.env.BETA || 1);
+// 利得の大きい 16 項目に絞ると交差検証でも検証期間でも良くなった（77項目 → 16項目：検証期間で +0.0033±0.0018）
+const TOP16 = ['logq', 'logqGap', 'popRank', 'placeLog', 'placeVsWin', 'placeSpread', 'weightRel', 'jTop3', 'tWin', 'fFormRel', 'siBest4Rel', 'siLast4Rel', 'fSpeedRel', 'closingBest', 'daysSince', 'cEloRel'];
 const CANDIDATES = [
+  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
+  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
-  { depth: 2, lr: 0.04, lambda: 5, drop: LEAN, beta: BETA },
-  { depth: 3, lr: 0.02, lambda: 20, colsample: 0.5, subsample: 0.7, drop: LEAN, beta: BETA },
-  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: NO_BW, beta: BETA },
-  { depth: 1, lr: 0.05, lambda: 5, drop: LEAN, beta: BETA },
+  { depth: 1, lr: 0.03, lambda: 5, only: TOP16, beta: BETA },
 ];
 
 if (process.env.SKIP_DATASET !== '1') {

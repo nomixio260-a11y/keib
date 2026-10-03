@@ -113,6 +113,23 @@ for (const c of res.test.cal) if (c.n) log(`  予測 ${(c.lo * 100).toFixed(0)}�
   log(`検証（馬体重あり）：${seg(0)} ／（馬体重なし）：${seg(1)}`);
 }
 
+// 検証レースごとの勝ち馬の対数確率を書き出す（モデルどうしの対の比較用）：DUMP_TEST=ファイル
+if (process.env.DUMP_TEST) {
+  const perRace = [];
+  for (let ri = 0; ri < test.races.length; ri++) {
+    const a = test.start[ri];
+    const b = test.start[ri + 1];
+    let lp = null;
+    let best = a;
+    for (let i = a; i < b; i++) {
+      if (res.test.p[i] > res.test.p[best]) best = i;
+      if (test.y[i]) lp = Math.log(Math.max(res.test.p[i], 1e-12));
+    }
+    perRace.push({ id: test.races[ri][0].raceId, date: test.races[ri][0].date, lp, hit: test.y[best] ? 1 : 0 });
+  }
+  await writeFile(process.env.DUMP_TEST, JSON.stringify(perRace));
+  log(`検証のレースごとの対数確率を書き出しました：${process.env.DUMP_TEST}`);
+}
 const temps = fitTemps(fit, res.fit.m);
 log('着順ごとの温度', temps);
 const imp = importance(all, names);
