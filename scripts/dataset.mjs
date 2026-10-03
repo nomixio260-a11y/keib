@@ -13,18 +13,22 @@ import { tally, rates, CONDITION_KEYS } from '../src/data/rates.js';
 
 const START = process.env.DATASET_START || '2025-12-01';
 const EXTRA = process.env.DATASET_EXTRA === '1';
-const EXTRA_NAMES = ['hPopResid', 'hMktResid', 'hSurfStarts', 'hSurfTop3', 'hDistTop3', 'hCourseTop3', 'hGoingTop3', 'hPairStarts', 'hPairTop3', 'tDebutWin', 'tDebutStarts', 'jWin90', 'tWin90'];
+const EXTRA_NAMES = ['hPopResid', 'hMktResid', 'hSurfStarts', 'hSurfTop3', 'hDistTop3', 'hCourseTop3', 'hGoingTop3', 'hPairStarts', 'hPairTop3', 'tDebutWin', 'tDebutStarts', 'jWin90', 'tWin90', 'jMktResid', 'tMktResid'];
 // 実験用（DATASET_EXTRA=1）：馬と騎手・厩舎の履歴を深く見る特徴量
 //   hPopResid … 過去走で「人気より着順が良かった」度合い（(人気 − 着順)/頭数 の合計を走数+3で割る。市場に過小評価されがちな馬はプラス）
 //   hMktResid … 過去走の（勝ち − 市場の勝率）の合計を走数+3で割る（市場の期待より勝ってきた馬はプラス）
 //   hSurfStarts/hSurfTop3 … 今日の芝ダでの走数と3着内率（事前分布つき）、hDistTop3 … 同じ芝ダで距離 ±200m、hCourseTop3 … 同じ競馬場、
 //   hGoingTop3 … 今日と同じ馬場の区分（良・稍重／重・不良）、hPairStarts/hPairTop3 … 今日の騎手がこの馬に乗った回数と3着内率
 //   tDebutWin/tDebutStarts … 厩舎の初出走馬（デビュー戦）の勝率と頭数、jWin90/tWin90 … 騎手・厩舎の直近90日の勝率
+//   jMktResid/tMktResid … 騎手・厩舎の「市場の期待より勝ってきた」度合い（(勝ち − 市場の勝率) の合計を走数+30で割る。市場が割安に見積もる騎手・厩舎はプラス）
 const WINDOW_DAYS = 90;
 const dayNum = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
 const jWin = new Map(); // 騎手名 → [{ d, win, top3 }]（日付順）
 const tWinQ = new Map();
 const debutAcc = new Map(); // 厩舎 → { s, w }（初出走馬の走数・勝ち数。その日より前）
+const jResid = new Map(); // 騎手 → { s, r }（走数と (勝ち − 市場の勝率) の合計。その日より前）
+const tResid = new Map();
+const residOf = (map, key, k = 30) => { const a = key ? map.get(key) : null; return a ? a.r / (a.s + k) : 0; };
 const pushRun = (map, key, dn, r) => {
   if (!key) return;
   const q = map.get(key) || map.set(key, []).get(key);
@@ -134,7 +138,7 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
           const jw = windowRate(jWin, r.entry.jockey, dn, 60, jr.average.winRate, jr.average.top3Rate);
           const tw = windowRate(tWinQ, r.entry.trainer, dn, 60, tr.average.winRate, tr.average.top3Rate);
           const d = debutAcc.get(r.entry.trainer) || { s: 0, w: 0 };
-          return [...horseHistory(index, r.entry.horseId, rec.date, rec, r.entry.jockey), shrink(d.w, d.s, tr.average.winRate, 10), d.s, jw.winRate, tw.winRate];
+          return [...horseHistory(index, r.entry.horseId, rec.date, rec, r.entry.jockey), shrink(d.w, d.s, tr.average.winRate, 10), d.s, jw.winRate, tw.winRate, residOf(jResid, r.entry.jockey), residOf(tResid, r.entry.trainer)];
         });
       }
       fx.rows.forEach((r, i) => rows.push({ raceId: rec.id, date: rec.date, number: r.number, finish: finishOf[r.number] || 0, y: finishOf[r.number] === 1 ? 1 : 0, bwHidden: hideBw ? 1 : 0, x: [...Array.from(r.x, (v) => Math.round(v * 1e4) / 1e4), ...(extra ? extra[i].map((v) => Math.round(v * 1e4) / 1e4) : [])] }));
@@ -149,6 +153,16 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     if (EXTRA) {
       pushRun(jWin, r.jockey, dayNum(rec.date), r);
       pushRun(tWinQ, r.trainer, dayNum(rec.date), r);
+      // 騎手・厩舎の「市場の期待より勝ってきた」度合い
+      if (r.finish > 0 && r.odds > 1) {
+        const q = Math.min(0.9, 0.8 / r.odds);
+        for (const [map, key] of [[jResid, r.jockey], [tResid, r.trainer]]) {
+          if (!key) continue;
+          const a = map.get(key) || map.set(key, { s: 0, r: 0 }).get(key);
+          a.s++;
+          a.r += (r.finish === 1 ? 1 : 0) - q;
+        }
+      }
       // 初出走（この日より前の出走がない）馬の成績を厩舎ごとに
       if (r.horseId && r.trainer && !(index.byHorse.get(r.horseId) || []).some((h) => h.date < rec.date)) {
         const a = debutAcc.get(r.trainer) || debutAcc.set(r.trainer, { s: 0, w: 0 }).get(r.trainer);
