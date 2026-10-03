@@ -44,8 +44,10 @@ const ds = await readJson(process.env.DATASET_FILE || path.join(DATA_DIR, 'datas
 if (!ds) throw new Error('data/dataset.json がありません。先に node scripts/dataset.mjs');
 const names = ds.names;
 const Fn = names.length;
-const iLogq = names.indexOf('logq');
-const marketCols = new Set(['logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread'].map((k) => names.indexOf(k)));
+const BASE_FEATURE = process.env.BASE_FEATURE || 'logq';
+const iLogq = names.indexOf(BASE_FEATURE);
+if (iLogq < 0) throw new Error(`出発点の特徴量がありません: ${BASE_FEATURE}`);
+const marketCols = new Set(['logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap'].map((k) => names.indexOf(k)));
 const baseIndex = NO_MARKET ? -1 : iLogq;
 
 const racesAll = groupRaces(ds.rows);
@@ -119,7 +121,7 @@ log('利得の大きい特徴量', imp.slice(0, 15).map((r) => `${r.name}:${r.co
 if (!process.argv.includes('--dry')) {
   const model = {
     names,
-    base: NO_MARKET ? 'none' : 'logq',
+    base: NO_MARKET ? 'none' : BASE_FEATURE,
     baseScale: BETA,
     calib: calib ? { edges: CALIB_EDGES, logRatio: calib } : null,
     trees: compactTrees(all),

@@ -30,6 +30,29 @@ export function harvilleTopK(q, k = 3) {
   return out;
 }
 
+/**
+ * Shin（1993）の市場確率：オッズの逆数 π_i（合計 Π > 1）から、人気薄が過大評価される分を取り除いた確率。
+ *   p_i = ( sqrt(z^2 + 4(1-z) π_i^2 / Π) - z ) / (2(1-z))、Σp_i = 1 になる z を二分法で求める。
+ * 単純な正規化（1/オッズ ÷ 合計）より人気薄が低く、人気馬が高くなる
+ */
+export function shinProbs(odds) {
+  const pi = odds.map((o) => (o > 0 ? 1 / o : 0));
+  const Pi = pi.reduce((a, b) => a + b, 0);
+  if (!(Pi > 0) || pi.some((v) => !(v > 0))) return null;
+  const probs = (z) => pi.map((v) => (Math.sqrt(z * z + (4 * (1 - z) * v * v) / Pi) - z) / (2 * (1 - z)));
+  let lo = 0;
+  let hi = 0.5;
+  for (let it = 0; it < 60; it++) {
+    const mid = (lo + hi) / 2;
+    const s = probs(mid).reduce((a, b) => a + b, 0);
+    if (s > 1) lo = mid;
+    else hi = mid;
+  }
+  const p = probs((lo + hi) / 2);
+  const s = p.reduce((a, b) => a + b, 0);
+  return p.map((v) => v / s);
+}
+
 const fin01 = (finish, field) => (finish > 0 ? 1 - (Math.min(finish, field) - 1) / Math.max(1, field - 1) : 0);
 
 /**
@@ -62,7 +85,7 @@ export function careerFromRow(row) {
 
 export const FEATURE_NAMES = [
   // 市場（単勝オッズ）と複勝オッズ（別の投票の市場。単勝から見込まれる複勝確率とのずれ）
-  'logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread',
+  'logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap',
   // エンジンのファクター（生の値とレース内の相対値）
   'fSpeed', 'fSpeedRel', 'fForm', 'fFormRel', 'fClosing', 'fClosingRel', 'fJockey', 'fTrainer', 'fApt', 'fAptRel', 'fPace', 'fDraw', 'fCond',
   // 馬
@@ -108,6 +131,9 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
   const wMean = weights.length ? mean(weights) : 56;
   const logqs = rows.map((r) => Math.log(Math.max(r.marketProb, 1e-4)));
   const logqMax = Math.max(...logqs);
+  const shin = shinProbs(rows.map((r) => r.entry.odds));
+  const logqShin = shin ? shin.map((p) => Math.log(Math.max(p, 1e-4))) : logqs;
+  const logqShinMax = Math.max(...logqShin);
   // 同順位は馬番で決める（行の並び順に情報が混ざらないように）
   const byNumber = (a, b) => (rows[a].entry.number || 0) - (rows[b].entry.number || 0);
   const popOrder = [...rows.keys()].sort((a, b) => logqs[b] - logqs[a] || byNumber(a, b));
@@ -178,6 +204,8 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
     };
     set('logq', logqs[i]);
     set('logqGap', logqs[i] - logqMax);
+    set('logqShin', logqShin[i]);
+    set('logqShinGap', logqShin[i] - logqShinMax);
     set('popRank', popRank[i]);
     set('placeKnown', placeOk ? 1 : 0);
     set('placeLog', Math.log(placeProb[i]));

@@ -7,11 +7,11 @@ import { raceFeatures, FEATURE_NAMES } from './features.js';
 export const GBDT_READY = !!(GBDT_MODEL?.trees?.length && GBDT_MODEL.names?.length === FEATURE_NAMES.length && GBDT_MODEL.names.every((k, i) => k === FEATURE_NAMES[i]));
 export const GBDT_INFO = GBDT_MODEL ? { trainedOn: GBDT_MODEL.trainedOn, test: GBDT_MODEL.test, params: GBDT_MODEL.params } : null;
 
-const iLogq = FEATURE_NAMES.indexOf('logq');
+const iLogq = FEATURE_NAMES.indexOf(GBDT_MODEL?.base && GBDT_MODEL.base !== 'none' ? GBDT_MODEL.base : 'logq');
 
 /** 出発点：倍率つきの log(市場確率) に、市場確率の帯ごとの補正（学習時に推定）を足す */
 export function baseOf(logq, model = GBDT_MODEL) {
-  if (model.base !== 'logq') return 0;
+  if (!model.base || model.base === 'none') return 0;
   let v = (model.baseScale || 1) * logq;
   const c = model.calib;
   if (c?.edges && c.logRatio) {

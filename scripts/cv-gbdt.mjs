@@ -22,8 +22,11 @@ const ds = await readJson(process.env.DATASET_FILE || path.join(DATA_DIR, 'datas
 if (!ds) throw new Error('data/dataset.json がありません。先に node scripts/dataset.mjs');
 const names = ds.names;
 const Fn = names.length;
-const iLogq = names.indexOf('logq');
-const marketCols = new Set(['logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread'].map((k) => names.indexOf(k)));
+const BASE_FEATURE = process.env.BASE_FEATURE || 'logq';
+const iLogq = names.indexOf(BASE_FEATURE);
+if (iLogq < 0) throw new Error(`出発点の特徴量がありません: ${BASE_FEATURE}`);
+log(`出発点の特徴量：${BASE_FEATURE}`);
+const marketCols = new Set(['logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap'].map((k) => names.indexOf(k)));
 
 const trainRaces = groupRaces(ds.rows).filter((rs) => rs[0].date < TEST_START);
 const folds = dateFolds(trainRaces, FOLDS);
