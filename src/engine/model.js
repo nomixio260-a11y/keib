@@ -230,7 +230,8 @@ export function predictRace(race, settings = {}) {
   // シミュレーションは着順の分布の表示と、買い目の組み合わせ全体の統計（どれかが当たる確率など）にだけ使う
   const scores = rows.map((r) => r.score);
   const exact = exactPL(scores, { temps });
-  const sim = simulatePL(scores, { sims, seed, temps });
+  // sims=0：シミュレーションを省く（勝率・券種の確率は厳密計算なので一覧・買い目表・検証はこれで十分。4着以下の分布だけ出ない）
+  const sim = sims > 0 ? simulatePL(scores, { sims, seed, temps }) : { n, sims: 0, posDist: null, win: exact.win, top2: exact.top2, top3: exact.top3, samples: null };
   const combos = exact.combos;
   const market = marketModel(rows.map((r) => r.marketProb), sims, seed);
   const placeCount = placeCountOf(n);
@@ -246,7 +247,7 @@ export function predictRace(race, settings = {}) {
     r.pWin = exact.win[i];
     r.pTop2 = exact.top2[i];
     r.pTop3 = exact.top3[i];
-    r.posDist = Array.from(sim.posDist.subarray(i * n, i * n + n));
+    r.posDist = sim.posDist ? Array.from(sim.posDist.subarray(i * n, i * n + n)) : new Array(n).fill(0);
     // 1〜3着は厳密値に合わせる（4着以下はシミュレーションの値）
     r.posDist[0] = exact.win[i];
     if (n > 1) r.posDist[1] = exact.top2[i] - exact.win[i];

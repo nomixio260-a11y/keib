@@ -172,7 +172,7 @@ function detailPanel(entry, row, pred, ctx) {
         ${contribBars(row, factors, maxAbs)}
       </div>
       <div class="d-block">
-        <h4 class="d-h">着順の分布 <small>${pred.sim.sims.toLocaleString('ja-JP')}回のシミュレーション</small></h4>
+        <h4 class="d-h">着順の分布 <small>1〜3着は厳密計算・4着以下は${pred.sim.sims.toLocaleString('ja-JP')}回のシミュレーション</small></h4>
         ${positionStrip(row.posDist)}
         <p class="d-dist-note">1着 <b class="num">${pct(row.posDist[0])}</b>・2着 <b class="num">${pct(row.posDist[1] ?? 0)}</b>・3着 <b class="num">${pct(row.posDist[2] ?? 0)}</b></p>
         ${editBox}
@@ -385,7 +385,7 @@ export function renderWeightsPanel(ctx) {
     <div class="field-row">
       <label class="field" for="sims" title="勝率・複勝率・各買い目の確率は厳密に計算します。回数は着順の分布の表示と、買い目全体の統計（どれかが当たる確率など）にだけ影響します">シミュレーション回数 <small>（着順分布・買い目全体の統計用）</small></label>
       <select id="sims" data-sims>
-        ${[5000, 20000, 50000].map((n) => `<option value="${n}" ${state.sims === n ? 'selected' : ''}>${n.toLocaleString('ja-JP')}回</option>`).join('')}
+        ${[20000, 50000, 100000].map((n) => `<option value="${n}" ${state.sims === n ? 'selected' : ''}>${n.toLocaleString('ja-JP')}回</option>`).join('')}
       </select>
     </div>
     <div class="panel-actions"><button type="button" class="ghost-btn" data-action="reset-weights">既定に戻す</button></div>

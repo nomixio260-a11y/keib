@@ -74,7 +74,7 @@ const state = {
   weights: { ...DEFAULT_WEIGHTS, ...(sameCal ? saved.weights || {} : {}) },
   preset: sameCal && (PRESETS[saved.preset] || saved.preset === 'custom') ? saved.preset : DEFAULT_PRESET,
   noise: (sameCal && Number(saved.noise)) || DEFAULT_NOISE,
-  sims: [5000, 20000, 50000].includes(saved.sims) ? saved.sims : 20000,
+  sims: [20000, 50000, 100000].includes(saved.sims) ? saved.sims : 50000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
   strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
   betTypes: sameCal && Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...DEFAULT_TYPES],
@@ -291,11 +291,13 @@ const raceSig = (race) => `${race.id}|${race.oddsAt || ''}|${race.status || ''}|
 const predCache = new Map();
 const settingsKey = () => JSON.stringify([state.preset, state.weights, state.noise, state.sims]);
 
-function getPrediction(race) {
-  const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}`;
+/** light=true：一覧・買い目表用（厳密計算だけでシミュレーションを省く。速い） */
+function getPrediction(race, light = false) {
+  const sims = light ? 0 : state.sims;
+  const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}|${sims}`;
   const hit = predCache.get(key);
   if (hit) return hit;
-  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims: state.sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml });
+  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml });
   predCache.set(key, pred);
   if (predCache.size > 60) predCache.delete(predCache.keys().next().value);
   return pred;
@@ -329,7 +331,7 @@ function scheduleQuickPicks() {
     const t0 = performance.now();
     while (queue.length && performance.now() - t0 < 24) {
       const race = effectiveRace(queue.shift());
-      quickPicks.set(race.id, pickOf(getPrediction(race), race));
+      quickPicks.set(race.id, pickOf(getPrediction(race, true), race));
     }
     if (state.tab === 'predict') renderRailOnly();
     if (queue.length) quickTimer = setTimeout(step, 16);
@@ -429,7 +431,7 @@ function computeCurrent() {
 
 const sheetCtx = () => ({
   ...ctx(),
-  predFor: (race) => getPrediction(effectiveRace(race)),
+  predFor: (race) => getPrediction(effectiveRace(race), true),
   recFor: (pred) => recommendBets(pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend }),
 });
 
@@ -566,7 +568,7 @@ async function runRecentBacktest() {
       races,
       { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml },
       {
-        sims: 4000,
+        sims: 0,
         onProgress: (p) => {
           bt.recent.progress = p;
           updateProgress();
