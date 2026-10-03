@@ -45,7 +45,8 @@ export function statsForEngine(records, variantRecords = records) {
   const s = computeStats(records);
   // 条件つきの率（騎手×競馬場・厩舎×芝ダ・騎手×厩舎・血統）は採用した特徴量では使わないので、
   // 既定では統計に入れない（realStats.js が 500 KB 近く増える）。実験で使うときは KEIB_COND_STATS=1
-  const cond = process.env.KEIB_COND_STATS === '1' ? conditionRates(records, { horseInfo: HORSE_INFO }) : {};
+  const condAll = HORSE_INFO?.size || process.env.KEIB_COND_STATS === '1' ? conditionRates(records, { horseInfo: HORSE_INFO }) : {};
+  const cond = process.env.KEIB_COND_STATS === '1' ? condAll : { sireSurface: condAll.sireSurface || {}, damSireSurface: condAll.damSireSurface || {} };
   const jr = jockeyRates(s.jockeys);
   const tr = jockeyRates(s.trainers);
   // 基準タイムの全体式 a × (d/1200)^b を芝・ダート別に当てはめ

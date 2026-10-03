@@ -30,8 +30,11 @@ const LEAN = [...NO_BW, ...NO_GAIN];
 const BETA = Number(process.env.BETA || 1);
 // 利得の大きい 16 項目に絞ると交差検証でも検証期間でも良くなった（77項目 → 16項目：検証期間で +0.0033±0.0018）
 const TOP16 = ['logq', 'logqGap', 'popRank', 'placeLog', 'placeVsWin', 'placeSpread', 'weightRel', 'jTop3', 'tWin', 'fFormRel', 'siBest4Rel', 'siLast4Rel', 'fSpeedRel', 'closingBest', 'daysSince', 'cEloRel'];
+// 血統（競走馬ページから集めた父・母の父の芝ダ別成績）：半分の馬の収集時点で +0.0013（交差検証）
+const PEDIGREE = ['sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'damSireWinSurf'];
 const CANDIDATES = [
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
+  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: [...TOP16, ...PEDIGREE], beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
   { depth: 1, lr: 0.03, lambda: 5, only: TOP16, beta: BETA },
