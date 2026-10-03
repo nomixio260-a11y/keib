@@ -53,7 +53,8 @@ export function parseJpDate(s) {
 
 /** CNAME の中にあるレース番号・日付を取り出す（出馬表・結果・オッズ共通） */
 export function raceKeyFromCname(cname) {
-  const m = String(cname).match(/pw(?:01dde01|01sde10|151ou(?:S3|10)|01dpr01)(\d{2})(\d{4})(\d{2})(\d{2})(\d{2})(\d{8})/);
+  // pw01sde10 過去の結果ページ、pw01sde01 当日の結果ページ（レース確定後、開催ページに出る）
+  const m = String(cname).match(/pw(?:01dde01|01sde10|01sde01|151ou(?:S3|10)|01dpr01)(\d{2})(\d{4})(\d{2})(\d{2})(\d{2})(\d{8})/);
   if (!m) return null;
   const [, courseCode, year, kai, day, race, ymd] = m;
   return {
@@ -70,7 +71,7 @@ export function raceKeyFromCname(cname) {
 
 /** 開催（○回○○○日）の CNAME */
 export function meetingKeyFromCname(cname) {
-  const m = String(cname).match(/pw01(?:drl00|srl10)(\d{2})(\d{4})(\d{2})(\d{2})(\d{8})/);
+  const m = String(cname).match(/pw01(?:drl00|srl00|srl10)(\d{2})(\d{4})(\d{2})(\d{2})(\d{8})/);
   if (!m) return null;
   const [, courseCode, year, kai, day, ymd] = m;
   return {
@@ -358,7 +359,8 @@ export function parseOdds(html) {
 export function parseMeetingLinks(html) {
   const out = [];
   const seen = new Set();
-  for (const m of String(html).matchAll(/(pw01(?:drl00|srl10)\d{2}\d{4}\d{2}\d{2}\d{8}\/[0-9A-F]{2})/g)) {
+  // pw01drl00 出馬表の開催、pw01srl00 今週（当日）のレース結果の開催、pw01srl10 過去のレース結果の開催
+  for (const m of String(html).matchAll(/(pw01(?:drl00|srl00|srl10)\d{2}\d{4}\d{2}\d{2}\d{8}\/[0-9A-F]{2})/g)) {
     if (seen.has(m[1])) continue;
     seen.add(m[1]);
     const key = meetingKeyFromCname(m[1]);
@@ -378,7 +380,8 @@ export function parseRaceLinks(html) {
     races.set(key.raceId, r);
   };
   for (const m of String(html).matchAll(/(pw01dde01\d{20}\/[0-9A-F]{2})/g)) add(m[1], 'cardCname');
-  for (const m of String(html).matchAll(/(pw01sde10\d{20}\/[0-9A-F]{2})/g)) add(m[1], 'resultCname');
+  // pw01sde10 過去の結果、pw01sde01 当日の結果（出馬表の開催ページにレース確定後に出る）
+  for (const m of String(html).matchAll(/(pw01sde(?:10|01)\d{20}\/[0-9A-F]{2})/g)) add(m[1], 'resultCname');
   for (const m of String(html).matchAll(/(pw151ou(?:S3|10)\d{20}Z\/[0-9A-F]{2})/g)) add(m[1], 'oddsCname');
   return [...races.values()].sort((a, b) => a.raceNo - b.raceNo);
 }

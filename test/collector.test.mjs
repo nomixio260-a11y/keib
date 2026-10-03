@@ -303,3 +303,17 @@ test('競走馬情報ページから血統・生年月日・出走履歴を読�
   assert.equal(info.runs[0].finish, 6);
   assert.equal(info.runs[0].time, 73);
 });
+
+test('当日のレース結果の開催（pw01srl00）と結果ページ（pw01sde01）のリンクも拾う', async () => {
+  const { parseMeetingLinks, parseRaceLinks } = await import('../src/collector/jra.js');
+  const list = `<a onclick="return doAction('/JRADB/accessS.html', 'pw01srl00082026040120261003/86');">4回東京1日</a>
+    <a onclick="return doAction('/JRADB/accessS.html', 'pw01srl10062026040920260927/11');">4回中山9日</a>
+    <a onclick="return doAction('/JRADB/accessD.html', 'pw01drl00052026040120261003/EC');">4回東京1日</a>`;
+  const meetings = parseMeetingLinks(list);
+  assert.deepEqual(meetings.map((m) => [m.type, m.date, m.course]), [['result', '2026-10-03', '京都'], ['result', '2026-09-27', '中山'], ['card', '2026-10-03', '東京']]);
+  const races = parseRaceLinks(`doAction('/JRADB/accessD.html', 'pw01dde0105202604010120261003/AA'); doAction('/JRADB/accessS.html', 'pw01sde0105202604010120261003/BB'); doAction('/JRADB/accessO.html', 'pw151ouS305202604010120261003Z/CC');`);
+  assert.equal(races.length, 1);
+  assert.equal(races[0].resultCname, 'pw01sde0105202604010120261003/BB');
+  assert.equal(races[0].cardCname, 'pw01dde0105202604010120261003/AA');
+  assert.equal(races[0].oddsCname, 'pw151ouS305202604010120261003Z/CC');
+});
