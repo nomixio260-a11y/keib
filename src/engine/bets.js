@@ -7,6 +7,15 @@ export const STRATEGIES = {
   hit: { label: '的中重視', desc: '当たりやすさを優先。どれが当たっても払戻がそろうように配分します。', minEv: 0.8, maxTickets: 6, alloc: 'equal' },
   balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly' },
   value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly' },
+  careful: {
+    label: '控えめ',
+    desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を約4分の1に減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 94% 前後）。',
+    minEv: 0.8,
+    maxTickets: 2,
+    alloc: 'equal',
+    grades: ['S'],
+    onlyTypes: ['win', 'place'],
+  },
 };
 
 // 戦略ごとの最低的中確率（これ未満の買い目は候補にしない）
@@ -14,12 +23,14 @@ const MIN_P = {
   hit: { win: 0.22, place: 0.45, quinella: 0.07, wide: 0.18, exacta: 0.04, trio: 0.035, trifecta: 0.01 },
   balance: { win: 0.08, place: 0.22, quinella: 0.025, wide: 0.07, exacta: 0.013, trio: 0.01, trifecta: 0.0025 },
   value: { win: 0.03, place: 0.1, quinella: 0.008, wide: 0.025, exacta: 0.004, trio: 0.003, trifecta: 0.0008 },
+  careful: { win: 0.22, place: 0.45, quinella: 1, wide: 1, exacta: 1, trio: 1, trifecta: 1 },
 };
 
 const SCORE = {
   hit: (c) => c.p * Math.min(c.ev, 1.3),
   balance: (c) => c.p * (c.ev - 0.85),
   value: (c) => (c.ev - 1) * Math.sqrt(c.p),
+  careful: (c) => c.p * Math.min(c.ev, 1.3),
 };
 
 /** ワイドは8頭以上のレースのみ扱う（複勝と同じく3着までが対象になる頭数） */
@@ -242,6 +253,9 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   // オッズが出るまでは期待値を計算できない
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
+  // 自信度の条件（控えめ）：条件に合わないレースは見送り
+  if (st.grades && !st.grades.includes(pred.confidence?.grade)) return { strategy, budget, tickets: [], candidates: 0, skipped: true, stats: evaluateTickets([], pred) };
+  if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
   const cands = buildCandidates(pred, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);

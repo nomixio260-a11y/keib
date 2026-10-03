@@ -53,6 +53,9 @@ export function statusBadge(race, now, { withTime = false } = {}) {
   if (withTime && (st === 'open' || st === 'closing')) {
     const t = startMs(race);
     if (t) extra = `<span class="sb-until">${esc(untilText(t - now))}</span>`;
+  } else if (withTime && st === 'live') {
+    const t = startMs(race);
+    if (t) extra = `<span class="sb-until">発走から${Math.max(0, Math.floor((now - t) / 60000))}分・結果は数分後に反映</span>`;
   }
   return `<span class="status-badge sb-${st}">${esc(label)}${extra}</span>`;
 }
@@ -164,7 +167,11 @@ export function renderRail(ctx) {
         }
       </button>`
     : '';
-  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>${record}
+  const sheetBtn =
+    state.day !== 'import' && races.length
+      ? `<button type="button" class="sheet-btn${ctx.view === 'sheet' ? ' is-on' : ''}" data-action="show-sheet" aria-pressed="${ctx.view === 'sheet'}"><span class="sheet-btn-main">この日の買い目表</span><small>全レースの印・買い目・結果を1枚で</small></button>`
+      : '';
+  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>${sheetBtn}${record}
     ${venueBtns}
     ${state.day !== 'import' ? renderDayScore(allDay, quickPicks) : ''}
     <ol class="race-list">${items}</ol>`;

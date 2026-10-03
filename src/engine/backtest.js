@@ -73,6 +73,26 @@ export const BT_STRATEGIES = [
     build: (pred, m, settings) => recommendBets(pred, { budget: 1000, blend: settings?.blend }).tickets,
   },
   {
+    key: 'aiCareful',
+    label: '控えめ（自信度Sの単複だけ・1R千円、ほかは見送り）',
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'careful', blend: settings?.blend }).tickets,
+  },
+  {
+    key: 'placeS',
+    label: '複勝 ◎（自信度Sのレースだけ）',
+    build: (pred, m) => (pred.confidence?.grade === 'S' && pred.placeCount ? [{ type: 'place', idx: [m['◎']], stake: 100 }] : []),
+  },
+  {
+    key: 'wideValue',
+    label: 'ワイド 期待値1.0以上（実オッズがあるレース）',
+    build: (pred, m, settings) =>
+      pred.race?.exoticOdds
+        ? buildCandidates(pred, ['wide'], settings?.blend ?? 0.5)
+            .filter((c) => !c.estimated && c.ev >= 1.0 && c.pEv >= 0.1)
+            .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
+        : [],
+  },
+  {
     key: 'fav',
     label: '1番人気の単勝（比較用）',
     baseline: true,

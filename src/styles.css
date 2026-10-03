@@ -3344,3 +3344,40 @@ table.bt-table {
     scroll-behavior: auto !important;
   }
 }
+
+
+/* ---- 買い目表 ---- */
+.sheet-btn { display: block; width: 100%; margin: 10px 0 6px; padding: 10px 12px; border: 1px solid var(--line, #d8dee4); border-radius: 12px; background: var(--panel, #fff); text-align: left; cursor: pointer; }
+.sheet-btn .sheet-btn-main { display: block; font-weight: 700; font-size: 14px; }
+.sheet-btn small { color: var(--muted, #667085); }
+.sheet-btn:hover { border-color: var(--accent, #2f7d4f); }
+.sheet-btn.is-on { background: var(--accent, #2f7d4f); border-color: var(--accent, #2f7d4f); color: #fff; }
+.sheet-btn.is-on small { color: rgba(255, 255, 255, 0.85); }
+.bet-sheet .sheet-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 4px 0 10px; }
+.bet-sheet .sheet-controls .quick { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bet-sheet .sheet-controls .panel-note { flex-basis: 100%; margin: 0; }
+.bet-sheet .sheet-sum { margin-bottom: 8px; }
+.bet-sheet .sheet-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bet-sheet .sheet-table th { text-align: left; font-weight: 600; color: var(--muted, #667085); padding: 6px; border-bottom: 2px solid var(--line, #d8dee4); white-space: nowrap; }
+.bet-sheet .sheet-table td { padding: 8px 6px; border-bottom: 1px solid var(--line, #d8dee4); vertical-align: top; }
+.bet-sheet tr.sr-result td { background: rgba(127, 127, 127, 0.06); }
+.bet-sheet tr.sr-closing td { background: rgba(230, 160, 0, 0.08); }
+.bet-sheet .sheet-time { white-space: nowrap; }
+.bet-sheet .sheet-st { color: var(--muted, #667085); white-space: normal; max-width: 9em; display: inline-block; }
+.bet-sheet .sheet-race .link-btn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.bet-sheet .sheet-race .link-btn:hover { text-decoration: underline; }
+.bet-sheet .sheet-mark { white-space: nowrap; margin: 2px 0; }
+.bet-sheet .sheet-mark .sheet-horse { font-weight: 600; }
+.bet-sheet .sheet-bet { white-space: nowrap; margin: 2px 0; }
+.bet-sheet .sheet-bet-total { color: var(--muted, #667085); }
+.bet-sheet .sheet-fin { white-space: nowrap; }
+.bet-sheet .sheet-fin small { color: var(--muted, #667085); margin-right: 4px; }
+.bet-sheet .sheet-settle { margin-top: 4px; font-weight: 600; }
+.bet-sheet .tx-hit { color: var(--good, #1f8a4c); }
+.bet-sheet .tx-miss { color: var(--muted, #667085); font-weight: 500; }
+@media print {
+  header, .rail, .race-side, .footer, .sheet-controls, .panel-actions, .tabs { display: none !important; }
+  .predict-layout { display: block !important; }
+  .bet-sheet { font-size: 11px; }
+  .bet-sheet .sheet-table td, .bet-sheet .sheet-table th { padding: 4px; }
+}

@@ -6,6 +6,7 @@
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
 import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
+import { renderBetSheet, sheetText } from './ui/betSheet.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
 import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
@@ -303,6 +304,8 @@ function getPrediction(race) {
 const quickPicks = new Map();
 let quickKey = '';
 let quickTimer = null;
+// 予想画面の表示：'race'（レースごと）か 'sheet'（その日の買い目表）
+let view = 'race';
 
 function pickOf(pred, race) {
   if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
@@ -339,6 +342,7 @@ function scheduleQuickPicks() {
 
 const ctx = () => ({
   state,
+  view,
   days: days(),
   today: today(),
   now: Date.now(),
@@ -423,11 +427,25 @@ function computeCurrent() {
   return { pred, rec };
 }
 
+const sheetCtx = () => ({
+  ...ctx(),
+  predFor: (race) => getPrediction(effectiveRace(race)),
+  recFor: (pred) => recommendBets(pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend }),
+});
+
 function renderPredict() {
   current = computeCurrent() || { pred: null, rec: null };
   renderTopStatus();
   renderRailOnly();
   const main = $('#race-main');
+  if (view === 'sheet' && state.day !== 'import') {
+    setHTML(main, renderBetSheet(sheetCtx()));
+    setHTML($('#slot-pace'), '');
+    setHTML($('#slot-bets'), '');
+    setHTML($('#slot-weights'), data.loadState === 'ok' ? renderWeightsPanel(ctx()) : '');
+    scheduleQuickPicks();
+    return;
+  }
   if (current.jump) {
     setHTML(main, renderJumpRace(current.jump, ctx()));
     setHTML($('#slot-pace'), '');
@@ -453,6 +471,7 @@ function renderPredict() {
 
 /** 重みを動かしている最中・データ更新時：スライダーは作り直さずに、予想だけ更新 */
 function refreshPrediction() {
+  if (view === 'sheet') return renderPredict();
   current = computeCurrent() || current;
   if (!current.pred || current.pred.empty || current.jump) return renderPredict();
   const main = $('#race-main');
@@ -466,6 +485,7 @@ function refreshPrediction() {
 }
 
 function refreshBets() {
+  if (view === 'sheet') return renderPredict();
   if (!current.pred || current.pred.empty) return;
   current.rec = recommendBets(current.pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
   setHTML($('#slot-bets'), renderBetsPanel(current.pred, current.rec, ctx()));
@@ -752,8 +772,31 @@ function onClick(e) {
     if (tabBtn.dataset.tab !== 'predict') window.scrollTo({ top: 0 });
     return;
   }
+  const early = t.closest('[data-action]')?.dataset.action;
+  if (early === 'show-sheet') {
+    view = 'sheet';
+    renderPredict();
+    window.scrollTo({ top: 0 });
+    return;
+  }
+  if (early === 'show-race') {
+    view = 'race';
+    renderPredict();
+    return;
+  }
+  if (early === 'copy-sheet') {
+    copyText(sheetText(sheetCtx()), $('.bet-sheet .copy-status'), $('#copy-fallback-sheet'));
+    return;
+  }
+  if (early === 'print-sheet') {
+    window.print();
+    return;
+  }
   const raceBtn = t.closest('[data-race]');
-  if (raceBtn) return selectRace(raceBtn.dataset.race);
+  if (raceBtn) {
+    view = 'race';
+    return selectRace(raceBtn.dataset.race);
+  }
   const dayBtn = t.closest('[data-day]');
   if (dayBtn) return selectDay(dayBtn.dataset.day);
   const venueBtn = t.closest('[data-venue]');
