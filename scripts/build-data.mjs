@@ -9,6 +9,7 @@
 //   最後に「NEXT=秒」を出す：次の取り込みまでの目安（発走が近いと 300、前日発売中は 1200、それ以外は 3600。Race day ワークフローが読む）
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
 //             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
+//             --history <dir>（結果の記録を読む場所。既定は data/history。GitHub Actions では data ブランチの history/）
 //
 // 集めたデータは個人の分析用です。不特定多数が見られる場所には置かないでください。
 
@@ -36,7 +37,7 @@ const today = jstParts().date;
 const bundle = emptyBundle();
 
 // 1) 収集済みの過去の結果から、直近の開催日
-const records = await loadHistory();
+const records = await loadHistory(opt('history', null) ? path.resolve(opt('history', null)) : undefined);
 if (records.length) {
   const dates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort().slice(-keepPast);
   addPastDaysFromHistory(bundle, records, indexHistory(records), dates);
@@ -83,8 +84,8 @@ if (!flag('offline')) {
   const recDir = opt('records', null);
   const { cards, results } = await refreshLive(client, bundle, {
     log,
-    onRecord: records.length ? (rec) => saveRecord(rec) : recDir ? (rec) => saveRecord(rec, path.resolve(recDir)) : null,
-    onOdds: records.length ? (race) => appendOddsSnapshot(race) : snapDir ? (race) => appendOddsSnapshot(race, path.resolve(snapDir)) : null,
+    onRecord: recDir ? (rec) => saveRecord(rec, path.resolve(recDir)) : records.length ? (rec) => saveRecord(rec) : null,
+    onOdds: snapDir ? (race) => appendOddsSnapshot(race, path.resolve(snapDir)) : records.length ? (race) => appendOddsSnapshot(race) : null,
   });
   log(`JRA：出馬表 ${cards}件・結果 ${results}件（通信 ${client.stats().requests}回）`);
 } else bundle.generatedAt = new Date().toISOString();
@@ -92,9 +93,10 @@ if (!flag('offline')) {
 pruneBundle(bundle, { keepPast, today });
 attachDayVariants(bundle, records, REAL_STATS, { today });
 // 機械学習の特徴量に使う馬ごとの通算要約。データベースがあればそのレースより前の出走から、なければ src/data/horses.json
+// （記録が少ないとき＝GitHub Actions の data ブランチの history/ だけのときは、通算の要約にならないので horses.json を使う）
 {
   const snaps = await loadHorseSnapshots();
-  const index = records.length ? indexHistory(records) : null;
+  const index = records.length >= 1000 ? indexHistory(records) : null;
   const n = attachCareer(bundle.days.flatMap((d) => d.races), index, { stats: REAL_STATS, fallback: snaps.get });
   log(`通算要約を付けた馬：${n}（${index ? 'データベース' : `horses.json ${snaps.asOf || '—'} 時点`}）`);
 }
