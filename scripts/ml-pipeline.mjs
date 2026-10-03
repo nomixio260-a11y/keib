@@ -17,7 +17,7 @@ import { ROOT } from '../src/collector/store.js';
 
 const TEST_START = process.env.TEST_START || '2026-07-01';
 const DATASET_START = process.env.DATASET_START || '2024-12-01';
-const BAGS = process.env.BAGS || '5';
+const BAGS = process.env.BAGS || '1'; // 乱数の違うモデルの平均は効果なし（3個・10個とも ±0.0003 以内）なので既定は 1
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const run = (args, env = {}) => execFileSync('node', args, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, TEST_START, ...env } });
 
