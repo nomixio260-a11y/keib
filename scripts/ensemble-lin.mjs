@@ -25,7 +25,8 @@ const Fn = names.length;
 const ix = (k) => { const i = names.indexOf(k); if (i < 0) throw new Error(`特徴量がありません: ${k}`); return i; };
 const iLogq = ix('logq');
 // 線形モデルに使う列：馬体重（発走1時間前まで出ない）以外の全部
-const linCols = [...Array(Fn).keys()].filter((f) => !['bodyWeight', 'bwDiff', 'bwKnown'].includes(names[f]));
+const linOnly = (process.env.LIN_ONLY || '').split(',').filter(Boolean);
+const linCols = [...Array(Fn).keys()].filter((f) => !['bodyWeight', 'bwDiff', 'bwKnown'].includes(names[f]) && (!linOnly.length || linOnly.includes(names[f])));
 const racesAll = groupRaces(ds.rows);
 const trainRaces = racesAll.filter((rs) => rs[0].date < TEST_START && rs.length >= 2);
 const testRaces = racesAll.filter((rs) => rs[0].date >= TEST_START && rs.length >= 2);
