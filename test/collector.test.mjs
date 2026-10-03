@@ -275,3 +275,31 @@ test('馬連・ワイド・3連複のオッズページ', () => {
   assert.equal(trio.type, 'trio');
   assert.deepEqual(trio.odds, { '1-2-3': 940, '1-2-4': 550.1, '2-3-4': 3382.1 });
 });
+
+test('競走馬情報ページから血統・生年月日・出走履歴を読む', async () => {
+  const { parseHorsePage } = await import('../src/collector/jra.js');
+  const html = `<html><body><h2>競走馬情報 テストホース Test Horse（JPN） 抹消年月日 2026年8月20日</h2>
+  <div class="profile"><div class="data"><ul>
+    <li><dl><dt>父</dt><dd>テストサイアー</dd></dl></li>
+    <li><dl><dt>性別</dt><dd>牝</dd></dl></li>
+    <li><dl><dt>母</dt><dd><a href="#">テストダム</a><span class="sanku"><a href="#">産駒</a></span></dd></dl></li>
+    <li><dl><dt>調教師名</dt><dd><a href="#">中竹 和也</a>（栗東）</dd></dl></li>
+    <li><dl><dt>母の父</dt><dd><a href="#">テストダムサイアー</a></dd></dl></li>
+    <li><dl><dt>生年月日</dt><dd>2023年4月1日</dd></dl></li>
+  </ul></div></div>
+  <table><tbody><tr>
+    <td class="date">2026年8月15日</td><td>中京</td><td class="race"><a href="/JRADB/accessS.html?CNAME=pw01sde1007202602071220260815/5D">3歳未勝利</a></td>
+    <td>ダ1200</td><td>良</td><td>16</td><td>9</td><td>6</td><td class="jockey"><a href="#">柴田 裕一郎</a></td><td>53.0</td><td>484</td><td>1:13.0</td><td class="rate"></td><td class="horse">ゴールドアーチ</td>
+  </tr></tbody></table></body></html>`;
+  const info = parseHorsePage(html);
+  assert.equal(info.name, 'テストホース');
+  assert.equal(info.sire, 'テストサイアー');
+  assert.equal(info.dam, 'テストダム');
+  assert.equal(info.damSire, 'テストダムサイアー');
+  assert.equal(info.trainer, '中竹 和也');
+  assert.equal(info.birth, '2023-04-01');
+  assert.equal(info.runs.length, 1);
+  assert.equal(info.runs[0].raceId, '202607020712');
+  assert.equal(info.runs[0].finish, 6);
+  assert.equal(info.runs[0].time, 73);
+});
