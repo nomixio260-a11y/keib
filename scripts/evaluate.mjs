@@ -40,7 +40,7 @@ console.log(`検証期間 ${period}（${test.length}レース、平地のみ。�
 const out = { period, races: test.length, withExotic, source: 'JRA', generatedAt: new Date().toISOString().slice(0, 10), presets: {} };
 for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   const preset = PRESETS[key];
-  const res = await runBacktest(test, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml }, { sims: 4000 });
+  const res = await runBacktest(test, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml, blend: process.env.EVAL_BLEND != null ? Number(process.env.EVAL_BLEND) : undefined }, { sims: 4000 });
   console.log(`\n■ ${preset.label}`);
   console.log(`  ◎      勝率 ${pct(res.ai.winRate)}  連対率 ${pct(res.ai.top2Rate)}  複勝率 ${pct(res.ai.top3Rate)}  対数損失 ${res.ai.logLoss.toFixed(3)}`);
   console.log(`  1番人気 勝率 ${pct(res.fav.winRate)}  連対率 ${pct(res.fav.top2Rate)}  複勝率 ${pct(res.fav.top3Rate)}  対数損失 ${res.fav.logLoss.toFixed(3)}`);
@@ -87,6 +87,10 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
 
 if (!process.argv.includes('--dry')) {
   const header = '// scripts/evaluate.mjs が実際のレース結果（JRA）で検証した結果。手で編集しないでください。\n';
+if (process.env.EVAL_NO_WRITE === '1') {
+  log('EVAL_NO_WRITE=1：src/data/realBacktest.js は書き換えません');
+} else {
   await writeFile(path.join(root, 'src/data/realBacktest.js'), `${header}export const REAL_BACKTEST = ${JSON.stringify(out)};\n`);
   console.log('\n書き出しました：src/data/realBacktest.js');
+}
 }

@@ -383,7 +383,7 @@ export function renderWeightsPanel(ctx) {
       <p class="slider-desc">小さいほど能力どおりの堅い決着、大きいほど波乱を多めに見込みます。</p>
     </div>
     <div class="field-row">
-      <label class="field" for="sims">シミュレーション回数</label>
+      <label class="field" for="sims" title="勝率・複勝率・各買い目の確率は厳密に計算します。回数は着順の分布の表示と、買い目全体の統計（どれかが当たる確率など）にだけ影響します">シミュレーション回数 <small>（着順分布・買い目全体の統計用）</small></label>
       <select id="sims" data-sims>
         ${[5000, 20000, 50000].map((n) => `<option value="${n}" ${state.sims === n ? 'selected' : ''}>${n.toLocaleString('ja-JP')}回</option>`).join('')}
       </select>

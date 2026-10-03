@@ -4,6 +4,8 @@
 //   1着は exp(スコア/T1)、2着は残りの馬で exp(スコア/T2)、3着以下は exp(スコア/T3) に比例する確率。
 //   着順ごとの温度 T は実際のレースで推定（2着・3着は1着より紛れが大きい）。予想に使う。
 // simulate：能力スコア + 正規分布の揺らぎ。単勝オッズから市場の券種別の確率を作るのに使う。
+// exactPL：同じプラケット・ルースの 1〜3着の確率と券種別の確率を厳密に計算する（勝率・買い目の確率はこちらを使う。
+//   シミュレーションは着順の分布の表示と、買い目の組み合わせ全体の統計にだけ使う）。
 
 import { createRng } from './rng.js';
 
@@ -135,4 +137,83 @@ export function comboProbs(sim) {
     wide[y * n + z] += inc;
   }
   return { n, exacta, quinella, wide, trio, trifecta };
+}
+
+/**
+ * プラケット・ルースの厳密計算（シミュレーションの揺らぎなし）。
+ * 1着は exp(スコア/T1)、2着は残りの馬で exp(スコア/T2)、3着は exp(スコア/T3) に比例するとして、
+ * 1〜3着のすべての並び（最大 18×17×16 = 4,896通り）の確率を足し合わせる。
+ * 返り値：win / top2 / top3（各馬）と combos（馬単・馬連・ワイド・三連複・三連単の確率。simulatePL+comboProbs と同じ形）
+ */
+export function exactPL(scores, { temps = [1, 1, 1] } = {}) {
+  const n = scores.length;
+  const mx = n ? Math.max(...scores) : 0;
+  const w = [0, 1, 2].map((k) => Float64Array.from(scores, (v) => Math.exp((v - mx) / Math.max(0.05, temps[k] ?? 1))));
+  const S = w.map((arr) => arr.reduce((a, b) => a + b, 0));
+  const win = new Float64Array(n);
+  const second = new Float64Array(n);
+  const third = new Float64Array(n);
+  const exacta = new Float64Array(n * n);
+  const quinella = new Float64Array(n * n);
+  const wide = new Float64Array(n * n);
+  const trio = new Float64Array(n * n * n);
+  const trifecta = new Float64Array(n * n * n);
+  // 1〜3着の並び（a,b,c）とその確率。買い目の組み合わせ全体の的中率・収支の確率を厳密に出すのに使う
+  const tripleCount = n >= 3 ? n * (n - 1) * (n - 2) : n === 2 ? 2 : n;
+  const triples = new Int16Array(tripleCount * 3).fill(-1);
+  const probs = new Float64Array(tripleCount);
+  let ti = 0;
+  for (let a = 0; a < n; a++) {
+    const p1 = w[0][a] / S[0];
+    win[a] = p1;
+    if (n < 2) {
+      triples[ti * 3] = a;
+      probs[ti++] = p1;
+      continue;
+    }
+    const S2 = S[1] - w[1][a];
+    for (let b = 0; b < n; b++) {
+      if (b === a) continue;
+      const p12 = p1 * (w[1][b] / Math.max(S2, 1e-300));
+      exacta[a * n + b] = p12;
+      quinella[Math.min(a, b) * n + Math.max(a, b)] += p12;
+      second[b] += p12;
+      if (n < 3) {
+        triples[ti * 3] = a;
+        triples[ti * 3 + 1] = b;
+        probs[ti++] = p12;
+        continue;
+      }
+      const S3 = S2 - w[2][b] + (w[1][b] - w[2][b]) * 0 - (w[1][a] - w[2][a]) * 0; // 下で正しく計算
+      const S3real = S[2] - w[2][a] - w[2][b];
+      for (let c = 0; c < n; c++) {
+        if (c === a || c === b) continue;
+        const p = p12 * (w[2][c] / Math.max(S3real, 1e-300));
+        trifecta[(a * n + b) * n + c] = p;
+        third[c] += p;
+        triples[ti * 3] = a;
+        triples[ti * 3 + 1] = b;
+        triples[ti * 3 + 2] = c;
+        probs[ti++] = p;
+        let x = a;
+        let y = b;
+        let z = c;
+        if (x > y) [x, y] = [y, x];
+        if (y > z) [y, z] = [z, y];
+        if (x > y) [x, y] = [y, x];
+        trio[(x * n + y) * n + z] += p;
+        wide[x * n + y] += p;
+        wide[x * n + z] += p;
+        wide[y * n + z] += p;
+      }
+      void S3;
+    }
+  }
+  const top2 = new Float64Array(n);
+  const top3 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    top2[i] = win[i] + second[i];
+    top3[i] = top2[i] + third[i];
+  }
+  return { n, win, top2, top3, triples, probs, combos: { n, exacta, quinella, wide, trio, trifecta } };
 }

@@ -299,23 +299,39 @@ export function ticketHits(t, a, b, c, placeCount = 3) {
 }
 
 /**
- * 的中率・プラス収支の確率はAIのシミュレーションの各回に買い目を当てはめて数える。
+ * 的中率・プラス収支の確率は、1〜3着のすべての並びの確率（exactPL）に買い目を当てはめて厳密に出す。
+ * （厳密計算がないときはシミュレーションの各回に当てはめて数える）
  * 期待回収率は各買い目の「期待値の計算に使う確率」（pEv、オッズを混ぜたもの）から出す。
  */
 export function evaluateTickets(tickets, pred) {
   const stake = tickets.reduce((s, t) => s + (t.stake || 0), 0);
   if (!tickets.length || !stake) return { stake: 0, hitRate: 0, expectedReturn: 0, roi: 0, profitRate: 0 };
-  const { samples, sims } = pred.sim;
   let hit = 0;
   let profit = 0;
-  for (let s = 0; s < sims; s++) {
-    const a = samples[s * 3];
-    const b = samples[s * 3 + 1];
-    const c = samples[s * 3 + 2];
-    let ret = 0;
-    for (const t of tickets) if (t.stake && ticketHits(t, a, b, c, pred.placeCount)) ret += t.stake * t.odds;
-    if (ret > 0) hit++;
-    if (ret > stake) profit++;
+  let sims = 1;
+  if (pred.exact?.triples) {
+    const { triples, probs } = pred.exact;
+    for (let k = 0; k < probs.length; k++) {
+      const a = triples[k * 3];
+      const b = triples[k * 3 + 1];
+      const c = triples[k * 3 + 2];
+      let ret = 0;
+      for (const t of tickets) if (t.stake && ticketHits(t, a, b, c, pred.placeCount)) ret += t.stake * t.odds;
+      if (ret > 0) hit += probs[k];
+      if (ret > stake) profit += probs[k];
+    }
+  } else {
+    const { samples } = pred.sim;
+    sims = pred.sim.sims;
+    for (let s = 0; s < sims; s++) {
+      const a = samples[s * 3];
+      const b = samples[s * 3 + 1];
+      const c = samples[s * 3 + 2];
+      let ret = 0;
+      for (const t of tickets) if (t.stake && ticketHits(t, a, b, c, pred.placeCount)) ret += t.stake * t.odds;
+      if (ret > 0) hit++;
+      if (ret > stake) profit++;
+    }
   }
   const expectedReturn = tickets.reduce((s, t) => s + (t.stake || 0) * (t.odds || 0) * (t.pEv ?? t.p), 0);
   return { stake, hitRate: hit / sims, expectedReturn, roi: expectedReturn / stake, profitRate: profit / sims };

@@ -1,7 +1,7 @@
 // 予想モデル本体：ファクターを合成して能力スコアを出し、モンテカルロで確率に変換する。
 
 import { computeRaceFactors } from './factors.js';
-import { simulatePL, comboProbs } from './simulate.js';
+import { simulatePL, comboProbs, exactPL } from './simulate.js';
 import { harville, estimateOdds } from './market.js';
 import { hashString } from './rng.js';
 import { clamp, mean } from './util.js';
@@ -125,15 +125,17 @@ export function marketModel(q, sims = 20000, seed = 7) {
   const h = harville(q);
   if (n < 2) return h;
   const scores = q.map((v) => MARKET_BETA * Math.log(Math.max(v, 1e-6)));
-  const sim = simulatePL(scores, { sims, seed: (seed ^ 0x5bd1e995) >>> 0, temps: TEMPS_MARKET });
-  const c = comboProbs(sim);
-  const enough = 3 / sims;
-  const pick = (mc, hv) => mc.map((v, k) => (v >= enough ? v : hv[k]));
+  // 市場の券種別確率も厳密計算（以前はシミュレーション＋小さい確率はハーヴィル式で補っていた）
+  const ex = exactPL(scores, { temps: TEMPS_MARKET });
+  const c = ex.combos;
+  const pick = (mc, hv) => mc.map((v, k) => (v > 0 ? v : hv[k]));
+  void sims;
+  void seed;
   return {
     n,
     win: q.slice(),
-    top2: Float64Array.from(sim.top2),
-    top3: Float64Array.from(sim.top3),
+    top2: Float64Array.from(ex.top2),
+    top3: Float64Array.from(ex.top3),
     exacta: pick(c.exacta, h.exacta),
     quinella: pick(c.quinella, h.quinella),
     wide: pick(c.wide, h.wide),
@@ -224,11 +226,12 @@ export function predictRace(race, settings = {}) {
   const noOdds = !rows.some((r) => r.entry.odds > 1);
   const seed = hashString(`${race.id}|${sims}`);
   const temps = scored.ml ? scored.temps.map((t) => t * (settings.noise ?? 1)) : tempsFor(settings.weights || DEFAULT_WEIGHTS, settings.noise ?? 1);
-  const sim = simulatePL(
-    rows.map((r) => r.score),
-    { sims, seed, temps },
-  );
-  const combos = comboProbs(sim);
+  // 勝率・連対率・複勝率・各券種の確率は厳密計算（シミュレーションの揺らぎなし）。
+  // シミュレーションは着順の分布の表示と、買い目の組み合わせ全体の統計（どれかが当たる確率など）にだけ使う
+  const scores = rows.map((r) => r.score);
+  const exact = exactPL(scores, { temps });
+  const sim = simulatePL(scores, { sims, seed, temps });
+  const combos = exact.combos;
   const market = marketModel(rows.map((r) => r.marketProb), sims, seed);
   const placeCount = placeCountOf(n);
 
@@ -240,10 +243,14 @@ export function predictRace(race, settings = {}) {
   const aiMean = mean(rows.map((r) => r.aiScore));
   rows.forEach((r, i) => {
     r.i = i;
-    r.pWin = sim.win[i];
-    r.pTop2 = sim.top2[i];
-    r.pTop3 = sim.top3[i];
+    r.pWin = exact.win[i];
+    r.pTop2 = exact.top2[i];
+    r.pTop3 = exact.top3[i];
     r.posDist = Array.from(sim.posDist.subarray(i * n, i * n + n));
+    // 1〜3着は厳密値に合わせる（4着以下はシミュレーションの値）
+    r.posDist[0] = exact.win[i];
+    if (n > 1) r.posDist[1] = exact.top2[i] - exact.win[i];
+    if (n > 2) r.posDist[2] = exact.top3[i] - exact.top2[i];
     r.index = 50 + (10 * (r.aiScore - aiMean)) / INDEX_SCALE;
     r.odds = r.entry.odds > 1 ? r.entry.odds : null;
     r.ev = r.odds ? r.pWin * r.odds : null;
@@ -273,6 +280,7 @@ export function predictRace(race, settings = {}) {
     n,
     order,
     sim,
+    exact,
     combos,
     market,
     placeCount,

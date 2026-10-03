@@ -102,3 +102,24 @@ test('結果の記録から作る出馬表は馬番順（着順の並びが特�
   assert.deepEqual(card.entries.map((e) => e.number), [2, 5, 7]);
   assert.deepEqual(card.result, [7, 2, 5]);
 });
+
+test('プラケット・ルースの厳密計算はシミュレーションと一致し、確率の合計が合う', async () => {
+  const { exactPL, simulatePL, comboProbs } = await import('../src/engine/simulate.js');
+  const scores = [1.2, 0.4, 0, -0.3, -1, -1.5];
+  const temps = [0.95, 1.2, 1.4];
+  const ex = exactPL(scores, { temps });
+  const sum = (a) => Array.from(a).reduce((x, y) => x + y, 0);
+  assert.ok(Math.abs(sum(ex.win) - 1) < 1e-9);
+  assert.ok(Math.abs(sum(ex.top2) - 2) < 1e-9);
+  assert.ok(Math.abs(sum(ex.top3) - 3) < 1e-9);
+  assert.ok(Math.abs(sum(ex.combos.quinella) - 1) < 1e-9);
+  assert.ok(Math.abs(sum(ex.combos.trio) - 1) < 1e-9);
+  assert.ok(Math.abs(sum(ex.combos.wide) - 3) < 1e-9);
+  const sim = simulatePL(scores, { sims: 60000, seed: 3, temps });
+  const c = comboProbs(sim);
+  for (let i = 0; i < scores.length; i++) {
+    assert.ok(Math.abs(sim.win[i] - ex.win[i]) < 0.01, `win ${i}`);
+    assert.ok(Math.abs(sim.top3[i] - ex.top3[i]) < 0.012, `top3 ${i}`);
+  }
+  assert.ok(Math.abs(c.quinella[0 * 6 + 1] - ex.combos.quinella[0 * 6 + 1]) < 0.01);
+});
