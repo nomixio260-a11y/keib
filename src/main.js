@@ -93,7 +93,8 @@ let raceIndex = new Map();
 let userPicked = false;
 const preferredVenue = state.venue;
 
-const bt = { source: REAL_BACKTEST ? 'saved' : 'recent', preset: 'balance', focus: 'ai', recent: { running: false, progress: 0, result: null } };
+// バックテストの表示は既定の重み付け（機械学習があればそれ）から
+const bt = { source: REAL_BACKTEST ? 'saved' : 'recent', preset: REAL_BACKTEST?.presets?.[DEFAULT_PRESET] ? DEFAULT_PRESET : 'balance', focus: 'ai', recent: { running: false, progress: 0, result: null } };
 const dataView = {
   form: { date: jstParts().date, course: '東京', raceNo: 11, name: '', grade: '3勝', surface: '芝', distance: 1600, going: '良', card: '', past: '' },
   messages: null,
