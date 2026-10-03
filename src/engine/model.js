@@ -6,7 +6,7 @@ import { harville, estimateOdds } from './market.js';
 import { hashString } from './rng.js';
 import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
-import { GBDT_READY, gbdtScores } from './gbdt.js';
+import { GBDT_READY, GBDT_INFO, gbdtScores } from './gbdt.js';
 
 /**
  * ファクター定義。
@@ -52,7 +52,7 @@ export const PRESETS = {
           weights: AI_WEIGHTS,
           noise: 1,
           ml: true,
-          desc: '単勝オッズを出発点に、70の特徴量から決定木の集まり（勾配ブースティング）が「オッズにまだ織り込まれていない分」を学習したモデル。学習に使っていない期間で最も正確でした。重み付けのスライダーは使いません（内訳の表示にだけ使います）。',
+          desc: `単勝オッズを出発点に、${GBDT_INFO?.params?.features || GBDT_INFO?.params?.only?.length || '厳選した'}項目の特徴量から決定木の集まり（勾配ブースティング）が「オッズにまだ織り込まれていない分」を学習したモデル（3年分・${(GBDT_INFO?.trainedOn?.races || 0).toLocaleString('ja-JP')}レースで学習）。学習に使っていない期間で最も正確でした。重み付けのスライダーは使いません（内訳の表示にだけ使います）。`,
         },
       }
     : {}),
