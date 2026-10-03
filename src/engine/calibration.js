@@ -1,15 +1,15 @@
 // scripts/calibrate.mjs が実際のレース結果（JRA）から生成。手で編集しないでください。
 export const CALIBRATION = {
   "coef": {
-    "speed": 0.3213,
-    "form": 0.5775,
-    "closing": 0.0881,
-    "jockey": 0.2648,
-    "trainer": 0.2214,
-    "aptitude": 0.6973,
+    "speed": 0.3311,
+    "form": 0.5702,
+    "closing": 0.0888,
+    "jockey": 0.2662,
+    "trainer": 0.2198,
+    "aptitude": 0.6998,
     "pace": 0.04,
-    "draw": 0.1298,
-    "condition": 0.0735,
+    "draw": 0.1251,
+    "condition": 0.0709,
     "market": 0.9141
   },
   "ref": {
@@ -33,7 +33,7 @@ export const CALIBRATION = {
     "aptitude": 0,
     "pace": 0,
     "draw": 0,
-    "condition": 2,
+    "condition": 3,
     "market": 96
   },
   "temps": {
@@ -55,15 +55,15 @@ export const CALIBRATION = {
   },
   "marketBeta": 0.9141,
   "defaultPreset": "balance",
-  "indexScale": 1.0216,
+  "indexScale": 1.0265,
   "trainedOn": 2484,
   "fitLL": {
-    "ai": -4.8566,
-    "total": -4.4812,
+    "ai": -4.8523,
+    "total": -4.481,
     "market": -4.4866
   },
   "period": {
-    "stats": "2023-10-01〜2025-09-28",
+    "stats": "2022-10-01〜2025-09-28",
     "fit": "2025-10-04〜2026-06-28"
   },
   "source": "JRA"
