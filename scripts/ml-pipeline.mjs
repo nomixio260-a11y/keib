@@ -2,7 +2,7 @@
 // 機械学習モデルを作り直す一連の手順：データセット → 交差検証で設定を選ぶ → 選んだ設定で学習して書き出す。
 //
 //   node scripts/ml-pipeline.mjs
-//   環境変数：TEST_START=2026-07-01（検証の開始日。これ以降は設定選びに使わない）、DATASET_START=2024-12-01、
+//   環境変数：TEST_START=2026-07-01（検証の開始日。これ以降は設定選びに使わない）、DATASET_START=2022-12-01、
 //             BAGS=5（乱数の違うモデルを平均する個数）、FOLDS=5、SKIP_DATASET=1（データセットを作り直さない）
 //
 // 候補の設定（木の深さ・学習率・正則化・外す特徴量）は CANDIDATES。交差検証で最良のものと木の本数を選び、
@@ -16,7 +16,7 @@ import os from 'node:os';
 import { ROOT } from '../src/collector/store.js';
 
 const TEST_START = process.env.TEST_START || '2026-07-01';
-const DATASET_START = process.env.DATASET_START || '2024-12-01';
+const DATASET_START = process.env.DATASET_START || '2022-12-01'; // 4年分（2022-10 からの記録を2か月の助走に使う）
 const BAGS = process.env.BAGS || '1'; // 乱数の違うモデルの平均は効果なし（3個・10個とも ±0.0003 以内）なので既定は 1
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const run = (args, env = {}) => execFileSync('node', args, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, TEST_START, ...env } });
@@ -47,7 +47,8 @@ if (process.env.SKIP_DATASET !== '1') {
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'keib-cv-'));
 const cvOut = path.join(tmp, 'cv.json');
 log('交差検証で設定を選ぶ');
-run([path.join(ROOT, 'scripts/cv-gbdt.mjs')], { CONFIGS: JSON.stringify(CANDIDATES), CV_OUT: cvOut, FOLDS: process.env.FOLDS || '5' });
+// 学習率 0.01 では最良の本数が 500 を超える（4年分で 820本）ので、上限は 1000本
+run([path.join(ROOT, 'scripts/cv-gbdt.mjs')], { CONFIGS: JSON.stringify(CANDIDATES), CV_OUT: cvOut, FOLDS: process.env.FOLDS || '5', MAX_ROUNDS: process.env.MAX_ROUNDS || '1000' });
 const cv = JSON.parse(await readFile(cvOut, 'utf8'));
 // 候補どうしの差は ±0.001 くらいの偶然で入れ替わり、交差検証で +0.0014 良かった 85項目や血統つき 21項目は検証期間
 // （2026-07〜09）では 16項目より悪かった（−0.0022±0.0025、−0.0024±0.0014）。標準の設定より 0.002 以上良いときだけ乗り換える
