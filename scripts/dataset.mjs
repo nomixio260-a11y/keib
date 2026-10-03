@@ -12,6 +12,26 @@ import { usable } from './calibrate.mjs';
 import { tally, rates, CONDITION_KEYS } from '../src/data/rates.js';
 
 const START = process.env.DATASET_START || '2025-12-01';
+const EXTRA = process.env.DATASET_EXTRA === '1';
+const EXTRA_NAMES = ['logqMid', 'logqMidGap', 'jWin365', 'jTop3_365', 'tWin365', 'tTop3_365'];
+// 実験用：直近365日だけの騎手・厩舎成績（累積ではなく最近の調子）
+const WINDOW_DAYS = 365;
+const dayNum = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
+const jWin = new Map(); // 騎手名 → [{ d, win, top3 }]（日付順）
+const tWinQ = new Map();
+const pushRun = (map, key, dn, r) => {
+  if (!key) return;
+  const q = map.get(key) || map.set(key, []).get(key);
+  q.push({ d: dn, win: r.finish === 1 ? 1 : 0, top3: r.finish > 0 && r.finish <= 3 ? 1 : 0 });
+};
+const windowRate = (map, key, dn, prior = 60, avgW = 0.07, avgT = 0.21) => {
+  const q = map.get(key);
+  if (!q) return { winRate: avgW, top3Rate: avgT, starts: 0 };
+  while (q.length && q[0].d < dn - WINDOW_DAYS) q.shift();
+  let s = 0, w = 0, t = 0;
+  for (const x of q) { s++; w += x.win; t += x.top3; }
+  return { starts: s, winRate: (w + prior * avgW) / (s + prior), top3Rate: (t + prior * avgT) / (s + prior) };
+};
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const all = await loadHistory();
@@ -80,7 +100,21 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       const cardX = hideBw ? { ...card, entries: card.entries.map((e) => ({ ...e, bodyWeight: null, bodyWeightDiff: null })) } : card;
       const fx = raceFeatures(cardX, { stats, careerOf, jockeys: jr.rates, trainers: tr.rates });
       const finishOf = Object.fromEntries(rec.runners.map((r) => [r.number, r.finish]));
-      for (const r of fx.rows) rows.push({ raceId: rec.id, date: rec.date, number: r.number, finish: finishOf[r.number] || 0, y: finishOf[r.number] === 1 ? 1 : 0, bwHidden: hideBw ? 1 : 0, x: Array.from(r.x, (v) => Math.round(v * 1e4) / 1e4) });
+      // 実験用の追加列（DATASET_EXTRA=1）：オッズの表示が 0.1 刻みで切り捨てられている分を中央値（+0.05）で補正した市場確率
+      let extra = null;
+      if (EXTRA) {
+        const inv = fx.rows.map((r) => (r.entry.odds > 1 ? 1 / (r.entry.odds + 0.05) : 0));
+        const sum = inv.reduce((a, b) => a + b, 0) || 1;
+        const lq = inv.map((v) => Math.log(Math.max(v / sum, 1e-4)));
+        const mx = Math.max(...lq);
+        const dn = dayNum(rec.date);
+        extra = fx.rows.map((r, i) => {
+          const jw = windowRate(jWin, r.entry.jockey, dn, 60, jr.average.winRate, jr.average.top3Rate);
+          const tw = windowRate(tWinQ, r.entry.trainer, dn, 60, tr.average.winRate, tr.average.top3Rate);
+          return [lq[i], lq[i] - mx, jw.winRate, jw.top3Rate, tw.winRate, tw.top3Rate];
+        });
+      }
+      fx.rows.forEach((r, i) => rows.push({ raceId: rec.id, date: rec.date, number: r.number, finish: finishOf[r.number] || 0, y: finishOf[r.number] === 1 ? 1 : 0, bwHidden: hideBw ? 1 : 0, x: [...Array.from(r.x, (v) => Math.round(v * 1e4) / 1e4), ...(extra ? extra[i].map((v) => Math.round(v * 1e4) / 1e4) : [])] }));
       races++;
     }
   }
@@ -89,9 +123,13 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     const r = withPedigree(r0);
     tally(jAcc, r.jockey, r);
     tally(tAcc, r.trainer, r);
+    if (EXTRA) {
+      pushRun(jWin, r.jockey, dayNum(rec.date), r);
+      pushRun(tWinQ, r.trainer, dayNum(rec.date), r);
+    }
     if (!rec.jump && rec.surface !== '障') for (const [k, keyOf] of Object.entries(CONDITION_KEYS)) tally(cAcc[k], keyOf(rec, r), r);
   }
 }
 const outFile = process.env.DATASET_OUT || path.join(DATA_DIR, 'dataset.json');
-await writeJson(outFile, { names: FEATURE_NAMES, start: START, races, rows });
+await writeJson(outFile, { names: EXTRA ? [...FEATURE_NAMES, ...EXTRA_NAMES] : FEATURE_NAMES, start: START, races, rows });
 log(`書き出し：${path.relative(process.cwd(), outFile)}（${races}レース・${rows.length}頭・特徴量 ${FEATURE_NAMES.length}）`);
