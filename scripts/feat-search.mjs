@@ -26,8 +26,19 @@ const BASE = baseFeats.length ? baseFeats : TOP16;
 
 const ds = await readJson(process.env.DATASET_FILE || path.join(DATA_DIR, 'dataset.json'));
 if (!ds) throw new Error('data/dataset.json がありません。先に node scripts/dataset.mjs');
+// NOISE_REF=1：比較の基準を「いまの組＋乱数の列」にする。1列足すと列のサンプリングの当たり方が変わって +0.001 ほど良く見えるので、
+// 候補の列を乱数の列と比べることで、その見かけの差を取り除く
+const NOISE_REF = process.env.NOISE_REF === '1';
+if (NOISE_REF) {
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (const r of ds.rows) r.x = [...r.x, rnd()];
+  ds.names = [...ds.names, 'noiseRef'];
+}
 const names = ds.names;
 const Fn = names.length;
+const CAND = (process.env.CANDIDATES || '').split(',').filter(Boolean); // 足す候補をこの列だけに
+const NO_DROP = process.env.NO_DROP === '1';
 const iLogq = names.indexOf('logq');
 const idx = (k) => { const i = names.indexOf(k); if (i < 0) throw new Error(`特徴量がありません: ${k}`); return i; };
 // 馬体重は発走1時間前まで出ない情報なので候補から外す（交差検証で過学習もした）
@@ -62,13 +73,14 @@ function score(featNames) {
 
 const t0 = Date.now();
 const baseLL = splits.reduce((a, s) => a + s.base.ll, 0) / splits.length;
-const refLL = score(BASE);
-log(`出発点（市場のみ）${baseLL.toFixed(4)}、いまの組（${BASE.length}項目）${refLL.toFixed(4)}（差 ${(refLL - baseLL >= 0 ? '+' : '') + (refLL - baseLL).toFixed(4)}、${((Date.now() - t0) / 1000).toFixed(0)}秒）`);
+const plainLL = score(BASE);
+const refLL = NOISE_REF ? score([...BASE, 'noiseRef']) : plainLL;
+log(`出発点（市場のみ）${baseLL.toFixed(4)}、いまの組（${BASE.length}項目）${plainLL.toFixed(4)}（差 ${(plainLL - baseLL >= 0 ? '+' : '') + (plainLL - baseLL).toFixed(4)}）${NOISE_REF ? `、乱数の列を足した基準 ${refLL.toFixed(4)}（${(refLL - plainLL >= 0 ? '+' : '') + (refLL - plainLL).toFixed(4)}）` : ''}（${((Date.now() - t0) / 1000).toFixed(0)}秒）`);
 
 const results = [];
 const candidates = [
-  ...names.filter((k) => !BASE.includes(k) && !EXCLUDE.has(k)).map((k) => ({ op: 'add', feat: k, feats: [...BASE, k] })),
-  ...BASE.filter((k) => k !== 'logq').map((k) => ({ op: 'drop', feat: k, feats: BASE.filter((x) => x !== k) })),
+  ...names.filter((k) => !BASE.includes(k) && !EXCLUDE.has(k) && k !== 'noiseRef' && (!CAND.length || CAND.includes(k))).map((k) => ({ op: 'add', feat: k, feats: [...BASE, k] })),
+  ...(NO_DROP ? [] : BASE.filter((k) => k !== 'logq').map((k) => ({ op: 'drop', feat: k, feats: BASE.filter((x) => x !== k) }))),
 ];
 const todo = LIMIT ? candidates.slice(0, LIMIT) : candidates;
 for (const c of todo) {

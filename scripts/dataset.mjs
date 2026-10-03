@@ -13,12 +13,18 @@ import { tally, rates, CONDITION_KEYS } from '../src/data/rates.js';
 
 const START = process.env.DATASET_START || '2025-12-01';
 const EXTRA = process.env.DATASET_EXTRA === '1';
-const EXTRA_NAMES = ['logqMid', 'logqMidGap', 'jWin365', 'jTop3_365', 'tWin365', 'tTop3_365'];
-// 実験用：直近365日だけの騎手・厩舎成績（累積ではなく最近の調子）
-const WINDOW_DAYS = 365;
+const EXTRA_NAMES = ['hPopResid', 'hMktResid', 'hSurfStarts', 'hSurfTop3', 'hDistTop3', 'hCourseTop3', 'hGoingTop3', 'hPairStarts', 'hPairTop3', 'tDebutWin', 'tDebutStarts', 'jWin90', 'tWin90'];
+// 実験用（DATASET_EXTRA=1）：馬と騎手・厩舎の履歴を深く見る特徴量
+//   hPopResid … 過去走で「人気より着順が良かった」度合い（(人気 − 着順)/頭数 の合計を走数+3で割る。市場に過小評価されがちな馬はプラス）
+//   hMktResid … 過去走の（勝ち − 市場の勝率）の合計を走数+3で割る（市場の期待より勝ってきた馬はプラス）
+//   hSurfStarts/hSurfTop3 … 今日の芝ダでの走数と3着内率（事前分布つき）、hDistTop3 … 同じ芝ダで距離 ±200m、hCourseTop3 … 同じ競馬場、
+//   hGoingTop3 … 今日と同じ馬場の区分（良・稍重／重・不良）、hPairStarts/hPairTop3 … 今日の騎手がこの馬に乗った回数と3着内率
+//   tDebutWin/tDebutStarts … 厩舎の初出走馬（デビュー戦）の勝率と頭数、jWin90/tWin90 … 騎手・厩舎の直近90日の勝率
+const WINDOW_DAYS = 90;
 const dayNum = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
 const jWin = new Map(); // 騎手名 → [{ d, win, top3 }]（日付順）
 const tWinQ = new Map();
+const debutAcc = new Map(); // 厩舎 → { s, w }（初出走馬の走数・勝ち数。その日より前）
 const pushRun = (map, key, dn, r) => {
   if (!key) return;
   const q = map.get(key) || map.set(key, []).get(key);
@@ -32,6 +38,26 @@ const windowRate = (map, key, dn, prior = 60, avgW = 0.07, avgT = 0.21) => {
   for (const x of q) { s++; w += x.win; t += x.top3; }
   return { starts: s, winRate: (w + prior * avgW) / (s + prior), top3Rate: (t + prior * avgT) / (s + prior) };
 };
+const shrink = (k, n, prior, w = 4) => (k + prior * w) / (n + w);
+/** 馬の履歴（その日より前の出走）から今日の条件に合わせた集計 */
+function horseHistory(index, horseId, date, rec, jockey) {
+  const runs = (index.byHorse.get(horseId) || []).filter((h) => h.date < date && h.runner.finish > 0);
+  const n = runs.length;
+  const top3 = (h) => (h.runner.finish <= 3 ? 1 : 0);
+  const sub = (f) => {
+    const s = runs.filter(f);
+    return { n: s.length, rate: shrink(s.reduce((a, h) => a + top3(h), 0), s.length, 0.21) };
+  };
+  const popResid = n ? runs.reduce((a, h) => a + (h.runner.popularity > 0 ? (h.runner.popularity - h.runner.finish) / Math.max(1, h.rec.fieldSize || h.rec.runners.length) : 0), 0) / (n + 3) : 0;
+  const mktResid = n ? runs.reduce((a, h) => a + ((h.runner.finish === 1 ? 1 : 0) - (h.runner.odds > 1 ? Math.min(0.9, 0.8 / h.runner.odds) : 0.07)), 0) / (n + 3) : 0;
+  const heavyToday = rec.going === '重' || rec.going === '不良';
+  const surf = sub((h) => h.rec.surface === rec.surface);
+  const dist = sub((h) => h.rec.surface === rec.surface && Math.abs((h.rec.distance || 0) - rec.distance) <= 200);
+  const course = sub((h) => h.rec.course === rec.course);
+  const going = sub((h) => (h.rec.going === '重' || h.rec.going === '不良') === heavyToday);
+  const pair = sub((h) => !!jockey && h.runner.jockey === jockey);
+  return [popResid, mktResid, surf.n, surf.rate, dist.rate, course.rate, going.rate, pair.n, pair.rate];
+}
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const all = await loadHistory();
@@ -100,18 +126,15 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       const cardX = hideBw ? { ...card, entries: card.entries.map((e) => ({ ...e, bodyWeight: null, bodyWeightDiff: null })) } : card;
       const fx = raceFeatures(cardX, { stats, careerOf, jockeys: jr.rates, trainers: tr.rates });
       const finishOf = Object.fromEntries(rec.runners.map((r) => [r.number, r.finish]));
-      // 実験用の追加列（DATASET_EXTRA=1）：オッズの表示が 0.1 刻みで切り捨てられている分を中央値（+0.05）で補正した市場確率
+      // 実験用の追加列（DATASET_EXTRA=1）：馬・騎手・厩舎の履歴の集計（上の EXTRA_NAMES）
       let extra = null;
       if (EXTRA) {
-        const inv = fx.rows.map((r) => (r.entry.odds > 1 ? 1 / (r.entry.odds + 0.05) : 0));
-        const sum = inv.reduce((a, b) => a + b, 0) || 1;
-        const lq = inv.map((v) => Math.log(Math.max(v / sum, 1e-4)));
-        const mx = Math.max(...lq);
         const dn = dayNum(rec.date);
-        extra = fx.rows.map((r, i) => {
+        extra = fx.rows.map((r) => {
           const jw = windowRate(jWin, r.entry.jockey, dn, 60, jr.average.winRate, jr.average.top3Rate);
           const tw = windowRate(tWinQ, r.entry.trainer, dn, 60, tr.average.winRate, tr.average.top3Rate);
-          return [lq[i], lq[i] - mx, jw.winRate, jw.top3Rate, tw.winRate, tw.top3Rate];
+          const d = debutAcc.get(r.entry.trainer) || { s: 0, w: 0 };
+          return [...horseHistory(index, r.entry.horseId, rec.date, rec, r.entry.jockey), shrink(d.w, d.s, tr.average.winRate, 10), d.s, jw.winRate, tw.winRate];
         });
       }
       fx.rows.forEach((r, i) => rows.push({ raceId: rec.id, date: rec.date, number: r.number, finish: finishOf[r.number] || 0, y: finishOf[r.number] === 1 ? 1 : 0, bwHidden: hideBw ? 1 : 0, x: [...Array.from(r.x, (v) => Math.round(v * 1e4) / 1e4), ...(extra ? extra[i].map((v) => Math.round(v * 1e4) / 1e4) : [])] }));
@@ -126,6 +149,12 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     if (EXTRA) {
       pushRun(jWin, r.jockey, dayNum(rec.date), r);
       pushRun(tWinQ, r.trainer, dayNum(rec.date), r);
+      // 初出走（この日より前の出走がない）馬の成績を厩舎ごとに
+      if (r.horseId && r.trainer && !(index.byHorse.get(r.horseId) || []).some((h) => h.date < rec.date)) {
+        const a = debutAcc.get(r.trainer) || debutAcc.set(r.trainer, { s: 0, w: 0 }).get(r.trainer);
+        a.s++;
+        if (r.finish === 1) a.w++;
+      }
     }
     if (!rec.jump && rec.surface !== '障') for (const [k, keyOf] of Object.entries(CONDITION_KEYS)) tally(cAcc[k], keyOf(rec, r), r);
   }
