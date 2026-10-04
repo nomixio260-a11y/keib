@@ -117,7 +117,7 @@ function recentNote(m) {
   const b = m.bets60;
   const rec = m.calibration?.recent || [];
   return `<p><b>直近60日</b>（${esc(r.period)}・${r.races}レース）：◎の勝率は ${pct(r.hit)}（AI の見込み ${pct(r.exp)}）で、見込みどおりかやや上です。外れた ${miss}レースのうち、${pct(r.kinds.near / miss, 0)}は AI の2・3番手が勝った惜しい外れ、${pct(r.kinds.upset / miss, 0)}は人気も AI も低く見ていた馬が勝った波乱で、AI が人気馬を見落とした外れは ${pct(r.kinds.overlook / miss, 0)}だけでした。${
-    b?.races ? `AI推奨（的中重視・1R 3,000円）は ${b.races}レースを買って ${b.hits}レース的中${b.hits === b.races ? '（外れなし）' : ''}、回収率 ${pct(b.roi)}。` : ''
+    b?.races ? `AI推奨（的中重視の自動・1R 上限 3,000円）は ${b.races}レースを買って ${b.hits}レース的中${b.hits === b.races ? '（外れなし）' : `・外れ ${b.races - b.hits}レース`}、回収率 ${pct(b.roi)}。` : ''
   }</p>${
     rec.length
       ? `<p>直近60日で見込みから大きくずれ、検証期間・学習期間でも同じ向きだった区分：${esc(rec.join('、'))}。長い期間ではずれが小さく（実際÷見込み 0.92〜0.98倍）、勝率を補正すると◎の勝率と当てはまりはわずかに良くなりましたが、的中重視の利益が下がった（学習期間の分割外で回収率 111.0% → 109.1%）ので、予想には入れていません。</p>`

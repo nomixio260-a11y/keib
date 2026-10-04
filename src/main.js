@@ -53,8 +53,8 @@ const saved = loadSaved();
 const sameCal = saved.calId === CALIBRATION_ID;
 const NOISE_VERSION = 2;
 const BLEND_VERSION = 2;
-// 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%）ので、前に保存した選択は一度「買い方の標準」に戻す
-const KEEP_VERSION = 2;
+// 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%、2026-10-05 に的中重視の自動）ので、前に保存した選択は一度「自動」に戻す
+const KEEP_VERSION = 3;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
@@ -91,7 +91,7 @@ const state = {
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
-  // 2段目の絞り込み（当たる確率の下限）。既定は買い方の標準（的中重視・控えめは 50% 以上）
+  // 2段目の絞り込み（当たる確率の下限）。既定は自動（的中重視は毎レース買い目と金額まで自動、控えめは 50% 以上）
   keep: saved.keepVersion === KEEP_VERSION && KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
@@ -220,8 +220,12 @@ function insertDay(bundle, day) {
 }
 
 function setBundle(bundle) {
+  // 次の開催日（出馬表の前の特別登録だけの日も含む）：今日にレースがないときの案内用
+  const t0 = today();
+  const next = (bundle.days || []).find((d) => d.date > t0 && d.races?.length);
+  data.nextMeeting = next ? { date: next.date, card: next.races.some((r) => !r.provisional) } : null;
   // 特別登録の暫定のレース（出馬表の前）は出さない。過去の開催日は直近7日だけ（それより前はアーカイブから）
-  bundle.days = visibleDays(bundle.days, today());
+  bundle.days = visibleDays(bundle.days, t0);
   data.bundle = bundle;
   data.loadState = bundle.days?.length ? 'ok' : 'none';
   data.live = !!bundle.live;
@@ -471,16 +475,26 @@ const ctx = () => ({
   strategyLabel: STRATEGIES[state.strategy].label,
   recentCount: recentRaces().length,
   railStatus: statusHtml(),
+  noRaceNote: noRaceNote(),
   stats: currentStats(),
   ...data,
 });
+
+/** 今日にレースがないときの案内（次の開催日と、出馬表が出る目安） */
+function noRaceNote() {
+  const t = today();
+  if (data.loadState !== 'ok' || days().some((d) => d.date === t)) return '';
+  const next = data.nextMeeting;
+  const nextText = next ? `次の開催は ${dayLabel(next.date)}${next.card ? 'です。' : 'で、出馬表（枠順・騎手）が出たら予想を出します（土曜分は木曜、日曜・月曜分は金曜ごろ）。'}` : '';
+  return `今日（${dayLabel(t)}）は JRA の開催がありません。${nextText}`;
+}
 
 /** データの更新状況（ヘッダーと、狭い画面ではレース一覧の上に出す） */
 function statusHtml() {
   if (data.loadState !== 'ok') return data.loadState === 'loading' ? '読み込み中…' : '<span class="live-dot is-off" aria-hidden="true"></span>実データなし';
   const t = today();
   const upcoming = days().filter((d) => d.date >= t);
-  const label = upcoming.length ? upcoming.map((d) => dayLabel(d.date)).join('・') : `${dayLabel(days()[days().length - 1].date)}まで`;
+  const label = upcoming.length ? upcoming.map((d) => dayLabel(d.date)).join('・') : data.nextMeeting ? `次の開催 ${dayLabel(data.nextMeeting.date)}（出馬表待ち）` : `${dayLabel(days()[days().length - 1].date)}まで`;
   const at = data.bundle.checkedAt || data.bundle.generatedAt;
   const gen = at ? new Date(Date.parse(at) + 9 * 3600 * 1000).toISOString() : '';
   const genText = gen ? `${Number(gen.slice(5, 7))}/${Number(gen.slice(8, 10))} ${gen.slice(11, 16)}` : '';

@@ -72,7 +72,7 @@ export const BT_STRATEGIES = [
   },
   {
     key: 'ai',
-    label: 'AI推奨（的中重視・単複・1R千円）',
+    label: 'AI推奨（的中重視の自動・単複・1R上限千円）',
     build: (pred, m, settings) => recommendBets(pred, { budget: 1000, types: TANPUKU, blend: settings?.blend }).tickets,
   },
   {

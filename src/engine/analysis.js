@@ -2,7 +2,7 @@
 // 画面の「レース分析」（src/ui/predictView.js）が使う。数字はすべて予想（pred）と買い目（rec）と過去のレース結果から。
 
 import { COURSE_STATS } from './courseStats.js';
-import { LOW_ODDS_LABEL } from './bets.js';
+import { LOW_ODDS_LABEL, AUTO_STAKE, MIN_ODDS } from './bets.js';
 import { horseComment } from './comments.js';
 
 const STYLES = ['逃げ', '先行', '差し', '追込'];
@@ -23,6 +23,14 @@ function verdictOf(pred, rec) {
   const race = pred.race;
   if (race.provisional) return { kind: 'wait', title: '出馬表待ち', text: '特別登録の段階です。枠順・騎手・単勝オッズが出てから、期待値と当たる確率で買い目を決めます。' };
   if (pred.noOdds || rec?.noOdds) return { kind: 'wait', title: 'オッズ待ち', text: '単勝オッズが出たら、期待値と当たる確率で買い目を決めます。' };
+  // 的中重視の自動：自信に応じて金額まで決めた買い目
+  if (rec?.auto && rec.tickets?.length) {
+    const t = rec.tickets[0];
+    if (t.auto === 'floor') return { kind: 'buy', title: '買い（最低額）', text: `自信を持って買える買い目はありませんが、当たりやすい買い目（当たる確率 ${pc(t.pHit)}）を最低額の ${t.stake.toLocaleString('ja-JP')}円で買います。利益はほぼなく、当たる回数を増やすための買い目です。`, tickets: rec.tickets };
+    const why = t.auto === 'classic' ? 'これまでの的中重視の条件' : `当たる確率 ${pc(t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv} 以上`;
+    return { kind: 'buy', title: '買い', text: `${why}を満たす、自信のある買い目があります（当たる確率 ${pc(t.pHit)}・期待値 ${t.ev.toFixed(2)}）。自信に応じて予算の ${Math.round((t.share ?? 1) * 100)}%（${t.stake.toLocaleString('ja-JP')}円）を買います。`, tickets: rec.tickets };
+  }
+  if (rec?.auto && rec.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason, dropped: rec.dropped };
   if (rec?.tickets?.length) {
     return {
       kind: 'buy',

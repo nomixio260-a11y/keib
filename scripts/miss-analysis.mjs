@@ -80,7 +80,7 @@ const lastDate = holdCards.filter((c) => c.result?.length).reduce((m, c) => (c.d
 const R60_FROM = addDays(lastDate, -59);
 const SETS = { oof: { label: '学習期間の分割外', cards: oofCards }, hold: { label: '検証期間', cards: holdCards }, r60: { label: '直近60日', cards: holdCards.filter((c) => c.date >= R60_FROM) } };
 const recs = { oof: [], hold: [], r60: [] };
-// 直近60日の AI推奨（的中重視・既定の単勝/複勝・1R 3,000円）
+// 直近60日の AI推奨（的中重視の自動・既定の券種・1R 上限 3,000円）
 const bets60 = { races: 0, hits: 0, stake: 0, ret: 0 };
 for (const [set, { cards }] of Object.entries(SETS)) {
   for (const card of cards) {
@@ -223,7 +223,7 @@ for (const [who, keep] of [
 out.calibration = { dims: Object.keys(SEGS).length, cells, zCut: Z_CUT, flagged, recent };
 out.bets60 = { ...bets60, hitRate: bets60.races ? bets60.hits / bets60.races : 0, roi: bets60.stake ? bets60.ret / bets60.stake : 0 };
 console.log(`[直近60日] 大きくずれ・長い期間でも同じ向き：${recent.length ? recent.join('、') : 'なし'}`);
-console.log(`[直近60日] AI推奨（的中重視・1R 3,000円）${bets60.races}レース・的中 ${bets60.hits}・回収率 ${pct(out.bets60.roi)}`);
+console.log(`[直近60日] AI推奨（的中重視の自動・1R 上限 3,000円）${bets60.races}レース・的中 ${bets60.hits}・回収率 ${pct(out.bets60.roi)}`);
 console.log(`\n[校正] ${Object.keys(SEGS).length}項目・${cells}区分（◎だけと全馬）で、分割外 |z| ≥ ${Z_CUT} かつ検証も同じ向き：${flagged.length ? flagged.join('、') : 'なし'}`);
 
 const file = path.join(ROOT, 'src/engine/missStats.js');
