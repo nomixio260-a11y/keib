@@ -7,6 +7,8 @@ import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
+import { volatilityFactors } from '../engine/volatility.js';
+import { VOLATILITY_MODEL } from '../engine/volatilityModel.js';
 import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
 import { esc, fixed, frameBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
@@ -78,6 +80,22 @@ export function gradeRecord(grade, preset = 'balance') {
   return g && g.n >= 20 ? g : null;
 }
 
+/** 荒れ度の要素の分析（過去のレースで、その条件のときに人気3頭以外が勝った割合） */
+function renderVolFactors(pred) {
+  const vf = volatilityFactors(pred);
+  if (!vf.length) return '';
+  const up = vf.filter((f) => f.delta >= 0.02).slice(0, 3);
+  const down = vf.filter((f) => f.delta <= -0.02).slice(0, 3);
+  const chip = (f) => `<span class="vf-chip ${f.delta > 0 ? 'is-up' : 'is-down'}">${esc(f.value)}</span>`;
+  const rows = vf
+    .map((f) => `<tr><th>${esc(f.label)}</th><td>${esc(f.value)}</td><td class="num">${pct(f.rate, 0)}</td><td class="num ${f.delta >= 0.02 ? 'tx-bad' : f.delta <= -0.02 ? 'tx-good' : ''}">${f.delta >= 0 ? '+' : '−'}${Math.abs(f.delta * 100).toFixed(0)}pt</td></tr>`)
+    .join('');
+  return `<details class="vol-factors"><summary>荒れ度の要素${up.length ? `　荒れやすい：${up.map(chip).join('')}` : ''}${down.length ? `　堅い：${down.map(chip).join('')}` : ''}</summary>
+    <table class="vf-table"><thead><tr><th>要素</th><th>このレース</th><th>人気3頭以外が勝った割合</th><th>全体との差</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="vf-note">過去のレース（学習期間）で、同じ条件のときに人気3頭以外が勝った割合です（全体 ${pct(VOLATILITY_MODEL.overall, 0)}）。荒れ度の数字そのものは、すべての要素を合わせたモデルの勝率から計算しています。</p>
+  </details>`;
+}
+
 export function renderSummary(pred, rec, preset = 'balance') {
   const h = pred.order[0];
   const e = h.entry;
@@ -103,6 +121,7 @@ export function renderSummary(pred, rec, preset = 'balance') {
       <div class="tile-label">自信度・荒れ度</div>
       <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="vol-badge v-${['solid', 'mid', 'wild'][c.volatilityIndex ?? 1]}" title="人気3頭以外が勝つ確率 ${pct(c.upsetProb || 0)}">${esc(c.volatility || '普通')}</span><span class="meter" role="img" aria-label="荒れ度 ${c.upset} / 5">${dots}</span></div>
       <div class="tile-sub">◎が勝つ確率 <b class="num">${pct(c.winProb ?? c.top, 0)}</b>${c.placeProb != null ? `・複勝圏 <b class="num">${pct(c.placeProb, 0)}</b>` : ''}${gr ? `<small>（自信度${esc(c.grade)}の実績：勝率 ${pct(gr.winRate, 0)}・複勝 ${pct(gr.top3Rate, 0)}・${gr.n}R）</small>` : ''}<br>人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>${vr ? `<small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : ''}</div>
+      ${renderVolFactors(pred)}
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>

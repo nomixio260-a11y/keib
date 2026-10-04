@@ -78,6 +78,11 @@ export const BT_STRATEGIES = [
     build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'careful', blend: settings?.blend }).tickets,
   },
   {
+    key: 'aiAuto',
+    label: '自動調整（荒れ度に合わせて◎の買い方を切り替え・1R千円）',
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'auto', blend: settings?.blend }).tickets,
+  },
+  {
     key: 'placeS',
     label: '複勝 ◎（自信度Sのレースだけ）',
     build: (pred, m) => (pred.confidence?.grade === 'S' && pred.placeCount ? [{ type: 'place', idx: [m['◎']], stake: 100 }] : []),

@@ -2,6 +2,7 @@
 
 import { BET_LABEL, BET_TYPES } from './constants.js';
 import { estimateOdds } from './market.js';
+import { AUTO_POLICY, POLICY_FORMS } from './volatility.js';
 
 export const STRATEGIES = {
   hit: { label: '的中重視', desc: '当たりやすさを優先。どれが当たっても払戻がそろうように配分します。', minEv: 0.8, maxTickets: 6, alloc: 'equal' },
@@ -15,6 +16,14 @@ export const STRATEGIES = {
     alloc: 'equal',
     grades: ['S'],
     onlyTypes: ['win', 'place'],
+  },
+  auto: {
+    label: '自動調整',
+    desc: '荒れ度（堅い・普通・荒れ）に合わせて、◎の買い方を自動で切り替えます。区分ごとの買い方は、学習期間の実際の払戻で回収率が最も良かったもの（scripts/fit-volatility.mjs）。予算はその買い方の点数で等分します。',
+    minEv: 0,
+    maxTickets: 6,
+    alloc: 'equal',
+    auto: true,
   },
 };
 
@@ -255,6 +264,19 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
   // 自信度の条件（控えめ）：条件に合わないレースは見送り
   if (st.grades && !st.grades.includes(pred.confidence?.grade)) return { strategy, budget, tickets: [], candidates: 0, skipped: true, stats: evaluateTickets([], pred) };
+  // 自動調整：荒れ度の区分ごとに決めた買い方（モデルがなければ的中重視と同じ）
+  if (st.auto) {
+    const form = AUTO_POLICY?.[pred.confidence?.volatility];
+    if (form && POLICY_FORMS[form]) {
+      const marks = pred.rows.map((r, i) => i).sort((a, b) => pred.rows[b].pWin - pred.rows[a].pWin);
+      const unordered = new Set(['quinella', 'wide', 'trio']);
+      const raw = POLICY_FORMS[form].build(marks, pred.placeCount, pred.n).map((t) => ({ ...t, idx: unordered.has(t.type) ? [...t.idx].sort((a, b) => a - b) : t.idx }));
+      const each = Math.max(100, Math.floor(budget / Math.max(1, raw.length) / 100) * 100);
+      const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
+      return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };
+    }
+    return recommendBets(pred, { budget, strategy: 'hit', types, blend });
+  }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
