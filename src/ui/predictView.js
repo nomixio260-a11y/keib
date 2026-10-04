@@ -381,14 +381,14 @@ export function renderBetsPanel(pred, rec, ctx) {
     <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>
-        ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${Number(state.blend) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.blend) === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>
     ${(() => {
       const flat = (STRATEGIES[state.strategy].betTemp ?? BET_TEMP) !== 1;
       const exotic = state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta', 'wide'].includes(t));
       const parts = [];
-      if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）選びます。予想の勝率どおりに選ぶより回収率が上がりました（単勝/複勝・学習期間の分割外 約1.2万レース：的中重視 90.9% → 94.6%、控えめ 92.5% → 93.6%）。的中率・期待値の欄はこの値です。`);
+      if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.2%（週平均 −2,115円 → +608円）、直近14週 99.3% → 127.8%（−256円 → +2,067円）。的中率・期待値の欄はこの値です。`);
       if (exotic) parts.push('<span class="bet-caution">的中重視に馬連・三連複・三連単を足すと、学習期間の約1.2万レースでは回収率が下がりました（単勝/複勝だけ 94.6% → 足すと 88.1%）。</span>');
       return parts.length ? `<p class="panel-note">${parts.join('<br>')}</p>` : '';
     })()}

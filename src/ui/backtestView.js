@@ -89,7 +89,7 @@ export function renderBacktest(ctx) {
   ];
   const settingNote =
     bt.source === 'recent'
-      ? `表示中の設定（重み付け <b>${esc(presetLabel(state))}</b>・オッズを混ぜる割合 <b>${Math.round(state.blend * 100)}%</b>）で、直近の開催日の${res.races}レースを検証した結果です（統計にはこの期間の結果も含まれるので、厳密な検証は「検証済み」を見てください）。`
+      ? `表示中の設定（重み付け <b>${esc(presetLabel(state))}</b>・オッズを混ぜる割合 <b>${state.blend === 'auto' ? '買い方の標準' : `${Math.round(state.blend * 100)}%`}</b>）で、直近の開催日の${res.races}レースを検証した結果です（統計にはこの期間の結果も含まれるので、厳密な検証は「検証済み」を見てください）。`
       : `重み付け <b>${esc(res.label)}</b>・オッズを混ぜる割合 50% で検証した結果です。`;
   return `${intro}${sourceSwitch(ctx)}
     <p class="bt-weights">${settingNote}</p>

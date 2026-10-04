@@ -5,7 +5,7 @@
 
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
-import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
+import { recommendBets, ticketsToText, STRATEGIES, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
 import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
@@ -51,6 +51,7 @@ const saved = loadSaved();
 // 校正し直したら、保存してある重み付けは使わない（古い係数用の値なので）
 const sameCal = saved.calId === CALIBRATION_ID;
 const NOISE_VERSION = 2;
+const BLEND_VERSION = 2;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
@@ -85,7 +86,8 @@ const state = {
   strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
   betTypes: sameCal && Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...DEFAULT_TYPES],
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
-  blend: BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : DEFAULT_BLEND,
+  // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
+  blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
 };
@@ -112,7 +114,7 @@ let current = { pred: null, rec: null };
 
 function persist() {
   const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits } = state;
-  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
 }
 
 const today = () => jstParts().date;
@@ -1073,7 +1075,7 @@ function onChange(e) {
     return refreshBets();
   }
   if (t.matches('[data-blend]')) {
-    state.blend = Number(t.value);
+    state.blend = t.value === 'auto' ? 'auto' : Number(t.value);
     persist();
     return refreshBets();
   }

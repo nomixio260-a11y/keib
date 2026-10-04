@@ -28,14 +28,17 @@ export function betView(pred, temp = BET_TEMP) {
 }
 
 export const STRATEGIES = {
-  hit: { label: '的中重視', desc: '当たりやすさを優先。どれが当たっても払戻がそろうように配分します。', minEv: 0.8, maxTickets: 6, alloc: 'equal' },
+  // 的中重視・控えめ：期待値は AI の確率だけで計算し（blend 0）、0.9 以上の買い目だけ買う。学習期間の分割外（約1.2万レース・186週）と
+  // 検証期間（14週）の両方で、0.5 混合・0.8 以上より回収率も週の収支も良かった（scratchpad/oof-grid*.mjs。README の開発日記）
+  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目だけを選び、どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, maxTickets: 6, alloc: 'equal' },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
   value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
   careful: {
     label: '控えめ',
-    desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を約4分の1に減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 94% 前後）。',
-    minEv: 0.8,
+    desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を大きく減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 98〜99% 前後）。',
+    minEv: 0.9,
+    blend: 0,
     maxTickets: 2,
     alloc: 'equal',
     grades: ['S'],
@@ -260,8 +263,15 @@ export function allocate(tickets, budget, mode) {
 }
 
 /** 推奨買い目 */
-/** 期待値の計算でオッズ（市場）の確率を混ぜる既定の割合 */
+/** 期待値の計算でオッズ（市場）の確率を混ぜる割合の標準（買い方に標準がないとき・印のフォーメーション） */
 export const DEFAULT_BLEND = 0.5;
+
+/** 期待値に混ぜる割合：'auto'（既定）は買い方ごとの標準（的中重視・控えめは 0、ほかは DEFAULT_BLEND）。数値ならそのまま */
+export function resolveBlend(blend, strategy = null) {
+  if (blend == null || blend === '' || blend === 'auto') return STRATEGIES[strategy]?.blend ?? DEFAULT_BLEND;
+  const v = Number(blend);
+  return Number.isFinite(v) ? v : DEFAULT_BLEND;
+}
 
 /**
  * 既定の買い方：的中重視 × 単勝・複勝。
@@ -276,14 +286,16 @@ export const DEFAULT_TYPES = ['win', 'place'];
 export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'];
 
 export const BLEND_OPTIONS = [
+  { value: 'auto', label: '買い方の標準（的中重視・控えめは混ぜない、ほかは50%）' },
   { value: 0, label: '混ぜない（AIのみ）' },
   { value: 0.3, label: '30%' },
-  { value: 0.5, label: '50%（標準）' },
+  { value: 0.5, label: '50%' },
   { value: 0.7, label: '70%' },
 ];
 
-export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend = DEFAULT_BLEND, betTemp = null } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
+  const blend = resolveBlend(blendIn, strategy);
   // オッズが出るまでは期待値を計算できない
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
   // 自信度の条件（控えめ）：条件に合わないレースは見送り
@@ -300,7 +312,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
       return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };
     }
-    return recommendBets(pred, { budget, strategy: 'hit', types, blend, betTemp });
+    return recommendBets(pred, { budget, strategy: 'hit', types, blend: blendIn, betTemp });
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   const minP = MIN_P[strategy] || MIN_P.balance;
@@ -441,7 +453,8 @@ export const FORMATIONS = [
 ];
 
 /** フォーメーションごとの点数・的中率・期待回収率（1点100円） */
-export function evaluateFormations(pred, blend = DEFAULT_BLEND) {
+export function evaluateFormations(pred, blendIn = DEFAULT_BLEND) {
+  const blend = resolveBlend(blendIn, null);
   const mk = marksToIndex(pred);
   if (mk['◎'] < 0 || pred.noOdds) return [];
   const p4 = [mk['○'], mk['▲'], ...mk['△']].filter((v) => v >= 0);

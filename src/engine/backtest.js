@@ -1,7 +1,7 @@
 // バックテスト：結果のわかっている過去レースで予想と買い方を検証する。
 
 import { predictRace, VOLATILITY_LABELS } from './model.js';
-import { recommendBets, buildCandidates, marksToIndex, ticketLabel } from './bets.js';
+import { recommendBets, buildCandidates, marksToIndex, ticketLabel, resolveBlend } from './bets.js';
 
 /** 払戻表のキー（馬番で表す） */
 export function payoutKey(type, nums) {
@@ -62,7 +62,7 @@ export const BT_STRATEGIES = [
     label: '馬連・ワイド・三連複 期待値1.1以上（実オッズがあるレース）',
     build: (pred, m, settings) =>
       pred.race?.exoticOdds
-        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], settings?.blend ?? 0.5)
+        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], resolveBlend(settings?.blend, null))
             .filter((c) => !c.estimated && c.ev >= 1.1 && c.pEv >= 0.02)
             .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
         : [],
@@ -92,7 +92,7 @@ export const BT_STRATEGIES = [
     label: 'ワイド 期待値1.0以上（実オッズがあるレース）',
     build: (pred, m, settings) =>
       pred.race?.exoticOdds
-        ? buildCandidates(pred, ['wide'], settings?.blend ?? 0.5)
+        ? buildCandidates(pred, ['wide'], resolveBlend(settings?.blend, null))
             .filter((c) => !c.estimated && c.ev >= 1.0 && c.pEv >= 0.1)
             .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
         : [],
@@ -118,7 +118,7 @@ export const BT_STRATEGIES = [
     label: '馬連・ワイド・三連複 期待値1.1以上（荒れ度「荒れ」だけ）',
     build: (pred, m, settings) =>
       pred.race?.exoticOdds && pred.confidence?.volatility === '荒れ'
-        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], settings?.blend ?? 0.5)
+        ? buildCandidates(pred, ['quinella', 'wide', 'trio'], resolveBlend(settings?.blend, null))
             .filter((c) => !c.estimated && c.ev >= 1.1 && c.pEv >= 0.02)
             .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
         : [],
@@ -128,7 +128,7 @@ export const BT_STRATEGIES = [
     label: 'ワイド 期待値1.0以上（荒れ度「荒れ」だけ）',
     build: (pred, m, settings) =>
       pred.race?.exoticOdds && pred.confidence?.volatility === '荒れ'
-        ? buildCandidates(pred, ['wide'], settings?.blend ?? 0.5)
+        ? buildCandidates(pred, ['wide'], resolveBlend(settings?.blend, null))
             .filter((c) => !c.estimated && c.ev >= 1.0 && c.pEv >= 0.1)
             .map((c) => ({ type: c.type, idx: c.idx, stake: 100 }))
         : [],
