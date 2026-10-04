@@ -384,11 +384,14 @@ export function renderBetsPanel(pred, rec, ctx) {
         ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${Number(state.blend) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>
-    <p class="panel-note">買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）選びます。予想の勝率どおりに選ぶより回収率が上がりました（的中重視・単勝/複勝：学習期間の分割外 約1.2万レースで 90.9% → 94.6%、検証期間 887レースで 95.8% → 99.2%）。的中率・期待値の欄はこの値です。${
-      state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta', 'wide'].includes(t))
-        ? '<br><span class="bet-caution">的中重視に馬連・三連複・三連単を足すと、学習期間の約1.2万レースでは回収率が下がりました（単勝/複勝だけ 94.6% → 足すと 88.1%）。</span>'
-        : ''
-    }</p>
+    ${(() => {
+      const flat = (STRATEGIES[state.strategy].betTemp ?? BET_TEMP) !== 1;
+      const exotic = state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta', 'wide'].includes(t));
+      const parts = [];
+      if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）選びます。予想の勝率どおりに選ぶより回収率が上がりました（単勝/複勝・学習期間の分割外 約1.2万レース：的中重視 90.9% → 94.6%、控えめ 92.5% → 93.6%）。的中率・期待値の欄はこの値です。`);
+      if (exotic) parts.push('<span class="bet-caution">的中重視に馬連・三連複・三連単を足すと、学習期間の約1.2万レースでは回収率が下がりました（単勝/複勝だけ 94.6% → 足すと 88.1%）。</span>');
+      return parts.length ? `<p class="panel-note">${parts.join('<br>')}</p>` : '';
+    })()}
     <div class="table-scroll"><table class="bets">
       <thead><tr><th>券種</th><th>買い目</th><th>的中率</th><th>オッズ</th><th title="(1−混合率)×AIの確率＋混合率×オッズの確率 で計算">期待値</th><th>金額</th></tr></thead>
       <tbody>${body}</tbody>

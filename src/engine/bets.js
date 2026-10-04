@@ -9,6 +9,7 @@ import { exactPL } from './simulate.js';
  * 買い目の選定（期待値・最低的中確率・並べ替え）に使う勝率の「平らさ」。予想の勝率（着順の温度）をこの倍率で平らにしてから選ぶ。
  * 予想そのもの（一覧の勝率・自信度・荒れ度）は平らにしない。利用者の指摘（荒れ度 1.2 のほうが成績が良い）を、
  * 学習期間の分割外 11,991レースと検証期間 887レースの実際の払戻で確かめて採用（scratchpad/oof-bets.mjs・setting-check.mjs）。
+ * 買い方ごと（学習期間の分割外・単勝/複勝）：的中重視 90.9% → 94.6%、控えめ 92.5% → 93.6% で採用。バランス・高配当は 1（STRATEGIES の betTemp）。
  */
 export const BET_TEMP = 1.2;
 
@@ -28,8 +29,9 @@ export function betView(pred, temp = BET_TEMP) {
 
 export const STRATEGIES = {
   hit: { label: '的中重視', desc: '当たりやすさを優先。どれが当たっても払戻がそろうように配分します。', minEv: 0.8, maxTickets: 6, alloc: 'equal' },
-  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly' },
-  value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly' },
+  // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
+  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
+  value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
   careful: {
     label: '控えめ',
     desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を約4分の1に減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 94% 前後）。',
