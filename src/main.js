@@ -334,6 +334,11 @@ async function fetchBundle() {
       }
     }
     if (!json) throw lastErr || new Error('data.json を取得できません');
+    // 最初の読み込みでは、HTML に埋め込んだ実データのほうが新しければそちらを使う（Artifact に古い data.json が残っているときなど）
+    if (!data.bundle) {
+      const inline = inlineBundle();
+      if (inline && String(inline.generatedAt || '') > String(json.generatedAt || '')) json = inline;
+    }
     if (data.bundle && String(json.generatedAt || '') < String(data.bundle.generatedAt || '')) return false;
     data.lastFetch = new Date().toISOString();
     if (data.bundle && json.generatedAt === data.bundle.generatedAt && !!json.live === data.live) {
