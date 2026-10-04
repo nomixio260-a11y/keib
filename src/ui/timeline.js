@@ -176,9 +176,15 @@ function renderArchivePicker(ctx) {
     .join('');
   const notLoaded = archive.index.filter((d) => !loaded.has(d.date)).length;
   const oldest = archive.index[archive.index.length - 1]?.date;
+  // 収支を出す期間：直近（data.json の開催日だけ）／全期間（アーカイブをすべて読み込む）
+  const archivedDays = days.filter((d) => d.archived).length;
+  const recentDays = days.filter((d) => !d.archived && d.races.some((r) => r.result?.length && !r.jump)).length;
+  const allDays = new Set([...archive.index.map((d) => d.date), ...days.filter((d) => d.races.some((r) => r.result?.length)).map((d) => d.date)]).size;
+  const seg = (on, act, label, disabled = false) => `<button type="button" class="seg-btn${on ? ' is-on' : ''}" data-action="${act}" aria-pressed="${on}"${disabled ? ' disabled' : ''}>${label}</button>`;
   return `<div class="archive-pick">
+    <div class="seg range-seg" role="group" aria-label="収支を出す期間"><span class="seg-label">期間</span>${seg(!archivedDays, 'unload-archive', `直近 ${recentDays}日`)}${seg(!notLoaded, 'load-all-archive', archive.allLoading ? '読み込み中…' : `全 ${allDays}日`, archive.allLoading)}</div>
     <label><span>過去の開催日</span><select data-archive aria-label="過去の開催日を選ぶ"><option value="">${archive.index.length}日から選ぶ</option>${opts}</select></label>
-    ${notLoaded ? `<button type="button" class="link-btn" data-action="load-all-archive"${archive.allLoading ? ' disabled' : ''}>${archive.allLoading ? '読み込み中…' : `全${archive.index.length}日の収支を計算`}</button>` : ''}
+    ${archivedDays && notLoaded ? `<button type="button" class="link-btn" data-action="unload-archive">読み込んだ過去の開催日（${archivedDays}日）を外す</button>` : ''}
     ${archive.loading ? `<small>${esc(dayLabel(archive.loading))} を読み込み中…</small>` : ''}${archive.error ? `<small class="tx-bad">${esc(archive.error)}</small>` : ''}
     <small class="muted">${oldest ? `${esc(dayLabel(oldest))}以降。` : ''}過去の日の予想は、いまのモデルで計算し直したものです（学習に使っていない期間）。</small>
   </div>`;

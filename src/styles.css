@@ -3616,3 +3616,36 @@ table.bt-table {
   line-height: 1.6;
 }
 .pm-horse circle.f0 { fill: var(--surface-3); }
+
+/* 収支を出す期間（直近／全期間） */
+.range-seg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.range-seg .seg-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* 2段目で外した買い目 */
+.bet-dropped {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.bet-dropped summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.bet-dropped ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.bet-dropped li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}

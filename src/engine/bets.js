@@ -32,7 +32,9 @@ export const STRATEGIES = {
   // 検証期間（14週）の両方で、0.5 混合・0.8 以上より回収率も週の収支も良かった（scratchpad/oof-grid*.mjs。README の開発日記）。
   // minOdds（的中重視だけ）：オッズ 1.0 倍の買い目（当たっても元返し）は買わない（週の収支は変わらず、回収率は学習期間 107.2→107.5%・検証期間 127.8→129.2%。
   // 控えめでは両方の期間でわずかに下がったので付けない）
-  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目だけを選び、どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: 1.05, maxTickets: 6, alloc: 'equal' },
+  // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
+  // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
+  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目を選び、そこから当たる確率が 50% 以上のものだけを買います。どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal' },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
   value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
@@ -41,6 +43,7 @@ export const STRATEGIES = {
     desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を大きく減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 98〜99% 前後）。',
     minEv: 0.9,
     blend: 0,
+    keepMinP: 0.5,
     maxTickets: 2,
     alloc: 'equal',
     grades: ['S'],
@@ -287,6 +290,21 @@ export const DEFAULT_TYPES = ['win', 'place'];
 /** オッズを推定するしかない券種（複勝は実際のオッズがないときだけ推定） */
 export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'];
 
+/** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめは 50%、ほかは絞らない） */
+export function resolveKeep(keep, strategy = null) {
+  if (keep == null || keep === '' || keep === 'auto') return STRATEGIES[strategy]?.keepMinP ?? 0;
+  const v = Number(keep);
+  return Number.isFinite(v) ? v : 0;
+}
+
+export const KEEP_OPTIONS = [
+  { value: 'auto', label: '買い方の標準（的中重視・控えめは50%以上）' },
+  { value: 0, label: '絞らない' },
+  { value: 0.3, label: '30%以上（収支を重く見る）' },
+  { value: 0.5, label: '50%以上' },
+  { value: 0.7, label: '70%以上（当たり重視）' },
+];
+
 export const BLEND_OPTIONS = [
   { value: 'auto', label: '買い方の標準（的中重視・控えめは混ぜない、ほかは50%）' },
   { value: 0, label: '混ぜない（AIのみ）' },
@@ -295,7 +313,7 @@ export const BLEND_OPTIONS = [
   { value: 0.7, label: '70%' },
 ];
 
-export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto' } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   const blend = resolveBlend(blendIn, strategy);
   // オッズが出るまでは期待値を計算できない
@@ -314,7 +332,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
       return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };
     }
-    return recommendBets(pred, { budget, strategy: 'hit', types, blend: blendIn, betTemp });
+    return recommendBets(pred, { budget, strategy: 'hit', types, blend: blendIn, betTemp, keep });
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   const minP = MIN_P[strategy] || MIN_P.balance;
@@ -331,10 +349,18 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
     picked.push(c);
     perType[c.type] = (perType[c.type] || 0) + 1;
   }
-  allocate(picked, budget, st.alloc);
-  const tickets = picked.filter((t) => t.stake > 0);
+  // 2段目：決めた買い目から、当たる確率（平らにしない元の予想）が下限以上のものだけを残す（外した分の予算は残りに配り直す）
+  const keepMinP = resolveKeep(keep, strategy);
+  for (const t of picked) t.pHit = priceTicket({ type: t.type, idx: t.idx }, pred, 0).p;
+  const kept = keepMinP > 0 ? picked.filter((t) => t.pHit >= keepMinP) : picked;
+  const dropped = keepMinP > 0 ? picked.filter((t) => t.pHit < keepMinP) : [];
+  allocate(kept, budget, st.alloc);
+  const tickets = kept.filter((t) => t.stake > 0);
   tickets.sort((a, b) => BET_TYPES.indexOf(a.type) - BET_TYPES.indexOf(b.type) || b.stake - a.stake);
-  return { strategy, budget, tickets, candidates: cands.length, stats: evaluateTickets(tickets, pred) };
+  dropped.forEach((t) => {
+    t.stake = 0;
+  });
+  return { strategy, budget, tickets, dropped, keepMinP, candidates: cands.length, stats: evaluateTickets(tickets, pred) };
 }
 
 /** 着順（rows のインデックス a,b,c）に対して買い目が当たっているか */

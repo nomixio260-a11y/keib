@@ -2,7 +2,7 @@
 
 import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS, PRESETS } from '../engine/model.js';
-import { BLEND_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { BLEND_OPTIONS, KEEP_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
@@ -340,7 +340,7 @@ export function renderBetsPanel(pred, rec, ctx) {
           (t) => `<tr>
           <td>${esc(BET_LABEL[t.type])}</td>
           <td class="num bt-combo">${esc(ticketLabel(t))}</td>
-          <td class="num">${pct(t.pEv ?? t.p)}</td>
+          <td class="num">${pct(t.pHit ?? t.pEv ?? t.p)}</td>
           <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : t.type !== 'win' ? '<small class="tx-good" title="JRA の実際のオッズ">実</small>' : ''}</td>
           <td class="num ${evClass(t.ev)}">${t.ev.toFixed(2)}</td>
           <td class="num">${t.stake.toLocaleString('ja-JP')}</td>
@@ -349,6 +349,8 @@ export function renderBetsPanel(pred, rec, ctx) {
         .join('')
     : rec.skipped
     ? `<tr><td colspan="6" class="muted bt-empty">${esc(rec.skipReason || '自信度 S のレースだけ買う設定（控えめ）なので、このレースは見送りです。')}</td></tr>`
+    : rec.dropped?.length
+    ? `<tr><td colspan="6" class="muted bt-empty">期待値の条件を満たす買い目はありましたが、当たる確率が ${pct(rec.keepMinP, 0)} 以上のものがないので見送りです（下の「外した買い目」）。</td></tr>`
     : `<tr><td colspan="6" class="muted bt-empty">期待値の条件（${STRATEGIES[rec.strategy].minEv.toFixed(2)}以上）を満たす買い目がありません。このレースは見送りか、戦略や券種を変えてみてください。${
         state.betTypes.includes('place') && !pred.rows.some((r) => r.entry.placeMin > 1)
           ? '<br>複勝の実際のオッズは発走の2時間ほど前から取り込みます。それまでは単勝オッズからの推定（控えめ）で計算しています。'
@@ -379,6 +381,12 @@ export function renderBetsPanel(pred, rec, ctx) {
         : ''
     }
     <div class="field-row">
+      <label class="field" for="keep">当たる確率で絞る</label>
+      <select id="keep" data-keep>
+        ${KEEP_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.keep ?? 'auto') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>
         ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.blend) === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
@@ -393,9 +401,16 @@ export function renderBetsPanel(pred, rec, ctx) {
       return parts.length ? `<p class="panel-note">${parts.join('<br>')}</p>` : '';
     })()}
     <div class="table-scroll"><table class="bets">
-      <thead><tr><th>券種</th><th>買い目</th><th>的中率</th><th>オッズ</th><th title="(1−混合率)×AIの確率＋混合率×オッズの確率 で計算">期待値</th><th>金額</th></tr></thead>
+      <thead><tr><th>券種</th><th>買い目</th><th title="AI の予想（平らにしない元の確率）で当たる確率">的中率</th><th>オッズ</th><th title="少し平らにした AI の確率（とオッズの確率を混ぜた値）× オッズ">期待値</th><th>金額</th></tr></thead>
       <tbody>${body}</tbody>
     </table></div>
+    ${
+      rec.dropped?.length
+        ? `<details class="bet-dropped"><summary>外した買い目 ${rec.dropped.length}点（当たる確率が ${pct(rec.keepMinP, 0)} 未満）</summary><ul>${rec.dropped
+            .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span></li>`)
+            .join('')}</ul><p class="muted">期待値の条件は満たしていますが、当たりにくいので買いません。学習に使っていない約1.2万レースで、こうして絞ると的中率が 52% → 76% に上がり、損が続いたときの落ち込みが約3分の1になりました（回収率は 107.5% → 105.4%）。</p></details>`
+        : ''
+    }
     <dl class="bet-stats">
       <div><dt>合計</dt><dd class="num">${yen(total)}</dd></div>
       <div><dt>どれかが当たる確率</dt><dd class="num">${pct(rec.stats.hitRate)}</dd></div>

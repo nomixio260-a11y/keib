@@ -146,3 +146,22 @@ test('買い目は勝率を少し平らにして選ぶ（予想の勝率その�
   const b = recommendBets(flat, { budget: 3000, betTemp: 1 }).tickets.map((t) => `${t.type}:${t.idx.join('-')}:${t.stake}`);
   assert.deepEqual(a, b);
 });
+
+test('2段目：決めた買い目から当たる確率が下限以上のものだけ買う', () => {
+  let both = false;
+  for (let seed = 1; seed <= 40; seed++) {
+    const pred = predictRace(makeRace({ seed }), { sims: 0 });
+    const all = recommendBets(pred, { budget: 3000, keep: 0 });
+    const kept = recommendBets(pred, { budget: 3000 });
+    assert.equal(kept.keepMinP, 0.5, '的中重視の標準は 50%');
+    for (const t of kept.tickets) assert.ok(t.pHit >= 0.5, `${t.type} ${t.pHit}`);
+    for (const t of kept.dropped) assert.ok(t.pHit < 0.5 && t.stake === 0);
+    assert.equal(kept.tickets.length + kept.dropped.length, all.tickets.length);
+    if (kept.tickets.length) assert.equal(kept.tickets.reduce((a, t) => a + t.stake, 0), 3000);
+    if (kept.tickets.length && kept.dropped.length) both = true;
+  }
+  assert.ok(both, '残す買い目と外す買い目の両方があるレースがある');
+  // 30% にゆるめると残る買い目は増える（同じか多い）
+  const pred = predictRace(makeRace({ seed: 7 }), { sims: 0 });
+  assert.ok(recommendBets(pred, { budget: 3000, keep: 0.3 }).tickets.length >= recommendBets(pred, { budget: 3000, keep: 0.5 }).tickets.length);
+});

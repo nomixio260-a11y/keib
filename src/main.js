@@ -5,7 +5,7 @@
 
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
-import { recommendBets, ticketsToText, STRATEGIES, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
+import { recommendBets, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
 import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
@@ -88,6 +88,8 @@ const state = {
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
+  // 2段目の絞り込み（当たる確率の下限）。既定は買い方の標準（的中重視・控えめは 50% 以上）
+  keep: KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
 };
@@ -113,8 +115,8 @@ const dataView = {
 let current = { pred: null, rec: null };
 
 function persist() {
-  const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits } = state;
-  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
+  const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, edits } = state;
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, edits, imported });
 }
 
 const today = () => jstParts().date;
@@ -294,6 +296,24 @@ async function loadAllArchive() {
   renderRailOnly();
 }
 
+/** 読み込んだ過去の開催日（アーカイブ）を外して、data.json の直近の開催日だけに戻す */
+function unloadArchive() {
+  if (!archive.loaded.size || !data.bundle) return;
+  const dates = new Set(archive.loaded.keys());
+  archive.loaded.clear();
+  data.bundle.days = (data.bundle.days || []).filter((d) => !(d.archived && dates.has(d.date)));
+  raceIndex = new Map();
+  for (const d of data.bundle.days) for (const r of d.races) raceIndex.set(r.id, r);
+  if (dates.has(state.day)) {
+    userPicked = false;
+    state.day = null;
+    ensureSelection();
+  }
+  scheduleQuickPicks();
+  persist();
+  renderPredict();
+}
+
 /** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
 async function fetchBundle() {
   try {
@@ -376,7 +396,7 @@ let quickTimer = null;
 // 予想画面の表示：'race'（レースごと）か 'sheet'（その日の買い目表）
 let view = 'race';
 
-const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
+const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend, keep: state.keep });
 
 function pickOf(pred, race) {
   if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
@@ -501,14 +521,14 @@ function computeCurrent() {
   const pred = getPrediction(race);
   if (pred.empty) return { pred, rec: null };
   quickPicks.set(race.id, pickOf(pred, race));
-  const rec = recommendBets(pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
+  const rec = recommendBets(pred, betOpts());
   return { pred, rec };
 }
 
 const sheetCtx = () => ({
   ...ctx(),
   predFor: (race) => getPrediction(effectiveRace(race), true),
-  recFor: (pred) => recommendBets(pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend }),
+  recFor: (pred) => recommendBets(pred, betOpts()),
 });
 
 function renderPredict() {
@@ -566,7 +586,7 @@ function refreshBets() {
   scheduleQuickPicks();
   if (view === 'sheet') return renderPredict();
   if (!current.pred || current.pred.empty) return;
-  current.rec = recommendBets(current.pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
+  current.rec = recommendBets(current.pred, betOpts());
   setHTML($('#slot-bets'), renderBetsPanel(current.pred, current.rec, ctx()));
   const sum = $('#slot-summary');
   if (sum) setHTML(sum, renderSummary(current.pred, current.rec, state.preset));
@@ -923,6 +943,7 @@ function onClick(e) {
   }
   if (act === 'run-recent') return runRecentBacktest();
   if (act === 'load-all-archive') return void loadAllArchive();
+  if (act === 'unload-archive') return void unloadArchive();
   if (act === 'reload-data') {
     fetchBundle().then((changed) => {
       if (changed) applyDataUpdate();
@@ -1071,6 +1092,11 @@ function onChange(e) {
     if (t.checked) set.add(t.dataset.bettype);
     else set.delete(t.dataset.bettype);
     state.betTypes = BET_TYPES.filter((x) => set.has(x));
+    persist();
+    return refreshBets();
+  }
+  if (t.matches('[data-keep]')) {
+    state.keep = t.value === 'auto' ? 'auto' : Number(t.value);
     persist();
     return refreshBets();
   }

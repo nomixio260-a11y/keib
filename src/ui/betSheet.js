@@ -87,7 +87,7 @@ function betsCell(row) {
   const { rec, settle } = row;
   if (rec.noOdds && row.race.provisional) return '<span class="muted">出馬表待ち<br><small>枠順・騎手・オッズが出たら計算します</small></span>';
   if (rec.noOdds) return '<span class="muted">オッズ待ち<br><small>単勝オッズが出たら計算します</small></span>';
-  if (!rec.tickets.length) return `<span class="muted">見送り${rec.skipped ? `<br><small>${esc(rec.skipReason || '自信度の条件に合わないレース')}</small>` : '<br><small>期待値の条件に合う買い目なし</small>'}</span>`;
+  if (!rec.tickets.length) return `<span class="muted">見送り${rec.skipped ? `<br><small>${esc(rec.skipReason || '自信度の条件に合わないレース')}</small>` : rec.dropped?.length ? `<br><small>当たる確率 ${pct(rec.keepMinP, 0)} 以上の買い目なし</small>` : '<br><small>期待値の条件に合う買い目なし</small>'}</span>`;
   const lines = rec.tickets.map((t, i) => {
     const hit = settle?.detail?.[i]?.pay > 0;
     return `<div class="sheet-bet${hit ? ' tx-hit' : ''}">${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> <span class="num">${yen(t.stake)}</span>${hit ? ' ✓' : ''}</div>`;
