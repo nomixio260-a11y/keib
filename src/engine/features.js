@@ -107,6 +107,77 @@ export const FEATURE_NAMES = [
 const F = Object.fromEntries(FEATURE_NAMES.map((k, i) => [k, i]));
 export const FEATURE_INDEX = F;
 
+/** 別の投票市場（馬連・ワイド・三連複・馬単）のオッズから作る特徴量の名前 */
+export const EXOTIC_FEATURE_NAMES = ['exoticKnown', 'q2Log', 'q2VsWin', 'top2VsHv', 'wideVsHv', 'trioVsHv', 'exWinLog', 'exVsWin'];
+
+/**
+ * 馬連・ワイド・三連複・馬単のオッズ（race.exoticOdds か data/odds-final の形：{ quinella: {"1-2": 倍率}, wide, trio: {"1-2-3": 倍率}, exacta: {"1>2": 倍率} }）から、
+ * 各馬の特徴（EXOTIC_FEATURE_NAMES の順）。numbers：馬番の並び、q：単勝からの市場確率（合計1）。
+ *   q2Log … 馬連オッズから推定した強さ（log p_ij = s_i + s_j + c の最小二乗 → softmax）、q2VsWin … 単勝とのずれ
+ *   top2VsHv / wideVsHv / trioVsHv … 馬連・ワイド・三連複から見た連対・3着内確率と、単勝からの Harville 確率のずれ（log 比）
+ *   exWinLog / exVsWin … 馬単オッズから見た勝率（1着がその馬の組み合わせの合計）とそのずれ
+ * 4券種がそろわないときは全部 0（exoticKnown=0）
+ */
+export function exoticFeatures(doc, numbers, q) {
+  const n = numbers.length;
+  const idx = new Map(numbers.map((num, i) => [num, i]));
+  const zero = numbers.map(() => [0, 0, 0, 0, 0, 0, 0, 0]);
+  if (!doc || n < 4) return zero;
+  const implied = (odds, arity) => {
+    const out = [];
+    let sum = 0;
+    for (const [key, o] of Object.entries(odds || {})) {
+      if (!(o > 0)) continue;
+      const ids = key.split('-').map((v) => idx.get(Number(v)));
+      if (ids.length !== arity || ids.some((v) => v == null)) continue;
+      out.push({ ids, p: 1 / o });
+      sum += 1 / o;
+    }
+    for (const x of out) x.p /= sum || 1;
+    return out;
+  };
+  const pairs = implied(doc.quinella, 2);
+  const wides = implied(doc.wide, 2);
+  const trios = implied(doc.trio, 3);
+  // 馬単（"1着>2着"）：1着がその馬の組み合わせの合計 ＝ 馬単市場から見た勝率
+  const exacta = [];
+  {
+    let sum = 0;
+    for (const [key, o] of Object.entries(doc.exacta || {})) {
+      if (!(o > 0)) continue;
+      const ids = key.split('>').map((v) => idx.get(Number(v)));
+      if (ids.length !== 2 || ids.some((v) => v == null)) continue;
+      exacta.push({ ids, p: 1 / o });
+      sum += 1 / o;
+    }
+    for (const x of exacta) x.p /= sum || 1;
+  }
+  const expect = (n * (n - 1)) / 2;
+  if (pairs.length < expect * 0.9 || wides.length < expect * 0.9 || trios.length < ((n * (n - 1) * (n - 2)) / 6) * 0.9 || exacta.length < expect * 2 * 0.9) return zero;
+  const exWin = new Array(n).fill(0);
+  for (const { ids, p } of exacta) exWin[ids[0]] += p;
+  // 馬連：log p_ij = s_i + s_j + c の最小二乗（完全グラフなら閉じた形）
+  const R = new Array(n).fill(0);
+  const cnt = new Array(n).fill(0);
+  for (const { ids, p } of pairs) for (const i of ids) { R[i] += Math.log(Math.max(p, 1e-6)); cnt[i]++; }
+  const c = R.reduce((a, b) => a + b, 0) / (n * (n - 1));
+  const sRaw = R.map((r, i) => (r - (cnt[i] || n - 1) * c) / Math.max(1, (cnt[i] || n - 1) - 1));
+  const mx = Math.max(...sRaw);
+  const Z = sRaw.reduce((a, v) => a + Math.exp(v - mx), 0);
+  const q2 = sRaw.map((v) => Math.exp(v - mx) / Z);
+  const top2 = new Array(n).fill(0);
+  for (const { ids, p } of pairs) for (const i of ids) top2[i] += p;
+  const wideSum = new Array(n).fill(0);
+  for (const { ids, p } of wides) for (const i of ids) wideSum[i] += p;
+  const trio3 = new Array(n).fill(0);
+  for (const { ids, p } of trios) for (const i of ids) trio3[i] += p;
+  const k3 = n >= 8 ? 3 : 2;
+  const hv2 = harvilleTopK(q, 2);
+  const hv3 = harvilleTopK(q, k3);
+  const lg = (v) => Math.log(Math.max(v, 1e-4));
+  return numbers.map((_, i) => [1, lg(q2[i]), lg(q2[i]) - lg(q[i]), lg(top2[i]) - lg(hv2[i]), lg(wideSum[i] * (k3 === 3 ? 1.5 : 1)) - lg(hv3[i]), lg(trio3[i]) - lg(hv3[i]), lg(exWin[i]), lg(exWin[i]) - lg(q[i])]);
+}
+
 /**
  * レースの全馬の特徴量。
  *   careerOf(entry) … 馬の通算要約（careerSnapshot の形）か null

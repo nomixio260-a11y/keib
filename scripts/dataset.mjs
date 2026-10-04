@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { loadHistory, writeJson, readJson, loadHorseInfo, DATA_DIR } from '../src/collector/store.js';
 import { indexHistory, preRaceCard, careerBefore } from '../src/data/history.js';
-import { raceFeatures, FEATURE_NAMES, harvilleTopK } from '../src/engine/features.js';
+import { raceFeatures, FEATURE_NAMES, exoticFeatures, EXOTIC_FEATURE_NAMES } from '../src/engine/features.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
 import { usable } from './calibrate.mjs';
 import { tally, rates, CONDITION_KEYS } from '../src/data/rates.js';
@@ -19,7 +19,7 @@ const EXTRA = !!EXTRA_MODE;
 //   q2VsWin … 馬連の見方と単勝の見方のずれ（q2Log − logq）、top2VsHv … 馬連から見た連対確率と単勝からの Harville 連対確率のずれ、
 //   wideVsHv … ワイドから見た3着内確率のずれ、trioVsHv … 三連複から見た3着内確率のずれ（いずれも log 比）
 //   exWinLog … 馬単オッズから見た勝率（1着がその馬の組み合わせの合計。log）、exVsWin … 馬単の見方と単勝の見方のずれ（exWinLog − logq）
-const EXOTIC_NAMES = ['exoticKnown', 'q2Log', 'q2VsWin', 'top2VsHv', 'wideVsHv', 'trioVsHv', 'exWinLog', 'exVsWin'];
+const EXOTIC_NAMES = EXOTIC_FEATURE_NAMES;
 const REQUIRE_EXOTIC = process.env.DATASET_REQUIRE_EXOTIC === '1';
 const HISTORY_NAMES = ['hPopResid', 'hMktResid', 'hSurfStarts', 'hSurfTop3', 'hDistTop3', 'hCourseTop3', 'hGoingTop3', 'hPairStarts', 'hPairTop3', 'tDebutWin', 'tDebutStarts', 'jWin90', 'tWin90', 'jMktResid', 'tMktResid'];
 // 実験用（DATASET_EXTRA=1）：馬と騎手・厩舎の履歴を深く見る特徴量
@@ -51,66 +51,6 @@ const windowRate = (map, key, dn, prior = 60, avgW = 0.07, avgT = 0.21) => {
   return { starts: s, winRate: (w + prior * avgW) / (s + prior), top3Rate: (t + prior * avgT) / (s + prior) };
 };
 const shrink = (k, n, prior, w = 4) => (k + prior * w) / (n + w);
-/** 馬連・ワイド・三連複の確定オッズから、各馬の特徴（EXOTIC_NAMES の順）。numbers：馬番の並び、q：単勝からの市場確率（合計1） */
-function exoticFeatures(doc, numbers, q) {
-  const n = numbers.length;
-  const idx = new Map(numbers.map((num, i) => [num, i]));
-  const zero = numbers.map(() => [0, 0, 0, 0, 0, 0, 0, 0]);
-  if (!doc || n < 4) return zero;
-  const implied = (odds, arity) => {
-    const out = [];
-    let sum = 0;
-    for (const [key, o] of Object.entries(odds || {})) {
-      if (!(o > 0)) continue;
-      const ids = key.split('-').map((v) => idx.get(Number(v)));
-      if (ids.length !== arity || ids.some((v) => v == null)) continue;
-      out.push({ ids, p: 1 / o });
-      sum += 1 / o;
-    }
-    for (const x of out) x.p /= sum || 1;
-    return out;
-  };
-  const pairs = implied(doc.quinella, 2);
-  const wides = implied(doc.wide, 2);
-  const trios = implied(doc.trio, 3);
-  // 馬単（"1着>2着"）：1着がその馬の組み合わせの合計 ＝ 馬単市場から見た勝率
-  const exacta = [];
-  {
-    let sum = 0;
-    for (const [key, o] of Object.entries(doc.exacta || {})) {
-      if (!(o > 0)) continue;
-      const ids = key.split('>').map((v) => idx.get(Number(v)));
-      if (ids.length !== 2 || ids.some((v) => v == null)) continue;
-      exacta.push({ ids, p: 1 / o });
-      sum += 1 / o;
-    }
-    for (const x of exacta) x.p /= sum || 1;
-  }
-  const expect = (n * (n - 1)) / 2;
-  if (pairs.length < expect * 0.9 || wides.length < expect * 0.9 || trios.length < ((n * (n - 1) * (n - 2)) / 6) * 0.9 || exacta.length < expect * 2 * 0.9) return zero;
-  const exWin = new Array(n).fill(0);
-  for (const { ids, p } of exacta) exWin[ids[0]] += p;
-  // 馬連：log p_ij = s_i + s_j + c の最小二乗（完全グラフなら閉じた形）
-  const R = new Array(n).fill(0);
-  const cnt = new Array(n).fill(0);
-  for (const { ids, p } of pairs) for (const i of ids) { R[i] += Math.log(Math.max(p, 1e-6)); cnt[i]++; }
-  const c = R.reduce((a, b) => a + b, 0) / (n * (n - 1));
-  const sRaw = R.map((r, i) => (r - (cnt[i] || n - 1) * c) / Math.max(1, (cnt[i] || n - 1) - 1));
-  const mx = Math.max(...sRaw);
-  const Z = sRaw.reduce((a, v) => a + Math.exp(v - mx), 0);
-  const q2 = sRaw.map((v) => Math.exp(v - mx) / Z);
-  const top2 = new Array(n).fill(0);
-  for (const { ids, p } of pairs) for (const i of ids) top2[i] += p;
-  const wideSum = new Array(n).fill(0);
-  for (const { ids, p } of wides) for (const i of ids) wideSum[i] += p;
-  const trio3 = new Array(n).fill(0);
-  for (const { ids, p } of trios) for (const i of ids) trio3[i] += p;
-  const k3 = n >= 8 ? 3 : 2;
-  const hv2 = harvilleTopK(q, 2);
-  const hv3 = harvilleTopK(q, k3);
-  const lg = (v) => Math.log(Math.max(v, 1e-4));
-  return numbers.map((_, i) => [1, lg(q2[i]), lg(q2[i]) - lg(q[i]), lg(top2[i]) - lg(hv2[i]), lg(wideSum[i] * (k3 === 3 ? 1.5 : 1)) - lg(hv3[i]), lg(trio3[i]) - lg(hv3[i]), lg(exWin[i]), lg(exWin[i]) - lg(q[i])]);
-}
 /** 馬の履歴（その日より前の出走）から今日の条件に合わせた集計 */
 function horseHistory(index, horseId, date, rec, jockey) {
   const runs = (index.byHorse.get(horseId) || []).filter((h) => h.date < date && h.runner.finish > 0);
