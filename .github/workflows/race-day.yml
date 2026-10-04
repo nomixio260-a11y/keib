@@ -10,7 +10,7 @@
 #   手動：Actions → Race day → Run workflow（分と間隔を指定すると固定。relay=1 なら終了後に次を予約して自動運転に戻る）
 #   止めるとき：Actions → Race day → … → Disable workflow（実行中の run も Cancel）
 #   data ブランチには data.json のほか、オッズの推移（odds/）と結果の記録（history/）も貯める（1コミットを上書き）。
-#   過去の開催日（直近4日）は history/ の記録から作るので、手元の data/history から history/ に記録を足せば画面に出る
+#   過去の開催日は、直近14日を data.json に入れ、それより前は days/（開催日ごとのアーカイブ。結果の出そろった日を自動で書き足す）から画面が読み込む
 name: Race day
 
 on:
@@ -85,7 +85,7 @@ jobs:
             echo "== $n 回目 $(date -u +%FT%TZ)"
             # ほかから data ブランチに push されたもの（過去の結果の記録など）を取り込む
             if git -C out fetch -q origin data 2>/dev/null; then git -C out reset -q --hard FETCH_HEAD; fi
-            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --exotic out/odds-final --skip-if-idle"
+            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --exotic out/odds-final --days-dir out/days --skip-if-idle"
             [ -s out/data.json ] && args="$args --previous out/data.json"
             if node scripts/build-data.mjs $args > build.log 2>&1; then
               tail -12 build.log

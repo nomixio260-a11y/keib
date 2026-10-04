@@ -92,7 +92,53 @@ export function dayScore(races, quickPicks) {
   return s;
 }
 
-function renderDayScore(races, quickPicks) {
+/** AI推奨（今の買い方）を実際の払戻で精算した合計。quickPicks の settle を足す */
+export function profitOf(races, quickPicks) {
+  const s = { races: 0, bets: 0, stake: 0, pay: 0, hitRaces: 0, pending: 0 };
+  for (const r of races) {
+    if (!r.result?.length || r.jump) continue;
+    const p = quickPicks.get(r.id);
+    if (!p) {
+      s.pending++;
+      continue;
+    }
+    if (p.jump || !p.settle) continue;
+    s.races++;
+    if (p.settle.stake > 0) {
+      s.bets++;
+      s.stake += p.settle.stake;
+      s.pay += p.settle.pay;
+      if (p.settle.hits) s.hitRaces++;
+    }
+  }
+  return s;
+}
+
+const signedYen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('ja-JP')}円`;
+
+function renderProfit(races, ctx) {
+  const { quickPicks, days, state, strategyLabel } = ctx;
+  const d = profitOf(races, quickPicks);
+  const allRaces = days.flatMap((x) => x.races);
+  const p = profitOf(allRaces, quickPicks);
+  const doneDays = days.filter((x) => x.races.some((r) => r.result?.length && !r.jump)).length;
+  const head = `<div class="ds-title">AI推奨どおりに買った場合 <small>${esc(strategyLabel)}・1R ${Number(state.budget).toLocaleString('ja-JP')}円</small></div>`;
+  const dayHtml = d.races
+    ? `<dl class="ds-grid ds-grid-3">
+      <div><dt>投資</dt><dd class="num">${d.stake.toLocaleString('ja-JP')}<small>円</small></dd></div>
+      <div><dt>払戻</dt><dd class="num">${Math.round(d.pay).toLocaleString('ja-JP')}<small>円</small></dd></div>
+      <div><dt>収支</dt><dd class="num ${d.pay - d.stake >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(d.pay - d.stake)}</dd></div>
+    </dl><p class="ds-note">この日 ${d.races}R（買い ${d.bets}R・的中 ${d.hitRaces}R）${d.pending ? `・計算中 ${d.pending}R` : ''}</p>`
+    : '<p class="ds-note">計算中…</p>';
+  const periodHtml =
+    doneDays > 1 && p.races
+      ? `<div class="ds-period"><span>表示中の ${doneDays}日の合計</span><b class="num ${p.pay - p.stake >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(p.pay - p.stake)}</b><small>投資 ${p.stake.toLocaleString('ja-JP')}円・払戻 ${Math.round(p.pay).toLocaleString('ja-JP')}円・回収率 ${p.stake ? pct(p.pay / p.stake, 1) : '—'}・${p.races}R${p.pending ? `（計算中 ${p.pending}R）` : ''}</small></div>`
+      : '';
+  return `<div class="ds-profit">${head}${dayHtml}${periodHtml}</div>`;
+}
+
+function renderDayScore(races, ctx) {
+  const { quickPicks } = ctx;
   const withResult = races.filter((r) => r.result?.length && !r.jump);
   if (!withResult.length) return '';
   const s = dayScore(races, quickPicks);
@@ -105,6 +151,36 @@ function renderDayScore(races, quickPicks) {
       <div><dt>単勝回収</dt><dd class="num ${s.winRet >= s.races * 100 ? 'tx-good' : ''}">${pct(s.winRet / (s.races * 100), 0)}</dd></div>
       <div><dt>複勝回収</dt><dd class="num ${s.placeRet >= s.placeBets * 100 ? 'tx-good' : ''}">${s.placeBets ? pct(s.placeRet / (s.placeBets * 100), 0) : '—'}</dd></div>
     </dl>
+    ${renderProfit(races, ctx)}
+  </div>`;
+}
+
+/** 過去の開催日（アーカイブ）を選ぶ */
+function renderArchivePicker(ctx) {
+  const { archive, days, state } = ctx;
+  if (!archive?.index?.length) return '';
+  const loaded = new Set(days.map((d) => d.date));
+  const byMonth = new Map();
+  for (const d of archive.index) {
+    const m = d.date.slice(0, 7);
+    if (!byMonth.has(m)) byMonth.set(m, []);
+    byMonth.get(m).push(d);
+  }
+  const opts = [...byMonth]
+    .map(
+      ([m, ds]) =>
+        `<optgroup label="${Number(m.slice(0, 4))}年${Number(m.slice(5, 7))}月">${ds
+          .map((d) => `<option value="${esc(d.date)}"${d.date === state.day ? ' selected' : ''}>${esc(dayLabel(d.date))} ${esc((d.venues || []).join('・'))} ${d.races}R${loaded.has(d.date) ? ' ✓' : ''}</option>`)
+          .join('')}</optgroup>`,
+    )
+    .join('');
+  const notLoaded = archive.index.filter((d) => !loaded.has(d.date)).length;
+  const oldest = archive.index[archive.index.length - 1]?.date;
+  return `<div class="archive-pick">
+    <label><span>過去の開催日</span><select data-archive aria-label="過去の開催日を選ぶ"><option value="">${archive.index.length}日から選ぶ</option>${opts}</select></label>
+    ${notLoaded ? `<button type="button" class="link-btn" data-action="load-all-archive"${archive.allLoading ? ' disabled' : ''}>${archive.allLoading ? '読み込み中…' : `全${archive.index.length}日の収支を計算`}</button>` : ''}
+    ${archive.loading ? `<small>${esc(dayLabel(archive.loading))} を読み込み中…</small>` : ''}${archive.error ? `<small class="tx-bad">${esc(archive.error)}</small>` : ''}
+    <small class="muted">${oldest ? `${esc(dayLabel(oldest))}以降。` : ''}過去の日の予想は、いまのモデルで計算し直したものです（学習に使っていない期間）。</small>
   </div>`;
 }
 
@@ -178,8 +254,8 @@ export function renderRail(ctx) {
     state.day !== 'import' && races.length
       ? `<button type="button" class="sheet-btn${ctx.view === 'sheet' ? ' is-on' : ''}" data-action="show-sheet" aria-pressed="${ctx.view === 'sheet'}"><span class="sheet-btn-main">この日の買い目表</span><small>全レースの印・買い目・結果を1枚で</small></button>`
       : '';
-  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>${sheetBtn}${record}
+  return `${ctx.railStatus ? `<p class="rail-status">${ctx.railStatus}</p>` : ''}<div class="day-strip" role="group" aria-label="開催日">${chips}${importChip}</div>${renderArchivePicker(ctx)}${sheetBtn}${record}
     ${venueBtns}
-    ${state.day !== 'import' ? renderDayScore(allDay, quickPicks) : ''}
+    ${state.day !== 'import' ? renderDayScore(allDay, ctx) : ''}
     <ol class="race-list">${items}</ol>`;
 }

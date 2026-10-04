@@ -6,7 +6,7 @@
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
 import { recommendBets, ticketsToText, STRATEGIES, DEFAULT_BLEND, BLEND_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
-import { renderBetSheet, sheetText } from './ui/betSheet.js';
+import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
 import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
@@ -65,6 +65,10 @@ const REMOTE_DATA_URL = (() => {
     return null;
   }
 })();
+
+// 過去の開催日のアーカイブ（data ブランチの days/：開催日ごとのファイルと index.json）。github.io 以外では公開先の days/
+const ARCHIVE_BASE = REMOTE_DATA_URL ? REMOTE_DATA_URL.replace(/data\.json$/, 'days/') : 'days/';
+const archive = { index: null, loaded: new Map(), loading: '', error: '', allLoading: false };
 
 const state = {
   tab: 'predict',
@@ -197,10 +201,16 @@ function effectiveRace(base) {
 // ---------------------------------------------------------------------------
 // 実データの読み込み（data.json）
 
+function insertDay(bundle, day) {
+  bundle.days = [...(bundle.days || []).filter((d) => d.date !== day.date), day].sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 function setBundle(bundle) {
   data.bundle = bundle;
   data.loadState = bundle.days?.length ? 'ok' : 'none';
   data.live = !!bundle.live;
+  // 読み込んだ過去の開催日（アーカイブ）は、data.json を読み直しても残す
+  for (const [date, day] of archive.loaded) if (!bundle.days.some((d) => d.date === date)) insertDay(bundle, day);
   raceIndex = new Map();
   for (const d of bundle.days || []) for (const r of d.races) raceIndex.set(r.id, r);
 }
@@ -226,6 +236,53 @@ async function fetchLiveInfo() {
   } catch {
     data.liveUrl = null;
   }
+}
+
+/** アーカイブの一覧（index.json）を読む */
+async function fetchArchiveIndex() {
+  try {
+    const res = await fetch(`${ARCHIVE_BASE}index.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error();
+    const j = await res.json();
+    archive.index = Array.isArray(j?.days) ? j.days : null;
+  } catch {
+    archive.index = archive.index || null;
+  }
+}
+
+/** アーカイブから1日分を読み込んでバンドルに足す */
+async function loadArchiveDay(date) {
+  if (!data.bundle || days().some((d) => d.date === date)) return true;
+  archive.loading = date;
+  renderRailOnly();
+  try {
+    const res = await fetch(`${ARCHIVE_BASE}${date}.json`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const doc = await res.json();
+    const day = doc?.days?.[0];
+    if (!day?.races?.length) throw new Error('形式が違います');
+    day.archived = true;
+    archive.loaded.set(date, day);
+    insertDay(data.bundle, day);
+    for (const r of day.races) raceIndex.set(r.id, r);
+    archive.error = '';
+    return true;
+  } catch (e) {
+    archive.error = `${dayLabel(date)} を読み込めませんでした（${e.message}）`;
+    return false;
+  } finally {
+    archive.loading = '';
+  }
+}
+
+/** アーカイブの全日を読み込む（期間の合計のため） */
+async function loadAllArchive() {
+  if (!archive.index?.length || archive.allLoading) return;
+  archive.allLoading = true;
+  for (const d of archive.index) if (!days().some((x) => x.date === d.date)) await loadArchiveDay(d.date);
+  archive.allLoading = false;
+  scheduleQuickPicks();
+  renderRailOnly();
 }
 
 /** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
@@ -310,24 +367,32 @@ let quickTimer = null;
 // 予想画面の表示：'race'（レースごと）か 'sheet'（その日の買い目表）
 let view = 'race';
 
+const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
+
 function pickOf(pred, race) {
   if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
   const h = pred.order[0];
-  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, sig: raceSig(race) };
+  // 確定したレースは、今の買い方（戦略・予算・券種）の AI推奨を実際の払戻で精算（合計の収支のため）
+  let settle = null;
+  if (race.result?.length) settle = settleTickets(race, pred, recommendBets(pred, betOpts()).tickets) || { stake: 0, pay: 0, hits: 0 };
+  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, sig: raceSig(race) };
 }
 
 /** 一覧の◎（とその日の成績）を裏で少しずつ計算 */
 function scheduleQuickPicks() {
-  const key = `${settingsKey()}|${JSON.stringify(state.edits)}`;
+  const key = `${settingsKey()}|${JSON.stringify(betOpts())}|${JSON.stringify(state.edits)}`;
   if (key !== quickKey) {
     quickPicks.clear();
     quickKey = key;
   }
   clearTimeout(quickTimer);
   const venueFirst = (r) => (state.day === 'import' || r.course === state.venue ? 0 : 1);
-  const queue = racesOf(state.day, null)
-    .filter((r) => quickPicks.get(r.id)?.sig !== raceSig(r))
-    .sort((a, b) => venueFirst(a) - venueFirst(b));
+  // 選んだ日を先に、そのあと読み込んである他の日（新しい日から）。他の日は期間の合計の収支に使う
+  const others = days()
+    .filter((d) => d.date !== state.day)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .flatMap((d) => d.races);
+  const queue = [...racesOf(state.day, null).slice().sort((a, b) => venueFirst(a) - venueFirst(b)), ...(state.day === 'import' ? [] : others)].filter((r) => quickPicks.get(r.id)?.sig !== raceSig(r));
   const step = () => {
     const t0 = performance.now();
     while (queue.length && performance.now() - t0 < 24) {
@@ -352,6 +417,7 @@ const ctx = () => ({
   racesOf,
   venuesOf,
   quickPicks,
+  archive,
   imported,
   edits: state.edits[state.raceId],
   bt,
@@ -488,6 +554,7 @@ function refreshPrediction() {
 }
 
 function refreshBets() {
+  scheduleQuickPicks();
   if (view === 'sheet') return renderPredict();
   if (!current.pred || current.pred.empty) return;
   current.rec = recommendBets(current.pred, { budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend });
@@ -846,6 +913,7 @@ function onClick(e) {
     return renderPredict();
   }
   if (act === 'run-recent') return runRecentBacktest();
+  if (act === 'load-all-archive') return void loadAllArchive();
   if (act === 'reload-data') {
     fetchBundle().then((changed) => {
       if (changed) applyDataUpdate();
@@ -977,6 +1045,12 @@ function onInput(e) {
 
 function onChange(e) {
   const t = e.target;
+  if (t.matches('[data-archive]')) {
+    const date = t.value;
+    if (!date) return;
+    loadArchiveDay(date).then((ok) => (ok ? selectDay(date) : renderRailOnly()));
+    return;
+  }
   if (t.matches('[data-budget-input]')) {
     const v = Math.max(100, Math.round(Number(t.value) / 100) * 100 || 100);
     state.budget = v;
@@ -1110,6 +1184,7 @@ async function start() {
   showTab(route.tab, { updateHash: false });
   await Promise.all([fetchBundle(), fetchLiveInfo()]);
   applyRoute(route);
+  fetchArchiveIndex().then(() => renderRailOnly());
   setInterval(tickClock, 30 * 1000);
   setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
 }

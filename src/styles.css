@@ -850,6 +850,108 @@ a {
   color: var(--bad);
 }
 
+/* 過去の開催日（アーカイブ） */
+.archive-pick {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.archive-pick label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.archive-pick select {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  max-width: 100%;
+}
+
+.archive-pick small {
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.link-btn {
+  font: inherit;
+  font-size: 12px;
+  justify-self: start;
+  padding: 4px 10px;
+  border: 1px solid var(--turf);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--turf);
+  cursor: pointer;
+}
+
+.link-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* AI推奨の合計の収支 */
+.ds-profit {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.ds-grid.ds-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ds-grid.ds-grid-3 dd {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.ds-grid.ds-grid-3 dd small {
+  font-size: 10px;
+}
+
+.ds-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ds-period {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.ds-period b {
+  font-size: 18px;
+}
+
+.ds-period small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .rail-empty {
   color: var(--muted);
   font-size: 13px;

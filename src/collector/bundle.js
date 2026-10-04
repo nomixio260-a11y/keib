@@ -258,10 +258,11 @@ export function compactBundle(bundle) {
   return bundle;
 }
 
-/** 古い開催日を落とす（結果のある日は keepPast 日分、これからの日はすべて残す） */
-export function pruneBundle(bundle, { keepPast = 4, today = jstParts().date } = {}) {
+/** 古い開催日を落とす（過去は keepPastDays 日以内の開催日。少なくとも直近 keepPast 開催日は残す。これからの日はすべて残す） */
+export function pruneBundle(bundle, { keepPast = 4, keepPastDays = 0, today = jstParts().date } = {}) {
   const past = bundle.days.filter((d) => d.date < today).map((d) => d.date);
-  const drop = new Set(past.slice(0, Math.max(0, past.length - keepPast)));
+  const cutoff = keepPastDays ? new Date(Date.parse(`${today}T00:00:00Z`) - keepPastDays * 86400000).toISOString().slice(0, 10) : '9999';
+  const drop = new Set(past.filter((d, i) => d < cutoff && i < past.length - keepPast));
   bundle.days = bundle.days.filter((d) => !drop.has(d.date));
   return bundle;
 }

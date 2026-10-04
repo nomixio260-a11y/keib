@@ -357,12 +357,18 @@ export function careerBefore(index, horseId, date, stats) {
 }
 
 /** レースの各馬に通算要約（entry.career）を付ける。fallback(horseId) はデータベースにない馬のため */
-export function attachCareer(races, index, { stats, fallback = null, before = null } = {}) {
+export function attachCareer(races, index, { stats, fallback = null, before = null, keepExisting = false, fallbackAsOf = null } = {}) {
   let n = 0;
   for (const race of races) {
+    // fallback（ある時点の通算要約）は、その時点より後のレースにだけ使う（前のレースに使うと、そのレース自体の結果が通算に入ってしまう）
+    const fallbackOk = !fallbackAsOf || String(race.date || '') > String(fallbackAsOf);
     for (const e of race.entries || []) {
       if (!e.horseId) continue;
-      const c = (index && careerBefore(index, e.horseId, before || race.date, stats)) || fallback?.(e.horseId) || null;
+      if (keepExisting && e.career) {
+        n++;
+        continue;
+      }
+      const c = (index && careerBefore(index, e.horseId, before || race.date, stats)) || (fallbackOk ? fallback?.(e.horseId) : null) || null;
       if (c) {
         e.career = c;
         n++;

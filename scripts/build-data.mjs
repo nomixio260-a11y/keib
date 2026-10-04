@@ -11,6 +11,8 @@
 //             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
 //             --history <dir>（結果の記録を読む場所。既定は data/history。GitHub Actions では data ブランチの history/）
 //             --exotic <dir>（馬連・ワイド・三連複・馬単の確定オッズの置き場。既定は data/odds-final。確定したレースのライブのオッズもここに残す）
+//             --days-dir <dir>（過去の開催日のアーカイブ。結果の出そろった日を <dir>/<日付>.json に書き、直近の期間に足りない日はここから補う）
+//             --past-days 14（data.json に入れる過去の期間。日数。少なくとも --past の開催日数は入れる）
 //
 // 集めたデータは個人の分析用です。不特定多数が見られる場所には置かないでください。
 
@@ -23,6 +25,7 @@ import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
 import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, FINAL_ODDS_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory, attachCareer } from '../src/data/history.js';
+import { writeArchiveDay, rebuildArchiveIndex, archiveDates, readArchiveDay } from '../src/collector/archive.js';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => {
@@ -33,6 +36,8 @@ const flag = (name) => args.includes(`--${name}`);
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const keepPast = Number(opt('past', 4));
+const keepPastDays = Number(opt('past-days', 14));
+const daysDir = opt('days-dir', null) ? path.resolve(opt('days-dir', null)) : null;
 const exoticDir = opt('exotic', null) ? path.resolve(opt('exotic', null)) : undefined;
 const out = path.resolve(opt('out', BUNDLE_FILE));
 const today = jstParts().date;
@@ -42,7 +47,9 @@ const bundle = emptyBundle();
 // 1) 収集済みの過去の結果から、直近の開催日
 const records = await loadHistory(opt('history', null) ? path.resolve(opt('history', null)) : undefined);
 if (records.length) {
-  const dates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort().slice(-keepPast);
+  const pastDates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort();
+  const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - keepPastDays * 86400000).toISOString().slice(0, 10);
+  const dates = pastDates.filter((d, i) => d >= cutoff || i >= pastDates.length - keepPast);
   addPastDaysFromHistory(bundle, records, indexHistory(records), dates);
   const n = await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races), exoticDir);
   log(`過去の開催日：${dates.join(', ') || 'なし'}（data/history ${records.length}レースから。確定オッズあり ${n}レース）`);
@@ -107,18 +114,42 @@ if (!flag('offline')) {
 }
 // 当日のレースにも、確定オッズの保存があれば付ける（データベースのない環境で past days を作り直したとき用）
 await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races).filter((r) => !r.exoticOdds), exoticDir);
-pruneBundle(bundle, { keepPast, today });
+// アーカイブ：直近の期間の過去の開催日は、アーカイブ（結果の出そろった日。各馬の通算要約もそのレースより前で計算済み）を使う
+if (daysDir) {
+  const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - keepPastDays * 86400000).toISOString().slice(0, 10);
+  const have = await archiveDates(daysDir);
+  let used = 0;
+  for (const date of [...have].filter((d) => d >= cutoff && d < today)) {
+    const day = await readArchiveDay(daysDir, date);
+    if (!day?.races?.length) continue;
+    bundle.days = bundle.days.filter((d) => d.date !== date);
+    mergeBundle(bundle, { days: [day] });
+    used++;
+  }
+  if (used) log(`アーカイブから過去の開催日を補いました：${used}日`);
+}
+pruneBundle(bundle, { keepPast, keepPastDays, today });
 attachDayVariants(bundle, records, REAL_STATS, { today });
 // 機械学習の特徴量に使う馬ごとの通算要約。データベースがあればそのレースより前の出走から、なければ src/data/horses.json
 // （記録が少ないとき＝GitHub Actions の data ブランチの history/ だけのときは、通算の要約にならないので horses.json を使う）
 {
   const snaps = await loadHorseSnapshots();
   const index = records.length >= 1000 ? indexHistory(records) : null;
-  const n = attachCareer(bundle.days.flatMap((d) => d.races), index, { stats: REAL_STATS, fallback: snaps.get });
+  const n = attachCareer(bundle.days.flatMap((d) => d.races), index, { stats: REAL_STATS, fallback: snaps.get, fallbackAsOf: snaps.asOf, keepExisting: true });
   log(`通算要約を付けた馬：${n}（${index ? 'データベース' : `horses.json ${snaps.asOf || '—'} 時点`}）`);
 }
 compactBundle(bundle);
 await writeJson(out, bundle);
+// 結果の出そろった日をアーカイブに書く（変わっていなければ書かない）
+if (daysDir) {
+  let wrote = 0;
+  for (const day of bundle.days) {
+    if (day.date > today || !day.races.length || !day.races.every((r) => r.status === 'result')) continue;
+    if (await writeArchiveDay(daysDir, day)) wrote++;
+  }
+  const idx = await rebuildArchiveIndex(daysDir);
+  log(`アーカイブ：書き足し ${wrote}日・一覧 ${idx.days.length}日`);
+}
 const races = bundle.days.reduce((a, d) => a + d.races.length, 0);
 log(`書き出しました：${path.relative(ROOT, out)}（${bundle.days.length}日・${races}レース）`);
 for (const d of bundle.days) log(`  ${d.date} ${d.venues.join('・')} ${d.races.length}R（結果 ${d.races.filter((r) => r.status === 'result').length}）`);
