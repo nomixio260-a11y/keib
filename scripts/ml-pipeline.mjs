@@ -35,12 +35,15 @@ const TOP16 = ['logq', 'logqGap', 'popRank', 'placeLog', 'placeVsWin', 'placeSpr
 const PEDIGREE = ['sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'damSireWinSurf'];
 // 別の投票市場（馬連・ワイド・三連複・馬単）の特徴量：INCLUDE_EXOTIC のときは標準の組に足す（検証の記録は README の開発日記）
 const STANDARD = INCLUDE_EXOTIC ? [...TOP16, ...EXOTIC_FEATURE_NAMES] : TOP16;
+// 候補はすべて標準の組（別の投票市場の特徴量つき）を土台に、木の深さ・列の使い方・特徴量の追加を変えたもの。
+// 別の投票市場の特徴量は他の特徴量との組み合わせで効く可能性があるので、深さ3と列を多めに使う設定も比べる
 const CANDIDATES = [
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: STANDARD, beta: BETA },
-  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: [...TOP16, ...PEDIGREE], beta: BETA },
-  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
+  { depth: 3, lr: 0.01, lambda: 20, colsample: 0.5, subsample: 0.6, only: STANDARD, beta: BETA },
+  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.7, subsample: 0.7, only: STANDARD, beta: BETA },
+  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: [...STANDARD, ...PEDIGREE], beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
-  { depth: 1, lr: 0.03, lambda: 5, only: TOP16, beta: BETA },
+  { depth: 1, lr: 0.03, lambda: 5, only: STANDARD, beta: BETA },
 ];
 
 if (process.env.SKIP_DATASET !== '1') {
