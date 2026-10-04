@@ -83,6 +83,9 @@ export function careerFromRow(row) {
   return { starts, wins, top3, siBest, siMean, posMean, bestClass, elo };
 }
 
+/** 別の投票市場（馬連・ワイド・三連複・馬単）のオッズから作る特徴量の名前（INCLUDE_EXOTIC のとき FEATURE_NAMES の末尾に足される） */
+export const EXOTIC_FEATURE_NAMES = ['exoticKnown', 'q2Log', 'q2VsWin', 'top2VsHv', 'wideVsHv', 'trioVsHv', 'exWinLog', 'exVsWin'];
+
 export const FEATURE_NAMES = [
   // 市場（単勝オッズ）と複勝オッズ（別の投票の市場。単勝から見込まれる複勝確率とのずれ）
   'logq', 'logqGap', 'popRank', 'placeKnown', 'placeLog', 'placeVsWin', 'placeSpread', 'logqShin', 'logqShinGap', 'placeRankDiff',
@@ -104,11 +107,13 @@ export const FEATURE_NAMES = [
   'n', 'isTurf', 'dist', 'gradeLevel', 'heavy', 'straight', 'drawInner', 'handicap', 'qFav', 'qEntropy',
 ];
 
+// 別の投票市場（馬連・ワイド・三連複・馬単）の特徴量を使うか。true にしたら npm run ml で学習し直す（モデルの列と一致しないと機械学習が止まる）
+export const INCLUDE_EXOTIC = false;
+if (INCLUDE_EXOTIC) FEATURE_NAMES.push(...EXOTIC_FEATURE_NAMES);
+
 const F = Object.fromEntries(FEATURE_NAMES.map((k, i) => [k, i]));
 export const FEATURE_INDEX = F;
 
-/** 別の投票市場（馬連・ワイド・三連複・馬単）のオッズから作る特徴量の名前 */
-export const EXOTIC_FEATURE_NAMES = ['exoticKnown', 'q2Log', 'q2VsWin', 'top2VsHv', 'wideVsHv', 'trioVsHv', 'exWinLog', 'exVsWin'];
 
 /**
  * 馬連・ワイド・三連複・馬単のオッズ（race.exoticOdds か data/odds-final の形：{ quinella: {"1-2": 倍率}, wide, trio: {"1-2-3": 倍率}, exacta: {"1>2": 倍率} }）から、
@@ -268,6 +273,8 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
   const elos = careers.map((c) => c?.elo).filter((v) => Number.isFinite(v));
   const eloMax = elos.length ? Math.max(...elos) : 1500;
   const eloFill = (elos.length ? mean(elos) : 1500) - 40;
+  // 別の投票市場（馬連・ワイド・三連複・馬単）の見方。オッズがそろっていなければ全部 0（exoticKnown=0）
+  const ex = INCLUDE_EXOTIC ? exoticFeatures(race.exoticOdds || null, rows.map((r) => r.entry.number), rows.map((r) => r.marketProb / qSum)) : null;
   const out = rows.map((r, i) => {
     const e = r.entry;
     const runs = r.runs;
@@ -277,6 +284,7 @@ export function raceFeatures(race, { stats = REAL_STATS, careerOf = (e) => e.car
     const set = (k, v) => {
       x[F[k]] = Number.isFinite(v) ? v : 0;
     };
+    if (ex) EXOTIC_FEATURE_NAMES.forEach((k, j) => set(k, ex[i][j]));
     set('logq', logqs[i]);
     set('logqGap', logqs[i] - logqMax);
     set('logqShin', logqShin[i]);

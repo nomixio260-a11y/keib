@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { loadHistory, writeJson, readJson, loadHorseInfo, DATA_DIR } from '../src/collector/store.js';
 import { indexHistory, preRaceCard, careerBefore } from '../src/data/history.js';
-import { raceFeatures, FEATURE_NAMES, exoticFeatures, EXOTIC_FEATURE_NAMES } from '../src/engine/features.js';
+import { raceFeatures, FEATURE_NAMES, exoticFeatures, EXOTIC_FEATURE_NAMES, INCLUDE_EXOTIC } from '../src/engine/features.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
 import { usable } from './calibrate.mjs';
 import { tally, rates, CONDITION_KEYS } from '../src/data/rates.js';
@@ -77,7 +77,7 @@ const index = indexHistory(all);
 const horseInfo = await loadHorseInfo();
 // 確定オッズ（馬連・ワイド・三連複）：data/odds-final/{年}/{レースID}.json
 const exoticDocs = new Map();
-if (process.env.DATASET_EXTRA === 'exotic') {
+if (process.env.DATASET_EXTRA === 'exotic' || INCLUDE_EXOTIC) {
   const { readdir } = await import('node:fs/promises');
   const dir = path.join(DATA_DIR, 'odds-final');
   for (const y of await readdir(dir).catch(() => [])) for (const f of await readdir(path.join(dir, y)).catch(() => [])) {
@@ -148,6 +148,8 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       // 一部のレース（3割）では馬体重を隠して特徴量を作る（全頭まとめて隠す：実際にそうなるため）
       const hideBw = hash(rec.id) % 10 < 3;
       const cardX = hideBw ? { ...card, entries: card.entries.map((e) => ({ ...e, bodyWeight: null, bodyWeightDiff: null })) } : card;
+      // 別の投票市場のオッズ（INCLUDE_EXOTIC のとき）。発売前の予想にも対応できるよう、2割のレースでは隠して特徴量を作る
+      if (INCLUDE_EXOTIC) cardX.exoticOdds = hash(`${rec.id}x`) % 10 < 2 ? null : exoticDocs.get(rec.id) || null;
       const fx = raceFeatures(cardX, { stats, careerOf, jockeys: jr.rates, trainers: tr.rates });
       const finishOf = Object.fromEntries(rec.runners.map((r) => [r.number, r.finish]));
       // 実験用の追加列（DATASET_EXTRA=1）：馬・騎手・厩舎の履歴の集計（上の EXTRA_NAMES）
