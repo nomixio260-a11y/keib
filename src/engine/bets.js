@@ -29,8 +29,10 @@ export function betView(pred, temp = BET_TEMP) {
 
 export const STRATEGIES = {
   // 的中重視・控えめ：期待値は AI の確率だけで計算し（blend 0）、0.9 以上の買い目だけ買う。学習期間の分割外（約1.2万レース・186週）と
-  // 検証期間（14週）の両方で、0.5 混合・0.8 以上より回収率も週の収支も良かった（scratchpad/oof-grid*.mjs。README の開発日記）
-  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目だけを選び、どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, maxTickets: 6, alloc: 'equal' },
+  // 検証期間（14週）の両方で、0.5 混合・0.8 以上より回収率も週の収支も良かった（scratchpad/oof-grid*.mjs。README の開発日記）。
+  // minOdds（的中重視だけ）：オッズ 1.0 倍の買い目（当たっても元返し）は買わない（週の収支は変わらず、回収率は学習期間 107.2→107.5%・検証期間 127.8→129.2%。
+  // 控えめでは両方の期間でわずかに下がったので付けない）
+  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目だけを選び、どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: 1.05, maxTickets: 6, alloc: 'equal' },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
   value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
@@ -319,7 +321,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   const score = SCORE[strategy] || SCORE.balance;
   // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）
   const view = betView(pred, betTemp ?? st.betTemp ?? BET_TEMP);
-  const cands = buildCandidates(view, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);
+  const cands = buildCandidates(view, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type] && c.odds >= (st.minOdds ?? 0));
   cands.sort((a, b) => score(b) - score(a));
   const picked = [];
   const perType = {};
