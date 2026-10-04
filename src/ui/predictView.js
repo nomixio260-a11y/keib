@@ -8,6 +8,7 @@ import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
 import { volatilityFactors } from '../engine/volatility.js';
+import { raceAnalysis } from '../engine/analysis.js';
 import { VOLATILITY_MODEL } from '../engine/volatilityModel.js';
 import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
@@ -468,7 +469,75 @@ export function renderWeightsPanel(ctx) {
 export function renderRaceMain(pred, rec, ctx) {
   const race = pred.race;
   const result = race.result?.length ? renderResultPanel(pred, rec, ctx) : '';
-  return `${renderHead(race, ctx)}<div id="slot-summary">${renderSummary(pred, rec, ctx.state.preset)}</div>${result}<div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
+  return `${renderHead(race, ctx)}<div id="slot-summary">${renderSummary(pred, rec, ctx.state.preset)}</div>${renderAnalysisPanel(pred, rec, ctx)}${result}<div class="card-wrap" id="slot-card">${renderCardTable(pred, ctx)}</div>`;
+}
+
+/** レース分析：結論（買う・見送りとその理由）、有力馬の比較、AI と人気のずれ、このコースの過去の傾向 */
+export function renderAnalysisPanel(pred, rec, ctx) {
+  const race = pred.race;
+  const a = raceAnalysis(pred, rec, { jockeys: race.jockeys && Object.keys(race.jockeys).length ? race.jockeys : REAL_STATS.jockeyRates });
+  const v = a.verdict;
+  const oddsKnown = !pred.noOdds;
+  const horse = (r) => `${entryBadge(r.entry, 'sm')} <span class="ra-name">${esc(r.entry.name)}</span>`;
+  const ticketLine = (t, dropped = false) =>
+    `<li${dropped ? ' class="muted"' : ''}>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit ?? t.p, 0)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span>${!dropped && t.stake ? `・<span class="num">${yen(t.stake)}</span>` : ''}</li>`;
+  const verdictHtml = `<div class="ra-verdict ra-${v.kind}">
+      <span class="ra-badge">${esc(v.title)}</span>
+      <p>${esc(v.text)}</p>
+      ${v.tickets?.length ? `<ul class="ra-tickets">${v.tickets.map((t) => ticketLine(t)).join('')}</ul>` : ''}
+      ${v.dropped?.length ? `<ul class="ra-tickets">${v.dropped.slice(0, 3).map((t) => ticketLine(t, true)).join('')}</ul>` : ''}
+    </div>`;
+  const topRows = a.top
+    .map(
+      (h) => `<tr>
+        <td class="c-mark">${h.row.mark ? `<span class="mark ${markClass(h.row.mark)}">${esc(h.row.mark)}</span>` : ''}</td>
+        <td><span class="ra-horse">${horse(h.row)}</span></td>
+        <td class="num">${pct(h.row.pWin)}</td>
+        <td class="num">${pct(h.row.pTop3)}</td>
+        <td class="num">${oddsKnown ? `${pct(h.row.marketProb)}<small>${h.row.entry.popularity ? `・${h.row.entry.popularity}人気` : ''}</small>` : '—'}</td>
+        <td>${h.value ? `<span class="ra-value v-${h.value.key}">${esc(h.value.label)}</span>` : '—'}</td>
+        <td class="ra-note">${h.comment.pros[0] ? `<span class="tx-good">＋${esc(h.comment.pros[0])}</span>` : ''}${h.comment.cons[0] ? ` <span class="tx-bad">－${esc(h.comment.cons[0])}</span>` : ''}</td>
+      </tr>`,
+    )
+    .join('');
+  const gapHtml = !oddsKnown
+    ? '<p class="muted">単勝オッズが出たら、AI とオッズの見立てのずれを表示します。</p>'
+    : a.overlays.length || a.underlays.length
+    ? `${a.overlays.length ? `<p class="ra-sub">AI の評価がオッズより高い（妙味）</p><ul>${a.overlays.map((o) => `<li>${horse(o.row)} AI ${pct(o.row.pWin, 0)} 対 オッズ ${pct(o.row.marketProb, 0)}${o.reason ? `：${esc(o.reason)}` : ''}</li>`).join('')}</ul>` : ''}
+       ${a.underlays.length ? `<p class="ra-sub">人気ほど AI は評価していない（人気先行）</p><ul>${a.underlays.map((o) => `<li>${horse(o.row)} AI ${pct(o.row.pWin, 0)} 対 オッズ ${pct(o.row.marketProb, 0)}${o.reason ? `：${esc(o.reason)}` : ''}</li>`).join('')}</ul>` : ''}`
+    : '<p class="muted">AI とオッズの見立てに大きなずれはありません（オッズどおりの評価）。</p>';
+  const c = a.course;
+  const STY = ['逃げ', '先行', '差し', '追込'];
+  const courseHtml = c
+    ? `<p class="ra-sub">${esc(pred.race.course)} ${esc(pred.race.surface === '芝' ? '芝' : pred.race.surface === 'ダ' ? 'ダート' : pred.race.surface)}${esc(pred.race.distance)}m・過去 ${c.n.toLocaleString('ja-JP')}レース</p>
+       <dl class="ra-dl">
+         <div><dt>1番人気</dt><dd>勝率 <b class="num">${pct(c.favWin, 0)}</b>・複勝率 <b class="num">${pct(c.favTop3, 0)}</b></dd></div>
+         <div><dt>人気3頭以外の勝ち</dt><dd class="num">${pct(c.upset, 0)}</dd></div>
+         <div><dt>単勝の配当</dt><dd>平均 <span class="num">${yen(c.avgWinPay)}</span>${c.medWinPay ? `・中央値 <span class="num">${yen(c.medWinPay)}</span>` : ''}</dd></div>
+         ${c.inner ? `<div><dt>内枠（1〜4枠）</dt><dd>勝ちの <span class="num">${pct(c.inner.win, 0)}</span>（出走の ${pct(c.inner.runners, 0)}）${c.innerEdge > 0.05 ? '：内枠が有利' : c.innerEdge < -0.05 ? '：外枠が有利' : '：大きな差なし'}</dd></div>` : ''}
+       </dl>
+       ${
+         c.style
+           ? `<div class="ra-styles">${STY.map((s) => `<div class="ra-style${s === c.styleBest ? ' is-best' : ''}"><span>${s}</span><span class="ra-bar"><i style="width:${Math.min(100, c.style[s].win * 500).toFixed(0)}%"></i></span><span class="num">${pct(c.style[s].win, 0)}</span></div>`).join('')}</div>
+              <p class="ra-foot">脚質ごとの勝率（勝ち ÷ 出走）。いちばん勝っているのは「${esc(c.styleBest)}」${c.fitting.length ? `：このレースでは ${c.fitting.slice(0, 4).map((n) => esc(n)).join('・')}` : '：このレースには見当たりません'}。</p>`
+           : ''
+       }
+       <p class="ra-foot muted">学習期間（${esc(c.period)}）のレース結果から集計。</p>`
+    : '<p class="muted">このコースは過去のレースが少ないため、傾向を出していません。</p>';
+  const fieldHtml = STY.map((s) => `<span class="style-chip ${STYLE_CLASS[s]}">${s} ${a.field[s].length}</span>`).join('');
+  return `<section class="panel race-analysis" aria-labelledby="h-analysis">
+    <header class="panel-head"><h2 id="h-analysis">レース分析</h2><span class="panel-sub">結論・有力馬・AIと人気のずれ・コースの傾向</span></header>
+    ${verdictHtml}
+    ${a.outlook ? `<p class="ra-outlook">${esc(a.outlook)}</p>` : ''}
+    <div class="table-scroll"><table class="ra-top">
+      <thead><tr><th class="c-mark">印</th><th>馬</th><th title="AI の予想">勝率</th><th>複勝率</th><th title="単勝オッズから見た勝率">オッズの勝率</th><th>評価</th><th>ひとこと</th></tr></thead>
+      <tbody>${topRows}</tbody>
+    </table></div>
+    <div class="ra-grid">
+      <div class="ra-box"><h3>AI と人気のずれ</h3>${gapHtml}</div>
+      <div class="ra-box"><h3>このコースの傾向</h3>${courseHtml}<p class="ra-foot">このレースの脚質：${fieldHtml}</p></div>
+    </div>
+  </section>`;
 }
 
 /** 障害レース：予想の対象外（出馬表と結果だけ表示） */

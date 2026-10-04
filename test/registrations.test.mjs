@@ -165,3 +165,40 @@ test('2段目：決めた買い目から当たる確率が下限以上のもの�
   const pred = predictRace(makeRace({ seed: 7 }), { sims: 0 });
   assert.ok(recommendBets(pred, { budget: 3000, keep: 0.3 }).tickets.length >= recommendBets(pred, { budget: 3000, keep: 0.5 }).tickets.length);
 });
+
+test('レース分析：結論（買い・見送り・待ち）、有力馬、AI と人気のずれ、コースの傾向', async () => {
+  const { raceAnalysis, valueLabel } = await import('../src/engine/analysis.js');
+  const { COURSE_STATS } = await import('../src/engine/courseStats.js');
+  assert.equal(valueLabel(1.4).key, 'over');
+  assert.equal(valueLabel(0.7).key, 'under');
+  assert.equal(valueLabel(1.0).key, 'fair');
+  assert.equal(valueLabel(null), null);
+  const kinds = new Set();
+  for (let seed = 1; seed <= 30; seed++) {
+    const race = { ...makeRace({ seed }), course: '東京', surface: '芝', distance: 1600 };
+    const pred = predictRace(race, { sims: 0 });
+    const rec = recommendBets(pred, { budget: 1000 });
+    const a = raceAnalysis(pred, rec);
+    kinds.add(a.verdict.kind);
+    assert.ok(['buy', 'skip'].includes(a.verdict.kind));
+    if (a.verdict.kind === 'buy') assert.ok(a.verdict.tickets.length > 0);
+    assert.equal(a.top.length, Math.min(5, pred.rows.length));
+    assert.ok(a.top[0].row.pWin >= a.top[1].row.pWin);
+    for (const o of a.overlays) assert.ok(o.ratio >= 1.15);
+    for (const u of a.underlays) assert.ok(u.ratio <= 0.88 && u.row.entry.popularity <= 4);
+    assert.ok(a.outlook.length > 0);
+    if (COURSE_STATS.courses['東京|芝|1600']) assert.equal(a.course.key, '東京|芝|1600');
+  }
+  assert.ok(kinds.size >= 1);
+  // オッズのないレース（暫定のレース）は「待ち」、ずれは出さない
+  const race = makeRace({ seed: 4 });
+  race.entries.forEach((e) => {
+    e.odds = null;
+    e.popularity = null;
+  });
+  const pred = predictRace({ ...race, provisional: true }, { sims: 0 });
+  const a = raceAnalysis(pred, recommendBets(pred, { budget: 1000 }));
+  assert.equal(a.verdict.kind, 'wait');
+  assert.equal(a.overlays.length + a.underlays.length, 0);
+  assert.ok(a.top.every((h) => h.ratio == null));
+});

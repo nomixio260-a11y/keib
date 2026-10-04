@@ -22,12 +22,13 @@
     "train": "node scripts/train-gbdt.mjs",
     "ml": "node scripts/ml-pipeline.mjs",
     "horses": "node scripts/horses.mjs",
-    "retrain": "CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/calibrate.mjs && node scripts/horses.mjs && TEST_START=2026-07-01 node scripts/ml-pipeline.mjs && TEST_START=2026-07-01 node scripts/fit-confidence.mjs && TEST_START=2026-07-01 node scripts/fit-volatility.mjs && npm test && CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/evaluate.mjs",
+    "retrain": "CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/calibrate.mjs && TEST_START=2026-07-01 node scripts/course-stats.mjs && node scripts/horses.mjs && TEST_START=2026-07-01 node scripts/ml-pipeline.mjs && TEST_START=2026-07-01 node scripts/fit-confidence.mjs && TEST_START=2026-07-01 node scripts/fit-volatility.mjs && npm test && CAL_START=2025-10-01 TEST_START=2026-07-01 node scripts/evaluate.mjs",
     "feat-search": "node scripts/feat-search.mjs",
     "race-temp": "node scripts/race-temp.mjs",
     "ensemble-lin": "node scripts/ensemble-lin.mjs",
     "confidence": "node scripts/fit-confidence.mjs",
-    "volatility": "node scripts/fit-volatility.mjs"
+    "volatility": "node scripts/fit-volatility.mjs",
+    "course-stats": "node scripts/course-stats.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
