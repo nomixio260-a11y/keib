@@ -185,6 +185,8 @@ const q = (u) => pOof[Math.min(pOof.length - 1, Math.max(0, Math.floor(u * pOof.
 const quantCuts = [q(1 - SHARES[0]), q(1 - SHARES[0] - SHARES[1]), q(1 - SHARES[0] - SHARES[1] - SHARES[2])].map((v) => Math.round(v * 100) / 100);
 // 区切りは ◎ の勝つ確率 42%・30%・20%（従来の確率の区切りから「2番手との差」の条件を外したもの。学習期間でも検証期間でも従来より当てはまりが良い。
 // 分位で決めた区切りは学習期間でだけ良く、検証期間では悪かった）
+// LEGACY=1（既定）：区切りは従来の決め方のまま（2026-10-04、確率だけの区切りに替えたところ利用者から「成績が悪くなった」と指摘があり戻した）
+const LEGACY = process.env.LEGACY !== '0';
 const cuts = (process.env.CUTS || '0.42,0.30,0.20').split(',').map(Number);
 log(`区切り（◎ の勝つ確率）：S ${pc(cuts[0])} 以上・A ${pc(cuts[1])} 以上・B ${pc(cuts[2])} 以上・C それ未満（参考：分割外の分位 ${SHARES.map((v) => `${v * 100}%`).join('/')} なら ${quantCuts.map(pc).join('・')}）`);
 const GR = ['S', 'A', 'B', 'C'];
@@ -228,7 +230,8 @@ const tt = report('検証期間（本番モデル）', test);
 
 if (!DRY) {
   const model = {
-    version: 1,
+    version: 2,
+    legacy: LEGACY,
     win: chosen.win.spec,
     place: chosen.place.spec,
     picks: { win: chosen.win.pick, place: chosen.place.pick },
