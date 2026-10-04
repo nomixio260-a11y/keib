@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm ci)",
+      "Bash(npm ci:*)",
+      "Bash(node scripts/artifact-refresh.mjs)",
+      "Bash(node scripts/artifact-refresh.mjs:*)",
+      "Artifact"
+    ]
+  }
+}

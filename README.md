@@ -83,7 +83,9 @@ npm run train                                # 1回学習（FIXED_ROUNDS・BAGS�
 
 ### claude.ai の Artifact（補助）
 
-`dist/artifact.html` と実データ `dist/data.json` を claude.ai の非公開 Artifact としても公開しています：<https://claude.ai/artifact/SEpXBGjVE5ftK8aWq191x4>（持ち主と共有した人だけが開けます）。Claude Code のルーティン「KEIB 実データ更新（土日・月曜）」で自動更新できますが、1回約0.25ドルかかるため **いまは無効** にしています（GitHub Actions 版が無料で同じことをするため）。必要なら claude.ai の Routines から有効に戻せます。
+`dist/artifact.html`（実データを埋め込んだもの）を claude.ai の非公開 Artifact としても公開しています：<https://claude.ai/artifact/SEpXBGjVE5ftK8aWq191x4>（持ち主と共有した人だけが開けます）。
+
+Artifact のページは外部のサイトからデータを読めない（GitHub の data ブランチも読めない）ので、データは公開した時点のものです。そこで Claude Code のルーティン「KEIB Artifact 自動更新（出馬表・オッズ・結果）」（`trig_01CVLwcTdR1ieZxhbXh2H3Gj`）が、木〜月曜の 8:43・12:43・17:43・20:43（日本時間）に新しいセッションで `node scripts/artifact-refresh.mjs` を動かし、data ブランチの最新の data.json と days/ で作り直します。公開中の `version.json` の目印（データの生成時刻・コードのコミット・アーカイブの日数）と比べて、変わっていたときだけ公開し直します（出馬表が出た・オッズや結果が更新された・コードを直した）。ルーティンの実行には Claude の利用料がかかります（変化なしで終わる回は短く、公開し直す回は1回あたり数分）。止めるとき・回数を減らすときは claude.ai の Routines から。ルーティンが確認なしで動けるように、`.claude/settings.json` で `npm ci`・`node scripts/artifact-refresh.mjs`・Artifact ツールを許可しています。
 
 ## 予想のしくみ
 
@@ -680,6 +682,12 @@ data/history/{年}/{レースID}.json … 過去の結果＋確定オッズ（�
   - **AI と人気のずれ**：AI の勝率がオッズより 15% 以上高い馬（妙味）と、4番人気以内で AI が 12% 以上低く見ている馬（人気先行）を理由つきで。
   - **このコースの傾向**：競馬場・芝ダ・距離ごとの過去のレース（学習期間 12,570レース、20レース以上あるコース 83）から、1番人気の勝率・複勝率、人気3頭以外が勝った割合、単勝の平均・中央値の配当、内枠（1〜4枠）の勝ちの割合と出走の割合、脚質ごとの勝率（いちばん勝っている脚質と、このレースでその脚質の馬）。`scripts/course-stats.mjs`（`npm run course-stats`、`npm run retrain` にも追加）が `src/engine/courseStats.js` に書く。
 - 画面は横にはみ出さないことを、パソコンと 390px 幅のスマホで確かめた（買い目の欄の選択肢の説明が長く、スマホで横にはみ出していたのも直した）。
+
+#### 2026-10-04 23:50 JST Artifact にも出馬表・オッズ・結果を自動で反映
+
+- 依頼：「Artifact にも出馬表が出たら自動で反映されるように」。
+- **制約**：Artifact のページは外部のサイトへの通信（fetch）がすべて止められている（GitHub の data ブランチも Pages も読めない）。読めるのは一緒に公開したファイルだけ。利用者の claude.ai のコネクタもない（`ListConnectors` が空）。→ ページが自分で最新のデータを取りにいく方法はなく、データが変わったら公開し直すしかない。
+- **しくみ**：`scripts/artifact-refresh.mjs` が data ブランチの data.json（Race day ワークフローが更新）と days/ を取り込み、`npm run build` で dist/artifact.html にデータを埋め込み、`dist/version.json` に目印（data.json の generatedAt・コードのコミット・アーカイブの日数）を書く。無効にしていたルーティン（`trig_01CVLwcTdR1ieZxhbXh2H3Gj`）を作り直し、木〜月曜の 8:43・12:43・17:43・20:43 に新しいセッションで、目印が公開中の version.json と違うときだけ公開し直す（JRA には接続しない。出馬表の取り込みは GitHub Actions が無料で続ける）。出馬表は木曜（土曜分）・金曜（日曜分）・土曜（祝日の月曜分）、特別登録は日曜の夕方に出るので、遅くとも数時間で Artifact に反映される。
 
 ### 判断の記録（なぜそうしたか）
 
