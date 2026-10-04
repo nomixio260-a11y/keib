@@ -89,7 +89,7 @@ function liveSection(ctx) {
 function studySection() {
   const m = MISS_STATS;
   if (!m) return '';
-  const sets = ['oof', 'hold'].filter((k) => m.sets?.[k]);
+  const sets = ['oof', 'hold', 'r60'].filter((k) => m.sets?.[k]);
   const head = sets.map((k) => `<th>${esc(m.sets[k].label)}<small>${esc(m.sets[k].period)}・${m.sets[k].races.toLocaleString('ja-JP')}R</small></th>`).join('');
   const row = (label, f) => `<tr><th>${label}</th>${sets.map((k) => `<td class="num">${f(m.sets[k])}</td>`).join('')}</tr>`;
   const kindRows = [
@@ -105,7 +105,24 @@ function studySection() {
   return `<h3 class="panel-h3">長期の分析 <small>学習に使っていない予測（${esc(m.generatedAt)}）</small></h3>
     <div class="table-scroll"><table class="rv-table rv-study"><thead><tr><th></th>${head}</tr></thead><tbody>${kindRows}</tbody></table></div>
     <p>外れの約半分は AI の2・3番手が勝った「惜しい外れ」、残りのほとんどは人気も AI も低く見ていた馬が勝った「波乱」で、AI が人気馬を見落とした外れは少数です。AI が1番人気と違う馬を◎にしたレースでは、◎のほうが1番人気より多く勝っています。</p>
+    ${recentNote(m)}
     ${c ? `<p>条件（芝ダ・距離・頭数・クラス・馬場・季節・競馬場など）と馬の型（休み明け・キャリア・昇級・距離変化・前走着順・馬体重・脚質・枠など）の${c.dims}項目・${c.cells}区分で、AI の見込みと実際の勝ち数を比べました。学習期間で見込みから大きくずれ（|z| ≥ ${c.zCut}）、検証期間でも同じ向きだった区分は <b>${c.flagged.length ? `${c.flagged.length}区分` : 'ありません'}</b>${c.flagged.length ? `（${esc(c.flagged.join('、'))}）` : ''}。ずれがまったくなくても偶然で約${Math.round(c.cells * 0.0228)}区分はこの条件に当たるので、偶然の範囲です。当日の馬場の傾向（前のレースで前・内の馬が勝っているか）も、オッズにすでに織り込まれていました。外れは決まった型の見落としではなく、確率どおりに起きているものがほとんどです。</p>` : ''}`;
+}
+
+/** 直近60日の外れの分析（利用者の依頼 2026-10-05） */
+function recentNote(m) {
+  const r = m.sets?.r60;
+  if (!r) return '';
+  const miss = r.races - r.hits;
+  const b = m.bets60;
+  const rec = m.calibration?.recent || [];
+  return `<p><b>直近60日</b>（${esc(r.period)}・${r.races}レース）：◎の勝率は ${pct(r.hit)}（AI の見込み ${pct(r.exp)}）で、見込みどおりかやや上です。外れた ${miss}レースのうち、${pct(r.kinds.near / miss, 0)}は AI の2・3番手が勝った惜しい外れ、${pct(r.kinds.upset / miss, 0)}は人気も AI も低く見ていた馬が勝った波乱で、AI が人気馬を見落とした外れは ${pct(r.kinds.overlook / miss, 0)}だけでした。${
+    b?.races ? `AI推奨（的中重視・1R 3,000円）は ${b.races}レースを買って ${b.hits}レース的中${b.hits === b.races ? '（外れなし）' : ''}、回収率 ${pct(b.roi)}。` : ''
+  }</p>${
+    rec.length
+      ? `<p>直近60日で見込みから大きくずれ、検証期間・学習期間でも同じ向きだった区分：${esc(rec.join('、'))}。長い期間ではずれが小さく（実際÷見込み 0.92〜0.98倍）、勝率を補正すると◎の勝率と当てはまりはわずかに良くなりましたが、的中重視の利益が下がった（学習期間の分割外で回収率 111.0% → 109.1%）ので、予想には入れていません。</p>`
+      : ''
+  }`;
 }
 
 /** バックテスト画面の節 */

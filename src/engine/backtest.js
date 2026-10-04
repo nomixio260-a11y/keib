@@ -28,6 +28,9 @@ export function payoutOf(race, type, nums) {
 
 const nums = (pred, idx) => idx.map((i) => pred.rows[i].entry.number);
 
+// 検証の表の AI推奨・控えめ・自動調整は、見出しのとおり単勝・複勝で比べる（画面の既定の券種とは別）
+const TANPUKU = ['win', 'place'];
+
 export const BT_STRATEGIES = [
   { key: 'win', label: '単勝 ◎', build: (pred, m) => [{ type: 'win', idx: [m['◎']], stake: 100 }] },
   { key: 'place', label: '複勝 ◎', build: (pred, m) => (pred.placeCount ? [{ type: 'place', idx: [m['◎']], stake: 100 }] : []) },
@@ -70,17 +73,17 @@ export const BT_STRATEGIES = [
   {
     key: 'ai',
     label: 'AI推奨（的中重視・単複・1R千円）',
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, blend: settings?.blend }).tickets,
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, types: TANPUKU, blend: settings?.blend }).tickets,
   },
   {
     key: 'aiCareful',
     label: '控えめ（自信度Sの単複だけ・1R千円、ほかは見送り）',
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'careful', blend: settings?.blend }).tickets,
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'careful', types: TANPUKU, blend: settings?.blend }).tickets,
   },
   {
     key: 'aiAuto',
     label: '自動調整（荒れ度に合わせて◎の買い方を切り替え・1R千円）',
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'auto', blend: settings?.blend }).tickets,
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, strategy: 'auto', types: TANPUKU, blend: settings?.blend }).tickets,
   },
   {
     key: 'placeS',
@@ -111,7 +114,7 @@ export const BT_STRATEGIES = [
   {
     key: 'carefulSolid',
     label: '控えめ（自信度S かつ 荒れ度「堅い」・1R千円）',
-    build: (pred, m, settings) => (pred.confidence?.volatility === '堅い' ? recommendBets(pred, { budget: 1000, strategy: 'careful', blend: settings?.blend }).tickets : []),
+    build: (pred, m, settings) => (pred.confidence?.volatility === '堅い' ? recommendBets(pred, { budget: 1000, strategy: 'careful', types: TANPUKU, blend: settings?.blend }).tickets : []),
   },
   {
     key: 'exoticWild',

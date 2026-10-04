@@ -1,7 +1,7 @@
 // レース一覧：開催日（過去・今日・これから）→ 競馬場 → レース。発走までの時間と、確定したレースの結果を並べる
 
 import { renderReviewCompact } from './reviewView.js';
-import { raceStatus, STATUS_LABEL, untilText, startMs } from '../engine/raceTime.js';
+import { raceStatus, STATUS_LABEL, untilText, startMs, RECENT_DAYS } from '../engine/raceTime.js';
 import { esc, frameBadge, entryBadge, pct } from './format.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
 
@@ -133,7 +133,7 @@ function renderProfit(races, ctx) {
     : '<p class="ds-note">計算中…</p>';
   const periodHtml =
     doneDays > 1 && p.races
-      ? `<div class="ds-period"><span>表示中の ${doneDays}日の合計</span><b class="num ${p.pay - p.stake >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(p.pay - p.stake)}</b><small>投資 ${p.stake.toLocaleString('ja-JP')}円・払戻 ${Math.round(p.pay).toLocaleString('ja-JP')}円・回収率 ${p.stake ? pct(p.pay / p.stake, 1) : '—'}・${p.races}R${p.pending ? `（計算中 ${p.pending}R）` : ''}</small></div>`
+      ? `<div class="ds-period"><span>${days.some((x) => x.archived) ? `表示中の ${doneDays}日の合計` : `直近${RECENT_DAYS}日（開催${doneDays}日）の合計`}</span><b class="num ${p.pay - p.stake >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(p.pay - p.stake)}</b><small>投資 ${p.stake.toLocaleString('ja-JP')}円・払戻 ${Math.round(p.pay).toLocaleString('ja-JP')}円・回収率 ${p.stake ? pct(p.pay / p.stake, 1) : '—'}・${p.races}R${p.pending ? `（計算中 ${p.pending}R）` : ''}</small></div>`
       : '';
   return `<div class="ds-profit">${head}${dayHtml}${periodHtml}</div>`;
 }
@@ -178,13 +178,13 @@ function renderArchivePicker(ctx) {
     .join('');
   const notLoaded = archive.index.filter((d) => !loaded.has(d.date)).length;
   const oldest = archive.index[archive.index.length - 1]?.date;
-  // 収支を出す期間：直近（data.json の開催日だけ）／全期間（アーカイブをすべて読み込む）
+  // 収支を出す期間：直近7日（今日の7日前から。data.json の開催日のうちその期間だけ）／全期間（アーカイブをすべて読み込む）
   const archivedDays = days.filter((d) => d.archived).length;
   const recentDays = days.filter((d) => !d.archived && d.races.some((r) => r.result?.length && !r.jump)).length;
   const allDays = new Set([...archive.index.map((d) => d.date), ...days.filter((d) => d.races.some((r) => r.result?.length)).map((d) => d.date)]).size;
   const seg = (on, act, label, disabled = false) => `<button type="button" class="seg-btn${on ? ' is-on' : ''}" data-action="${act}" aria-pressed="${on}"${disabled ? ' disabled' : ''}>${label}</button>`;
   return `<div class="archive-pick">
-    <div class="seg range-seg" role="group" aria-label="収支を出す期間"><span class="seg-label">期間</span>${seg(!archivedDays, 'unload-archive', `直近 ${recentDays}日`)}${seg(!notLoaded, 'load-all-archive', archive.allLoading ? '読み込み中…' : `全 ${allDays}日`, archive.allLoading)}</div>
+    <div class="seg range-seg" role="group" aria-label="収支を出す期間"><span class="seg-label">期間</span>${seg(!archivedDays, 'unload-archive', `直近${RECENT_DAYS}日<small>（開催${recentDays}日）</small>`)}${seg(!notLoaded, 'load-all-archive', archive.allLoading ? '読み込み中…' : `全 ${allDays}日`, archive.allLoading)}</div>
     <label><span>過去の開催日</span><select data-archive aria-label="過去の開催日を選ぶ"><option value="">${archive.index.length}日から選ぶ</option>${opts}</select></label>
     ${archivedDays && notLoaded ? `<button type="button" class="link-btn" data-action="unload-archive">読み込んだ過去の開催日（${archivedDays}日）を外す</button>` : ''}
     ${archive.loading ? `<small>${esc(dayLabel(archive.loading))} を読み込み中…</small>` : ''}${archive.error ? `<small class="tx-bad">${esc(archive.error)}</small>` : ''}

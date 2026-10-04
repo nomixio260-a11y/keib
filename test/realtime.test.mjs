@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { jstParts, startMs, raceStatus, untilText } from '../src/engine/raceTime.js';
+import { jstParts, startMs, raceStatus, untilText, visibleDays, RECENT_DAYS } from '../src/engine/raceTime.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, pruneBundle, cardTtl } from '../src/collector/bundle.js';
 import { indexHistory, preRaceCard, computeStats, jockeyRates } from '../src/data/history.js';
 import { speedFigure } from '../src/engine/speed.js';
@@ -298,4 +298,27 @@ test('馬連・ワイド・3連複は実際のオッズがあればそれで期�
   assert.equal(priceTicket({ type: 'trio', idx: [i(3), i(1), i(2)] }, pred, 0.5).odds, 56.7);
   // 表にない組み合わせは推定
   assert.equal(priceTicket({ type: 'quinella', idx: [i(1), i(3)] }, pred, 0.5).estimated, true);
+});
+
+test('画面に出す開催日：特別登録の暫定のレース（出馬表の前）は出さず、過去の開催日は直近7日だけ（読み込んだアーカイブは残す）', () => {
+  const race = (id, date, course, extra = {}) => ({ id, date, course, raceNo: 11, ...extra });
+  const days = [
+    { date: '2026-08-01', archived: true, venues: ['札幌'], races: [race('a', '2026-08-01', '札幌', { result: [1] })] },
+    { date: '2026-09-20', venues: ['中山'], races: [race('b', '2026-09-20', '中山', { result: [1] })] },
+    { date: '2026-09-27', venues: ['中山'], races: [race('c', '2026-09-27', '中山', { result: [1] })] },
+    { date: '2026-09-28', venues: ['中山'], races: [race('d', '2026-09-28', '中山', { result: [1] })] },
+    { date: '2026-10-04', venues: ['東京'], races: [race('e', '2026-10-04', '東京', { result: [1] })] },
+    // 出馬表の出た京都と、特別登録だけの東京が混ざった日
+    { date: '2026-10-10', venues: ['東京', '京都'], races: [race('f', '2026-10-10', '東京', { provisional: true, status: 'registration' }), race('g', '2026-10-10', '京都')] },
+    { date: '2026-10-11', venues: ['東京'], races: [race('h', '2026-10-11', '東京', { provisional: true, status: 'registration' })] },
+  ];
+  assert.equal(RECENT_DAYS, 7);
+  const out = visibleDays(days, '2026-10-05');
+  assert.deepEqual(out.map((d) => d.date), ['2026-08-01', '2026-09-28', '2026-10-04', '2026-10-10']);
+  const d10 = out.find((d) => d.date === '2026-10-10');
+  assert.deepEqual(d10.races.map((r) => r.id), ['g']);
+  assert.deepEqual(d10.venues, ['京都']);
+  // 元の配列は書き換えない
+  assert.equal(days[5].races.length, 2);
+  assert.ok(out.every((d) => d.races.every((r) => !r.provisional)));
 });

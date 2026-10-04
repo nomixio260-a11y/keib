@@ -10,7 +10,7 @@ import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { reviewRace } from './engine/review.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
-import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
+import { jstParts, raceStatus, startMs, visibleDays } from './engine/raceTime.js';
 import {
   renderRaceMain,
   renderSummary,
@@ -147,7 +147,7 @@ function defaultDay() {
   const list = days().map((d) => d.date);
   const next = list.find((d) => d > t);
   if (list.includes(t)) {
-    // 今日のレースがすべて確定したら、明日（来週の特別登録の暫定の予想を含む）を開く
+    // 今日のレースがすべて確定したら、次の開催日（出馬表が出ている日だけ）を開く
     const done = racesOf(t, null).every((r) => r.status === 'result' || r.result?.length);
     return done && next ? next : t;
   }
@@ -220,6 +220,8 @@ function insertDay(bundle, day) {
 }
 
 function setBundle(bundle) {
+  // 特別登録の暫定のレース（出馬表の前）は出さない。過去の開催日は直近7日だけ（それより前はアーカイブから）
+  bundle.days = visibleDays(bundle.days, today());
   data.bundle = bundle;
   data.loadState = bundle.days?.length ? 'ok' : 'none';
   data.live = !!bundle.live;

@@ -402,10 +402,12 @@ export function renderBetsPanel(pred, rec, ctx) {
     </div>
     ${(() => {
       const flat = (STRATEGIES[state.strategy].betTemp ?? BET_TEMP) !== 1;
-      const exotic = state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta', 'wide'].includes(t));
+      const exotic = state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta'].includes(t));
+      const wide = state.strategy === 'hit' && state.betTypes.includes('wide');
       const parts = [];
       if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.5%（週平均 −2,115円 → +601円）、直近14週 99.3% → 129.2%（−256円 → +1,961円）。的中率・期待値の欄はこの値です。`);
-      if (exotic) parts.push('<span class="bet-caution">的中重視に馬連・三連複・三連単を足すと、学習期間の約1.2万レースでは回収率が下がりました（単勝/複勝だけ 94.6% → 足すと 88.1%）。</span>');
+      if (exotic) parts.push('的中重視は当たる確率 50% 以上の買い目だけを買うので、馬連・馬単・三連複・三連単はほとんど選ばれません（学習期間 385日で馬連 1点）。単勝・複勝だけとほぼ同じ成績です。');
+      if (wide) parts.push('<span class="bet-caution">的中重視にワイドを入れると、的中率と回収率が少し下がります（学習期間 回収率 111.3% → 110.2%、検証期間の的中率 100% → 96.2%）。</span>');
       return parts.length ? `<p class="panel-note">${parts.join('<br>')}</p>` : '';
     })()}
     <div class="table-scroll"><table class="bets">

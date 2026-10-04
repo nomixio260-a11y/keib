@@ -94,7 +94,7 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
 if (!process.argv.includes('--dry')) {
   const header = '// scripts/evaluate.mjs が実際のレース結果（JRA）で検証した結果。手で編集しないでください。\n';
 if (process.env.EVAL_NO_WRITE === '1') {
-  log('EVAL_NO_WRITE=1：src/data/realBacktest.js は書き換えません');
+  console.log('EVAL_NO_WRITE=1：src/data/realBacktest.js は書き換えません');
 } else {
   await writeFile(path.join(root, 'src/data/realBacktest.js'), `${header}export const REAL_BACKTEST = ${JSON.stringify(out)};\n`);
   console.log('\n書き出しました：src/data/realBacktest.js');
