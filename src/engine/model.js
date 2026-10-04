@@ -6,7 +6,7 @@ import { harville, estimateOdds } from './market.js';
 import { hashString } from './rng.js';
 import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
-import { GBDT_READY, GBDT_INFO, gbdtScores } from './gbdt.js';
+import { GBDT_READY, GBDT_INFO, GBDT_AI_READY, GBDT_AI_INFO, gbdtScores } from './gbdt.js';
 import { honmeiConfidence } from './confidence.js';
 import { AUTO_VOLATILITY_CUTS } from './volatility.js';
 
@@ -74,7 +74,11 @@ export const PRESETS = {
     label: 'AI単独',
     weights: AI_WEIGHTS,
     noise: 1,
-    desc: 'オッズを見ずに、出馬表のデータだけで評価します。人気との違いから妙味のある馬を探すのに向きます。',
+    // オッズを使わない機械学習（gbdtModelAi.js）があればそれで評価する。単勝オッズの発売前の予想もこれ
+    mlAi: GBDT_AI_READY,
+    desc: GBDT_AI_READY
+      ? `オッズを見ずに、出馬表のデータ（前4走・スピード指数・騎手・厩舎・通算成績など${GBDT_AI_INFO?.params?.features || ''}項目）だけで評価する機械学習です（${trainedPeriod(GBDT_AI_INFO?.trainedOn)}${(GBDT_AI_INFO?.trainedOn?.races || 0).toLocaleString('ja-JP')}レースで学習）。人気との違いから妙味のある馬を探すのに向きます。単勝オッズの発売前の予想にも使います。`
+      : 'オッズを見ずに、出馬表のデータだけで評価します。人気との違いから妙味のある馬を探すのに向きます。',
   },
   speed: { label: 'スピード重視', weights: scaled(AI_WEIGHTS, { speed: 2, form: 0.6, jockey: 0.6 }), noise: 1, desc: '持ち時計（スピード指数）を重く見ます。' },
   pace: { label: '展開重視', weights: scaled(AI_WEIGHTS, { pace: 2.5, draw: 2, closing: 1.5 }), noise: 1, desc: '脚質・ペース・枠順を重く見ます。' },
@@ -175,11 +179,14 @@ export function scoreRace(race, settings = {}) {
   // 機械学習：スコアを決定木の出力（市場＋補正）に置き換える。ファクターの内訳は説明用に残す
   let ml = false;
   let temps = null;
-  if (settings.ml && (GBDT_READY || settings.mlScores)) {
+  const useAi = settings.mlAi && GBDT_AI_READY;
+  if (useAi || (settings.ml && (GBDT_READY || settings.mlScores))) {
     // 検証用：settings.mlScores（馬番 → スコアの Map）を渡すと、決定木の代わりにそのスコアを使う（分割外の予測で買い方を確かめるため）
-    const g = settings.mlScores
-      ? { rows: [...settings.mlScores].map(([number, score]) => ({ number, score, adj: 0, x: null })), temps: settings.mlTemps || [1, 1, 1] }
-      : gbdtScores(race, { stats: settings.stats, careerOf: settings.careerOf, fx });
+    // mlAi：オッズを使わない機械学習（単勝オッズの発売前。gbdtModelAi.js）
+    const g =
+      settings.mlScores && !useAi
+        ? { rows: [...settings.mlScores].map(([number, score]) => ({ number, score, adj: 0, x: null })), temps: settings.mlTemps || [1, 1, 1] }
+        : gbdtScores(race, { stats: settings.stats, careerOf: settings.careerOf, fx, ai: useAi });
     const by = new Map(g.rows.map((r) => [r.number, r]));
     for (const r of rows) {
       const m = by.get(r.entry.number);
@@ -191,7 +198,7 @@ export function scoreRace(race, settings = {}) {
     ml = true;
     temps = g.temps;
   }
-  return { ...fx, rows, coefs, ml, temps };
+  return { ...fx, rows, coefs, ml, mlAi: !!useAi, temps };
 }
 
 export function assignMarks(rows) {
@@ -248,10 +255,12 @@ export function predictRace(race, settings = {}) {
   const sims = settings.sims ?? DEFAULT_SETTINGS.sims;
   if (race.jump || race.surface === '障') return { race, rows: [], n: 0, empty: true, jump: true };
   // 単勝オッズの発売前は、オッズを使わない「AI単独」で予想する。機械学習（オッズが出発点）や総合（オッズのファクターを含む）は
-  // オッズがないと大きく外れる（検証期間でオッズを消すと◎の勝率が 機械学習 3.9%・総合 22.8%、AI単独 29.1%）
+  // オッズがないと大きく外れる（検証期間でオッズを消すと◎の勝率が 機械学習 3.9%・総合 22.8%、線形の AI単独 29.0%・
+  // オッズを使わない機械学習 29.6%。騎手・枠のない特別登録では 27.6% → 29.6%）
   const oddsKnown = (race.entries || []).some((e) => !e.scratched && e.odds > 1);
   const aiOnly = !oddsKnown && !settings.keepPresetWithoutOdds;
-  if (aiOnly) settings = { ...settings, weights: PRESETS.ai.weights, noise: PRESETS.ai.noise, ml: false };
+  // オッズを使わない機械学習があれば、それで予想する（線形の AI単独より、検証期間 910レースで対数損失 2.108 → 2.059）
+  if (aiOnly) settings = { ...settings, weights: PRESETS.ai.weights, noise: PRESETS.ai.noise, ml: false, mlAi: GBDT_AI_READY, mlScores: null };
   const scored = scoreRace(race, settings);
   const { rows } = scored;
   const n = rows.length;
@@ -322,13 +331,15 @@ export function predictRace(race, settings = {}) {
     placeCount,
     noOdds,
     temps,
-    ml: scored.ml,
+    // ml … オッズを出発点にした機械学習。mlAi … オッズを使わない機械学習（単勝オッズの発売前）
+    ml: scored.ml && !scored.mlAi,
+    mlAi: scored.mlAi,
     aiOnly,
     pace: scored.pace,
     straightBias: scored.straightBias,
     drawBias: scored.drawBias,
     nigeCount: scored.nigeCount,
     coefs: scored.coefs,
-    confidence: confidenceOf(rows, { placeCount, ml: scored.ml, oddsKnown: !noOdds }),
+    confidence: confidenceOf(rows, { placeCount, ml: scored.ml && !scored.mlAi, oddsKnown: !noOdds }),
   };
 }

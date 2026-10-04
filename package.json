@@ -29,7 +29,8 @@
     "confidence": "node scripts/fit-confidence.mjs",
     "volatility": "node scripts/fit-volatility.mjs",
     "course-stats": "node scripts/course-stats.mjs",
-    "miss-analysis": "node scripts/miss-analysis.mjs"
+    "miss-analysis": "node scripts/miss-analysis.mjs",
+    "train-ai": "NO_MARKET=1 FEATS_DROP=placeRankDiff,qFav,qEntropy,exoticKnown,q2Log,q2VsWin,top2VsHv,wideVsHv,trioVsHv,exWinLog,exVsWin,sireKnown,sireWinSurf,sireTop3Surf,sireStarts,damSireWinSurf,bodyWeight,bwDiff,bwKnown ROUNDS=4000 DEPTH=3 LR=0.03 LAMBDA=10 COLSAMPLE=0.5 SUBSAMPLE=0.6 node scripts/train-gbdt.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

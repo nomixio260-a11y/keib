@@ -59,7 +59,7 @@ function renderHead(race, ctx) {
     </div>
     ${
       race.provisional
-        ? `<p class="prov-note">特別登録の段階の<b>暫定の予想</b>です。枠順・騎手・単勝オッズは出馬表（土曜のレースは木曜、日曜・月曜のレースは金曜〜土曜）で決まり、出たら自動で予想を出し直します。いまの勝率は、登録馬の前4走・負担重量・厩舎などからオッズを使わずに計算した「AI単独」の予想です（騎手・枠順はまだ使っていません）。${
+        ? `<p class="prov-note">特別登録の段階の<b>暫定の予想</b>です。枠順・騎手・単勝オッズは出馬表（土曜のレースは木曜、日曜・月曜のレースは金曜〜土曜）で決まり、出たら自動で予想を出し直します。いまの勝率は、登録馬の前4走・負担重量・厩舎などからオッズを使わずに計算した機械学習（AI単独）の予想です（騎手・枠順はまだ使っていません）。${
             race.maxRunners && race.entries.length > race.maxRunners ? `登録が${race.entries.length}頭で出走できる頭数（${race.maxRunners}頭）より多いので、除外・抽選で出走馬が変わります。` : ''
           }</p>`
         : ''
@@ -296,7 +296,7 @@ export function renderCardTable(pred, ctx) {
         <span class="seg-label">並び順</span>
         ${sortBtn('number', race.provisional ? '登録順' : '馬番')}${sortBtn('ai', '勝率順')}${hasResult ? sortBtn('finish', '着順') : ''}
       </div>
-      <p class="card-hint">${race.provisional ? '特別登録の馬（50音順）です。枠・馬番・騎手は出馬表で決まります。行を押すと前4走と評価の内訳が開きます。' : pred.noOdds ? `単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。${pred.aiOnly ? 'いまの勝率はオッズを使わない「AI単独」の予想です（学習に使っていない期間で◎の勝率 29%。オッズが出ると機械学習の予想に切り替わります）。' : ''}` : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
+      <p class="card-hint">${race.provisional ? '特別登録の馬（50音順）です。枠・馬番・騎手は出馬表で決まります。行を押すと前4走と評価の内訳が開きます。' : pred.noOdds ? `単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。${pred.aiOnly ? 'いまの勝率はオッズを使わない機械学習（AI単独）の予想です（学習に使っていない期間で◎の勝率 約30%。オッズが出ると、オッズも使う機械学習の予想に切り替わります）。' : ''}` : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
     </div>
     <div class="table-scroll card-scroll"><table class="card${hasResult ? ' has-fin' : ''}">
     <thead><tr>
@@ -445,7 +445,7 @@ export function renderWeightsPanel(ctx) {
       <p class="slider-desc" id="wd-${f.key}">${esc(f.desc)}</p>
     </div>`,
   ).join('');
-  const ml = !!PRESETS[state.preset]?.ml;
+  const ml = !!(PRESETS[state.preset]?.ml || PRESETS[state.preset]?.mlAi);
   return `<section class="panel" id="panel-weights" aria-labelledby="h-weights">
     <header class="panel-head"><h2 id="h-weights">予想のモデル</h2><span class="pill" id="custom-pill" ${state.preset === 'custom' ? '' : 'hidden'}>カスタム</span></header>
     <div class="seg preset-seg" role="group" aria-label="プリセット">${presets}</div>

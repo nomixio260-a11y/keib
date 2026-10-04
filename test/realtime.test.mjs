@@ -152,9 +152,10 @@ test('オッズ発表前は買い目を出さない', () => {
   assert.deepEqual(evaluateFormations(pred), []);
   // 勝率は出る
   assert.ok(Math.abs(pred.rows.reduce((a, r) => a + r.pWin, 0) - 1) < 1e-9);
-  // オッズがないうちは、オッズを使わない「AI単独」で予想する（機械学習はオッズが出発点のため）
+  // オッズがないうちは、オッズを使わない「AI単独」で予想する（オッズが出発点の機械学習は使わず、オッズを使わない機械学習で）
   assert.equal(pred.aiOnly, true);
   assert.equal(pred.ml, false);
+  assert.equal(pred.mlAi, true);
   assert.equal(predictRace(race, { sims: 2000, keepPresetWithoutOdds: true }).aiOnly, false);
   assert.equal(predictRace(makeRace({ seed: 5 }), { sims: 2000 }).aiOnly, false);
 });

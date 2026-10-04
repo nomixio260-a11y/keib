@@ -4,7 +4,7 @@ import { PAYOUT_RATE, BET_LABEL } from '../engine/constants.js';
 import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor, VOLATILITY_CUTS } from '../engine/model.js';
 import { CALIBRATION } from '../engine/calibration.js';
 import { REAL_STATS } from '../engine/realStats.js';
-import { GBDT_READY, GBDT_INFO } from '../engine/gbdt.js';
+import { GBDT_READY, GBDT_INFO, GBDT_AI_READY, GBDT_AI_INFO } from '../engine/gbdt.js';
 import { CONFIDENCE_MODEL } from '../engine/confidenceModel.js';
 
 const CUTS = CONFIDENCE_MODEL?.cuts || [0.42, 0.3, 0.2];
@@ -22,6 +22,11 @@ function mlSection() {
         <h2>7. 機械学習（決定木のブースティング）</h2>
         <p>「機械学習」の重み付けでは、単勝オッズの対数確率を出発点にして、<strong>オッズにまだ織り込まれていない分だけ</strong>を決定木の集まり（勾配ブースティング）が学びます。特徴量は上のファクターに加えて、前走までのスピード指数の推移、通算成績、対戦成績の評価（相手の強さを考慮した着順の評価）、複勝オッズと単勝オッズのずれ、馬連・ワイド・三連複・馬単のオッズ（単勝とは別の投票市場）と単勝の見方のずれなど ${FEATURE_NAMES.length}項目で、すべて発走前にわかる情報です。別の投票市場のずれは最も効く特徴量のひとつで、発走が近づいてそれらのオッズが取れた時点から予想に反映されます。設定（木の深さ・学習率・正則化・使う特徴量）は学習期間の中の交差検証で選び、検証期間の成績は最後に一度だけ確認しています。</p>
         <p>学習 ${esc(tr.from || '')}〜${esc(tr.to || '')}（${(tr.races || 0).toLocaleString('ja-JP')}レース）、木 ${esc(GBDT_INFO.params?.rounds || 0)}本。学習に使っていない ${esc(t.from || '')} 以降の ${esc(t.races || 0)}レースでは、勝ち馬の対数損失が単勝オッズだけの ${(-(t.baseLL || 0)).toFixed(3)} から ${(-(t.ll || 0)).toFixed(3)} に、◎の勝率が ${pctOf(t.baseTop1)} から ${pctOf(t.top1)} になりました。差はわずかです。オッズには大勢の予想がすでに織り込まれていて、公開情報から上積みできる分は小さいためです。</p>
+        ${
+          GBDT_AI_READY && GBDT_AI_INFO
+            ? `<p>単勝オッズの発売前（前日・特別登録の段階）と「AI単独」の重み付けでは、オッズを出発点にせず、市場（単勝・複勝・馬連など）・血統・馬体重を除いた ${esc(GBDT_AI_INFO.params?.features || 0)}項目から学んだ<strong>オッズを使わない機械学習</strong>（木 ${esc(GBDT_AI_INFO.params?.rounds || 0)}本）で予想します。${REAL_BACKTEST?.presets?.ai?.ai ? `学習に使っていない ${(REAL_BACKTEST.races || 0).toLocaleString('ja-JP')}レース（バックテストと同じ検証）で◎の勝率 ${pctOf(REAL_BACKTEST.presets.ai.ai.winRate)}・複勝率 ${pctOf(REAL_BACKTEST.presets.ai.ai.top3Rate)}・対数損失 ${REAL_BACKTEST.presets.ai.ai.logLoss.toFixed(3)}（以前の線形の AI単独は ◎ 29.0%・複勝率 57.4%・2.107）。` : ''}オッズが出ると、オッズも使う機械学習に切り替わります。</p>`
+            : ''
+        }
       </section>`;
 }
 

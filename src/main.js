@@ -390,7 +390,7 @@ function getPrediction(race, light = false) {
   const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}|${sims}`;
   const hit = predCache.get(key);
   if (hit) return hit;
-  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml });
+  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi });
   predCache.set(key, pred);
   if (predCache.size > 60) predCache.delete(predCache.keys().next().value);
   return pred;
@@ -676,7 +676,7 @@ async function runRecentBacktest() {
   try {
     bt.recent.result = await runBacktest(
       races,
-      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml },
+      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi },
       {
         sims: 0,
         onProgress: (p) => {
