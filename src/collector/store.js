@@ -76,7 +76,7 @@ export async function attachFinalExoticOdds(races, dir = FINAL_ODDS_DIR) {
     const doc = await readJson(path.join(dir, String(race.date || '').slice(0, 4), `${race.id}.json`));
     if (!doc) continue;
     const exotic = {};
-    for (const k of ['quinella', 'wide', 'trio']) if (doc[k] && Object.keys(doc[k]).length) exotic[k] = doc[k];
+    for (const k of ['quinella', 'wide', 'trio', 'exacta']) if (doc[k] && Object.keys(doc[k]).length) exotic[k] = doc[k];
     if (Object.keys(exotic).length) {
       race.exoticOdds = exotic;
       n++;

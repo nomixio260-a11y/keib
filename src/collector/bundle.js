@@ -143,7 +143,7 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
             }
             const links = parseOddsLinks(html);
             const exotic = known?.exoticOdds || {};
-            for (const kind of ['quinella', 'wide', 'trio']) {
+            for (const kind of ['quinella', 'wide', 'trio', 'exacta']) {
               if (!links[kind]) continue;
               const parsed = parseExoticOdds(await client.page(links[kind], { cache: 'ttl', ttlMs: ttl }));
               if (parsed.count) exotic[kind] = parsed.odds;
