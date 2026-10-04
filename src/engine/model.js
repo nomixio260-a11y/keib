@@ -7,6 +7,7 @@ import { hashString } from './rng.js';
 import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
 import { GBDT_READY, GBDT_INFO, gbdtScores } from './gbdt.js';
+import { honmeiConfidence } from './confidence.js';
 
 /**
  * ファクター定義。
@@ -197,26 +198,25 @@ export function assignMarks(rows) {
   for (const r of rows) r.mark = marks.get(r) || '';
 }
 
-/** 自信度（S/A/B/C）と波乱度（1〜5） */
 /** 荒れ度の区切り：人気3頭以外が勝つ確率（学習期間の分割外の予測の3分位。scripts/race-temp.mjs） */
 export const VOLATILITY_CUTS = [0.28, 0.39];
 export const VOLATILITY_LABELS = ['堅い', '普通', '荒れ'];
 
 /**
- * 自信度（◎の勝率と2番手との差）と荒れ度。
+ * 自信度と荒れ度。
+ *   grade … S/A/B/C。◎が勝つ確率（学習期間の分割外の予測で校正。src/engine/confidence.js）を、学習期間の分布の区切りで分ける
+ *   winProb / placeProb … ◎が勝つ確率・複勝圏（8頭以上は3着内、5〜7頭は2着内）に来る確率（校正後）
  *   upsetProb … 人気3頭（単勝オッズ順）以外が勝つ確率（モデル）。荒れ度の元になる値
  *   volatility … 堅い／普通／荒れ（upsetProb を VOLATILITY_CUTS で区切る）
  *   favWinProb … 1番人気が勝つ確率（モデル）
  *   upset … 1〜5 の目盛り（画面の表示用）
  */
-export function confidenceOf(rows) {
+export function confidenceOf(rows, { placeCount = placeCountOf(rows.length), ml = true } = {}) {
   const p = rows.map((r) => r.pWin).sort((a, b) => b - a);
   const top = p[0] ?? 0;
   const second = p[1] ?? 0;
-  let grade = 'C';
-  if (top >= 0.42) grade = 'S';
-  else if (top >= 0.3 && top - second >= 0.08) grade = 'A';
-  else if (top >= 0.2) grade = 'B';
+  const hc = honmeiConfidence(rows, { placeCount, ml });
+  const grade = hc.grade;
   const n = p.length;
   const entropy = -p.reduce((acc, v) => acc + (v > 0 ? v * Math.log(v) : 0), 0);
   const evenness = n > 1 ? entropy / Math.log(n) : 0;
@@ -228,7 +228,7 @@ export function confidenceOf(rows) {
   const vi = upsetProb < VOLATILITY_CUTS[0] ? 0 : upsetProb < VOLATILITY_CUTS[1] ? 1 : 2;
   const volatility = VOLATILITY_LABELS[vi];
   const upset = upsetProb < 0.2 ? 1 : upsetProb < VOLATILITY_CUTS[0] ? 2 : upsetProb < VOLATILITY_CUTS[1] ? 3 : upsetProb < 0.5 ? 4 : 5;
-  return { grade, top, second, evenness, upset, upsetProb, favWinProb, volatility, volatilityIndex: vi };
+  return { grade, top, second, evenness, upset, upsetProb, favWinProb, volatility, volatilityIndex: vi, winProb: hc.winProb, placeProb: hc.placeProb, calibrated: hc.calibrated };
 }
 
 /** レースを予想する */
@@ -311,6 +311,6 @@ export function predictRace(race, settings = {}) {
     drawBias: scored.drawBias,
     nigeCount: scored.nigeCount,
     coefs: scored.coefs,
-    confidence: confidenceOf(rows),
+    confidence: confidenceOf(rows, { placeCount, ml: scored.ml }),
   };
 }
