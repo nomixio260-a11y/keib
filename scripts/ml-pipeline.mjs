@@ -9,6 +9,7 @@
 // 学習期間の全部で学習する（分割より2割ほどデータが増えるので本数も2割増やす）。検証期間の成績は最後に1回だけ見る。
 
 import path from 'node:path';
+import { INCLUDE_EXOTIC, EXOTIC_FEATURE_NAMES } from '../src/engine/features.js';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
@@ -32,8 +33,10 @@ const BETA = Number(process.env.BETA || 1);
 const TOP16 = ['logq', 'logqGap', 'popRank', 'placeLog', 'placeVsWin', 'placeSpread', 'weightRel', 'jTop3', 'tWin', 'fFormRel', 'siBest4Rel', 'siLast4Rel', 'fSpeedRel', 'closingBest', 'daysSince', 'cEloRel'];
 // 血統（競走馬ページから集めた父・母の父の芝ダ別成績）：交差検証 +0.0006、検証期間 −0.0024±0.0014 → 不採用（候補としては残す）
 const PEDIGREE = ['sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'damSireWinSurf'];
+// 別の投票市場（馬連・ワイド・三連複・馬単）の特徴量：INCLUDE_EXOTIC のときは標準の組に足す（検証の記録は README の開発日記）
+const STANDARD = INCLUDE_EXOTIC ? [...TOP16, ...EXOTIC_FEATURE_NAMES] : TOP16;
 const CANDIDATES = [
-  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
+  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: STANDARD, beta: BETA },
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: [...TOP16, ...PEDIGREE], beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.5, subsample: 0.6, only: TOP16, beta: BETA },
   { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
