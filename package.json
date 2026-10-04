@@ -28,7 +28,8 @@
     "ensemble-lin": "node scripts/ensemble-lin.mjs",
     "confidence": "node scripts/fit-confidence.mjs",
     "volatility": "node scripts/fit-volatility.mjs",
-    "course-stats": "node scripts/course-stats.mjs"
+    "course-stats": "node scripts/course-stats.mjs",
+    "miss-analysis": "node scripts/miss-analysis.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

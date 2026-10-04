@@ -46,6 +46,12 @@ const TOTAL_WEIGHTS = CALIBRATION.combinedWeights
   : { ...Object.fromEntries(FACTORS.map((f) => [f.key, Math.round(f.ref / 2)])), market: 50 };
 const scaled = (base, mult) => Object.fromEntries(Object.entries(base).map(([k, v]) => [k, Math.min(100, Math.round(v * (mult[k] ?? 1)))]));
 
+/** 学習期間の表記（2022年12月〜2026年6月の） */
+function trainedPeriod(t) {
+  const ym = (d) => (d ? `${d.slice(0, 4)}年${Number(d.slice(5, 7))}月` : '');
+  return t?.from && t?.to ? `${ym(t.from)}〜${ym(t.to)}の` : '';
+}
+
 export const PRESETS = {
   ...(GBDT_READY
     ? {
@@ -54,7 +60,7 @@ export const PRESETS = {
           weights: AI_WEIGHTS,
           noise: 1,
           ml: true,
-          desc: `単勝オッズを出発点に、${GBDT_INFO?.params?.features || GBDT_INFO?.params?.only?.length || '厳選した'}項目の特徴量から決定木の集まり（勾配ブースティング）が「オッズにまだ織り込まれていない分」を学習したモデル（3年分・${(GBDT_INFO?.trainedOn?.races || 0).toLocaleString('ja-JP')}レースで学習）。学習に使っていない期間で最も正確でした。重み付けのスライダーは使いません（内訳の表示にだけ使います）。`,
+          desc: `単勝オッズを出発点に、${GBDT_INFO?.params?.features || GBDT_INFO?.params?.only?.length || '厳選した'}項目の特徴量から決定木の集まり（勾配ブースティング）が「オッズにまだ織り込まれていない分」を学習したモデル（${trainedPeriod(GBDT_INFO?.trainedOn)}${(GBDT_INFO?.trainedOn?.races || 0).toLocaleString('ja-JP')}レースで学習）。学習に使っていない期間で最も正確でした。重み付けのスライダーは使いません（内訳の表示にだけ使います）。`,
         },
       }
     : {}),

@@ -4,6 +4,7 @@ import { PRESETS } from '../engine/model.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
 import { calibrationChart, lineChart } from './charts.js';
 import { esc, pct, yen } from './format.js';
+import { renderReviewSection } from './reviewView.js';
 
 export function presetLabel(state) {
   return state.preset === 'custom' ? 'カスタム' : PRESETS[state.preset]?.label || 'バランス';
@@ -77,7 +78,7 @@ export function renderBacktest(ctx) {
   </div>`;
   const res = currentBacktest(bt);
   if (!res) {
-    return `${intro}${sourceSwitch(ctx)}<div class="empty-state small"><p>${saved ? '「直近の開催日を検証」を押すと、表示中の設定で予想 → 買い目 → 実際の払戻の精算を行います。' : '検証結果はまだありません。npm run evaluate で作成するか、直近の開催日で検証してください。'}</p></div>`;
+    return `${intro}${sourceSwitch(ctx)}<div class="empty-state small"><p>${saved ? '「直近の開催日を検証」を押すと、表示中の設定で予想 → 買い目 → 実際の払戻の精算を行います。' : '検証結果はまだありません。npm run evaluate で作成するか、直近の開催日で検証してください。'}</p></div>${renderReviewSection(ctx)}`;
   }
   const focus = res.strategies.find((s) => s.key === bt.focus) || res.strategies[0];
   const base = res.strategies.find((s) => s.key === 'fav');
@@ -113,6 +114,7 @@ export function renderBacktest(ctx) {
         <p class="panel-note">点が斜めの線に近いほど、確率の見積もりが正確です。対数損失（小さいほど良い）は AI ${res.ai.logLoss.toFixed(3)}、オッズ ${res.fav.logLoss.toFixed(3)}。</p>
       </section>
     </div>
+    ${renderReviewSection(ctx)}
     <section class="note-box">
       <h2>結果の読み方</h2>
       <p>オッズには多くの人の予想がすでに織り込まれているため、公開情報だけで長期的に回収率100%を超えるのは非常に難しく、この検証でも多くの買い方が100%を下回ります。◎の勝率・複勝率が1番人気と比べてどうか、キャリブレーション（予測した確率と実際の勝率の一致）がどうかを、予想の確かさの目安にしてください。過去の成績は将来の結果を保証するものではありません。</p>

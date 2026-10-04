@@ -1,5 +1,6 @@
 // レース一覧：開催日（過去・今日・これから）→ 競馬場 → レース。発走までの時間と、確定したレースの結果を並べる
 
+import { renderReviewCompact } from './reviewView.js';
 import { raceStatus, STATUS_LABEL, untilText, startMs } from '../engine/raceTime.js';
 import { esc, frameBadge, entryBadge, pct } from './format.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
@@ -151,6 +152,7 @@ function renderDayScore(races, ctx) {
       <div><dt>単勝回収</dt><dd class="num ${s.winRet >= s.races * 100 ? 'tx-good' : ''}">${pct(s.winRet / (s.races * 100), 0)}</dd></div>
       <div><dt>複勝回収</dt><dd class="num ${s.placeRet >= s.placeBets * 100 ? 'tx-good' : ''}">${s.placeBets ? pct(s.placeRet / (s.placeBets * 100), 0) : '—'}</dd></div>
     </dl>
+    ${renderReviewCompact(races, ctx)}
     ${renderProfit(races, ctx)}
   </div>`;
 }

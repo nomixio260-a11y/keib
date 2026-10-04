@@ -6,7 +6,8 @@
 //   環境変数：TEST_START=2026-07-01（検証の開始日）、ROUNDS、DEPTH、LR、LAMBDA、MIN_H、COLSAMPLE、SUBSAMPLE、
 //             FIXED_ROUNDS=n（交差検証で選んだ本数。学習期間の全部で学習し早期終了しない）、BAGS=n（乱数の違う n 個を平均）、
 //             TOPK=3（何着までの順位で学ぶか。1なら1着だけ）、STAGE_W=0.5（2着以降の重み）、
-//             NO_MARKET=1（人気を使わない）、FEATS_DROP / FEATS_ONLY（特徴量名をコンマ区切り）、--dry（書き出さない）
+//             NO_MARKET=1（人気を使わない）、FEATS_DROP / FEATS_ONLY（特徴量名をコンマ区切り）、--dry（書き出さない）、
+//             OUT_FILE=ファイル（src/engine/gbdtModel.js の代わりに書き出す。候補のモデルを比べるとき）
 //
 // 各馬のスコア = 市場（単勝オッズの対数確率）＋ 木の合計。1着の確率はレース内のソフトマックス。
 // 市場を出発点にして「オッズにまだ織り込まれていない分」だけを木が学ぶので、市場より悪くなりにくい。
@@ -147,7 +148,7 @@ if (!process.argv.includes('--dry')) {
     params: { rounds: all.length, depth: params.depth, lr: params.lr, lambda: params.lambda, colsample: params.colsample, subsample: params.subsample, topk: params.topk, stageWeight: params.stageWeight, halfLife: params.halfLife, beta: BETA, bags: BAGS, drop: [...drop].map((f) => names[f]), only: only.map((f) => names[f]), features: feats.length },
     temps,
   };
-  const file = path.join(ROOT, 'src/engine', NO_MARKET ? 'gbdtModelAi.js' : 'gbdtModel.js');
+  const file = process.env.OUT_FILE ? path.resolve(process.env.OUT_FILE) : path.join(ROOT, 'src/engine', NO_MARKET ? 'gbdtModelAi.js' : 'gbdtModel.js');
   await writeFile(file, `// scripts/train-gbdt.mjs が実際のレース結果（JRA）から学習。手で編集しないでください。\nexport const GBDT_MODEL = ${JSON.stringify(model)};\n`);
   log(`書き出しました：${path.relative(ROOT, file)}（${(JSON.stringify(model).length / 1024).toFixed(0)} KB）`);
 }

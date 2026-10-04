@@ -7,6 +7,7 @@ import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
 import { recommendBets, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
 import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
+import { reviewRace } from './engine/review.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
 import { jstParts, raceStatus, startMs } from './engine/raceTime.js';
@@ -407,9 +408,16 @@ function pickOf(pred, race) {
   if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
   const h = pred.order[0];
   // 確定したレースは、今の買い方（戦略・予算・券種）の AI推奨を実際の払戻で精算（合計の収支のため）
+  // 外れ方の分析（src/engine/review.js）：◎と勝ち馬、AI推奨のどれかが当たる見込み（expHit）
   let settle = null;
-  if (race.result?.length) settle = settleTickets(race, pred, recommendBets(pred, betOpts()).tickets) || { stake: 0, pay: 0, hits: 0 };
-  return { number: h.entry.number, frame: h.entry.frame, prov: !!h.entry.provisionalNumber, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, sig: raceSig(race) };
+  let review = null;
+  if (race.result?.length) {
+    const rec = recommendBets(pred, betOpts());
+    settle = settleTickets(race, pred, rec.tickets) || { stake: 0, pay: 0, hits: 0 };
+    settle.expHit = rec.tickets.length ? rec.stats?.hitRate ?? null : null;
+    review = reviewRace(pred, race);
+  }
+  return { number: h.entry.number, frame: h.entry.frame, prov: !!h.entry.provisionalNumber, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, review, sig: raceSig(race) };
 }
 
 /** 一覧の◎（とその日の成績）を裏で少しずつ計算 */
