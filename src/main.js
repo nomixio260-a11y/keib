@@ -134,12 +134,17 @@ function venuesOf(day) {
 const baseRace = (id) => raceIndex.get(id) || imported.find((r) => r.id === id) || null;
 const dayOfRace = (race) => (race.imported ? 'import' : race.date);
 
-/** 最初に開く開催日：今日 → 次の開催日 → 直近の開催日 */
+/** 最初に開く開催日：今日（全レースが確定したら次の開催日）→ 次の開催日 → 直近の開催日 */
 function defaultDay() {
   const t = today();
   const list = days().map((d) => d.date);
-  if (list.includes(t)) return t;
-  return list.find((d) => d > t) || list[list.length - 1] || (imported.length ? 'import' : null);
+  const next = list.find((d) => d > t);
+  if (list.includes(t)) {
+    // 今日のレースがすべて確定したら、明日（来週の特別登録の暫定の予想を含む）を開く
+    const done = racesOf(t, null).every((r) => r.status === 'result' || r.result?.length);
+    return done && next ? next : t;
+  }
+  return next || list[list.length - 1] || (imported.length ? 'import' : null);
 }
 
 /** その日のメインレース（格がいちばん上、同じなら11R寄り） */
