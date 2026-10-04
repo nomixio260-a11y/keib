@@ -8,7 +8,7 @@ import { parseRegistrationList, parseRegistration, registrationKeyFromCname } fr
 import { registrationToRace, addProvisionalRaces, removeProvisionalRaces } from '../src/collector/registrations.js';
 import { upsertRace } from '../src/collector/bundle.js';
 import { predictRace } from '../src/engine/model.js';
-import { recommendBets, betView, BET_TEMP } from '../src/engine/bets.js';
+import { recommendBets, betView, BET_TEMP, priceTicket } from '../src/engine/bets.js';
 import { raceStatus } from '../src/engine/raceTime.js';
 import { makeRace } from './fixtures/race.mjs';
 
@@ -164,6 +164,36 @@ test('2段目：決めた買い目から当たる確率が下限以上のもの�
   // 30% にゆるめると残る買い目は増える（同じか多い）
   const pred = predictRace(makeRace({ seed: 7 }), { sims: 0 });
   assert.ok(recommendBets(pred, { budget: 3000, keep: 0.3 }).tickets.length >= recommendBets(pred, { budget: 3000, keep: 0.5 }).tickets.length);
+});
+
+test('バランス・高配当は当たる確率で絞り、自動調整は期待値 0.9 以上だけ買う（1日に何万円も負けないように）', () => {
+  const T5 = ['win', 'place', 'quinella', 'trio', 'trifecta'];
+  let balanceDropped = 0;
+  let autoSkipped = 0;
+  let autoBought = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const pred = predictRace(makeRace({ seed }), { sims: 0 });
+    const bal = recommendBets(pred, { budget: 3000, strategy: 'balance', types: T5 });
+    assert.equal(bal.keepMinP, 0.3, 'バランスの標準は 30%');
+    for (const t of bal.tickets) assert.ok(t.pHit >= 0.3, `バランス ${t.type} ${t.pHit}`);
+    balanceDropped += bal.dropped.length;
+    const val = recommendBets(pred, { budget: 3000, strategy: 'value', types: T5 });
+    assert.equal(val.keepMinP, 0.2, '高配当の標準は 20%');
+    for (const t of val.tickets) assert.ok(t.pHit >= 0.2, `高配当 ${t.type} ${t.pHit}`);
+    // 絞らない選択（0）なら従来どおり
+    const balAll = recommendBets(pred, { budget: 3000, strategy: 'balance', types: T5, keep: 0 });
+    assert.equal(balAll.tickets.length, bal.tickets.length + bal.dropped.length);
+    const auto = recommendBets(pred, { budget: 3000, strategy: 'auto' });
+    if (auto.skipped) autoSkipped++;
+    for (const t of auto.tickets) {
+      autoBought++;
+      const view = betView(pred, BET_TEMP);
+      const c = priceTicket({ type: t.type, idx: t.idx }, view, 0);
+      assert.ok(c.ev >= 0.9 - 1e-9 && c.odds >= 1.05, `自動調整 ${t.type} ev ${c.ev} odds ${c.odds}`);
+    }
+  }
+  assert.ok(balanceDropped > 0, 'バランスで外す買い目がある');
+  assert.ok(autoSkipped > 0, '自動調整で見送るレースがある');
 });
 
 test('レース分析：結論（買い・見送り・待ち）、有力馬、AI と人気のずれ、コースの傾向', async () => {

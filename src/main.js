@@ -53,6 +53,8 @@ const saved = loadSaved();
 const sameCal = saved.calId === CALIBRATION_ID;
 const NOISE_VERSION = 2;
 const BLEND_VERSION = 2;
+// 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%）ので、前に保存した選択は一度「買い方の標準」に戻す
+const KEEP_VERSION = 2;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
@@ -90,7 +92,7 @@ const state = {
   // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
   // 2段目の絞り込み（当たる確率の下限）。既定は買い方の標準（的中重視・控えめは 50% 以上）
-  keep: KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
+  keep: saved.keepVersion === KEEP_VERSION && KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
 };
@@ -117,7 +119,7 @@ let current = { pred: null, rec: null };
 
 function persist() {
   const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, edits } = state;
-  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, edits, imported });
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, keepVersion: KEEP_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, edits, imported });
 }
 
 const today = () => jstParts().date;

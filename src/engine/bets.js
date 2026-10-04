@@ -36,8 +36,11 @@ export const STRATEGIES = {
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
   hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目を選び、そこから当たる確率が 50% 以上のものだけを買います。どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal' },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
-  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から、確率とのバランスで選びます。', minEv: 1.0, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
-  value: { label: '高配当', desc: '期待値の高い穴目を中心に。当たる回数は少なめです。', minEv: 1.15, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
+  // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
+  // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、
+  // 最悪の日 −31,660円 → −4,000円、検証期間でも 99.7% → 164.2%（112.6% → 277.7%）。README の開発日記 2026-10-05
+  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から確率とのバランスで選び、当たる確率が 30% 以上のものだけを買います。学習期間の約1.2万レースで回収率 100.8%（1日 1〜2レース）。', minEv: 1.0, keepMinP: 0.3, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
+  value: { label: '高配当', desc: '期待値の高い買い目を中心に、当たる確率が 20% 以上のものだけを買います。当たる回数は少なめです（学習期間の約1.2万レースで回収率 106.2%・的中率 20%、買うのは週に数レース）。', minEv: 1.15, keepMinP: 0.2, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
   careful: {
     label: '控えめ',
     desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を大きく減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 98〜99% 前後）。',
@@ -49,10 +52,14 @@ export const STRATEGIES = {
     grades: ['S'],
     onlyTypes: ['win', 'place'],
   },
+  // autoMinEv・minOdds：区分ごとの買い方を決めたあと、期待値 0.9 以上・オッズ 1.05倍以上の買い目だけを買う。区分の買い方をそのまま毎レース買うと
+  // 1日に約20レース買い、回収率は学習期間の分割外 90.1%・検証期間 87.5%（週 −4,176円）。絞ると 104.8%・116.5%、的中率 83%・91%
   auto: {
     label: '自動調整',
-    desc: '荒れ度（堅い・普通・荒れ）に合わせて、◎の買い方を自動で切り替えます。区分ごとの買い方は、学習期間の実際の払戻で回収率が最も良かったもの（scripts/fit-volatility.mjs）。予算はその買い方の点数で等分します。',
+    desc: '荒れ度（堅い・普通・荒れ）に合わせて◎の買い方を切り替え、期待値が 0.9 以上のときだけ買います。区分ごとの買い方は、学習期間の実際の払戻で回収率が最も良かったもの（scripts/fit-volatility.mjs）。学習期間の約1.2万レースで回収率 104.8%・的中率 83%。',
     minEv: 0,
+    autoMinEv: 0.9,
+    minOdds: 1.05,
     maxTickets: 6,
     alloc: 'equal',
     auto: true,
@@ -290,7 +297,7 @@ export const DEFAULT_TYPES = ['win', 'place'];
 /** オッズを推定するしかない券種（複勝は実際のオッズがないときだけ推定） */
 export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'];
 
-/** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめは 50%、ほかは絞らない） */
+/** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめ 50%、バランス 30%、高配当 20%） */
 export function resolveKeep(keep, strategy = null) {
   if (keep == null || keep === '' || keep === 'auto') return STRATEGIES[strategy]?.keepMinP ?? 0;
   const v = Number(keep);
@@ -298,7 +305,7 @@ export function resolveKeep(keep, strategy = null) {
 }
 
 export const KEEP_OPTIONS = [
-  { value: 'auto', label: '買い方の標準（的中重視・控えめは50%以上）' },
+  { value: 'auto', label: '買い方の標準（的中重視・控えめ 50%、バランス 30%、高配当 20%以上）' },
   { value: 0, label: '絞らない' },
   { value: 0.3, label: '30%以上（収支を重く見る）' },
   { value: 0.5, label: '50%以上' },
@@ -327,7 +334,16 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
     if (form && POLICY_FORMS[form]) {
       const marks = pred.rows.map((r, i) => i).sort((a, b) => pred.rows[b].pWin - pred.rows[a].pWin);
       const unordered = new Set(['quinella', 'wide', 'trio']);
-      const raw = POLICY_FORMS[form].build(marks, pred.placeCount, pred.n).map((t) => ({ ...t, idx: unordered.has(t.type) ? [...t.idx].sort((a, b) => a - b) : t.idx }));
+      let raw = POLICY_FORMS[form].build(marks, pred.placeCount, pred.n).map((t) => ({ ...t, idx: unordered.has(t.type) ? [...t.idx].sort((a, b) => a - b) : t.idx }));
+      // autoMinEv：買い方を決めたあと、期待値（的中重視と同じく少し平らにした AI の確率・オッズを混ぜない）が下限に届かない買い目は買わない
+      if (st.autoMinEv > 0) {
+        const view = betView(pred, st.betTemp ?? BET_TEMP);
+        raw = raw.filter((t) => {
+          const c = priceTicket(t, view, 0);
+          return c.ev >= st.autoMinEv && c.odds >= (st.minOdds ?? 0);
+        });
+        if (!raw.length) return { strategy, budget, tickets: [], candidates: 0, skipped: true, skipReason: `期待値が ${st.autoMinEv} に届かないので見送り`, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets([], pred) };
+      }
       const each = Math.max(100, Math.floor(budget / Math.max(1, raw.length) / 100) * 100);
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
       return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };

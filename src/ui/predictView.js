@@ -387,6 +387,11 @@ export function renderBetsPanel(pred, rec, ctx) {
         ${KEEP_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.keep ?? 'auto') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>
+    ${
+      String(state.keep) === '0' && ['balance', 'value'].includes(state.strategy) && state.betTypes.some((t) => ['quinella', 'wide', 'exacta', 'trio', 'trifecta'].includes(t))
+        ? '<p class="panel-note bet-caution">絞らないと、バランス・高配当に馬連・三連複・三連単を足したとき1日に約30レース・百数十点を買い、学習期間の 385日のうち約170日で1万円以上負けました（1R 千円。7/25 は 1R 3,000円で −46,270円）。「買い方の標準」に戻すと、当たる確率で絞ります。</p>'
+        : ''
+    }
     <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>
