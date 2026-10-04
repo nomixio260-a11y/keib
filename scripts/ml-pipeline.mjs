@@ -37,12 +37,14 @@ const PEDIGREE = ['sireKnown', 'sireWinSurf', 'sireTop3Surf', 'sireStarts', 'dam
 const STANDARD = INCLUDE_EXOTIC ? [...TOP16, ...EXOTIC_FEATURE_NAMES] : TOP16;
 // 候補はすべて標準の組（別の投票市場の特徴量つき）を土台に、木の深さ・列の使い方・特徴量の追加を変えたもの。
 // 別の投票市場の特徴量は他の特徴量との組み合わせで効く可能性があるので、深さ3と列を多めに使う設定も比べる
+// 血統（PEDIGREE）はどの候補にも入れない：競走馬ページを集めたのが最近も走っている馬だけなので、古い期間では「血統がわかる＝その後も
+// 走り続けた馬」になり、交差検証の古い分割だけ大きく良く見える（4年分・確定オッズ全期間で +0.0027、分割ごと +0.031/+0.022/+0.005…）。
+// 検証期間では良くならない（2026-10-04：血統を含む 93項目が交差検証で最良 +0.0189 → 検証期間で配信中より −0.0033±0.0038）
 const CANDIDATES = [
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: STANDARD, beta: BETA },
   { depth: 3, lr: 0.01, lambda: 20, colsample: 0.5, subsample: 0.6, only: STANDARD, beta: BETA },
   { depth: 2, lr: 0.01, lambda: 10, colsample: 0.7, subsample: 0.7, only: STANDARD, beta: BETA },
-  { depth: 2, lr: 0.01, lambda: 10, colsample: 0.5, subsample: 0.6, only: [...STANDARD, ...PEDIGREE], beta: BETA },
-  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: LEAN, beta: BETA },
+  { depth: 2, lr: 0.02, lambda: 10, colsample: 0.4, subsample: 0.6, drop: [...LEAN, ...PEDIGREE], beta: BETA },
   { depth: 1, lr: 0.03, lambda: 5, only: STANDARD, beta: BETA },
 ];
 
