@@ -70,6 +70,7 @@ export const AUTO_POLICY = VOLATILITY_MODEL?.policy || null;
 
 /** 買い方の名前 → 買い目（◎○▲△の行番号から）。idx は予想の行番号、stake は1点あたり */
 export const POLICY_FORMS = {
+  skip: { label: '見送り', build: () => [] },
   win: { label: '単勝◎', build: (m) => [{ type: 'win', idx: [m[0]] }] },
   place: { label: '複勝◎', build: (m, pc) => (pc ? [{ type: 'place', idx: [m[0]] }] : []) },
   winplace: { label: '単勝◎＋複勝◎', build: (m, pc) => [{ type: 'win', idx: [m[0]] }, ...(pc ? [{ type: 'place', idx: [m[0]] }] : [])] },

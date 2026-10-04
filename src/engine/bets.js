@@ -267,6 +267,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   // 自動調整：荒れ度の区分ごとに決めた買い方（モデルがなければ的中重視と同じ）
   if (st.auto) {
     const form = AUTO_POLICY?.[pred.confidence?.volatility];
+    if (form === 'skip') return { strategy, budget, tickets: [], candidates: 0, skipped: true, skipReason: `荒れ度「${pred.confidence.volatility}」のレースは見送り`, form, formLabel: '見送り', stats: evaluateTickets([], pred) };
     if (form && POLICY_FORMS[form]) {
       const marks = pred.rows.map((r, i) => i).sort((a, b) => pred.rows[b].pWin - pred.rows[a].pWin);
       const unordered = new Set(['quinella', 'wide', 'trio']);

@@ -151,7 +151,7 @@ function table(recs) {
   for (let c = 0; c < 3; c++) {
     out[LABELS[c]] = {};
     const rs = recs.filter((r) => volOf(r) === c);
-    for (const form of Object.keys(POLICY_FORMS)) {
+    for (const form of Object.keys(POLICY_FORMS).filter((f) => f !== 'skip')) {
       let stake = 0;
       let ret = 0;
       let races = 0;
@@ -169,23 +169,40 @@ function table(recs) {
 }
 const tOof = table(oof);
 const tTest = table(test);
+// 区分ごとに、分割外で回収率が最も良い買い方。そのうえで「買う区分」を、分割外の回収率が最大になる組（ただし全レースの半分以上で買う）に絞る
 const policy = {};
 for (const lab of LABELS) {
-  const best = Object.entries(tOof[lab]).filter(([, v]) => v.races >= 300).sort((a, b) => b[1].roi - a[1].roi)[0];
+  const best = Object.entries(tOof[lab]).filter(([k, v]) => k !== 'skip' && v.races >= 300).sort((a, b) => b[1].roi - a[1].roi)[0];
   policy[lab] = best[0];
+}
+{
+  const totalRaces = oof.length;
+  let bestSet = null;
+  for (let mask = 1; mask < 8; mask++) {
+    const labs = LABELS.filter((_, i) => mask & (1 << i));
+    const stake = labs.reduce((a, l) => a + tOof[l][policy[l]].stake, 0);
+    const ret = labs.reduce((a, l) => a + tOof[l][policy[l]].ret, 0);
+    const races = labs.reduce((a, l) => a + tOof[l][policy[l]].races, 0);
+    if (races < totalRaces * 0.5) continue;
+    if (!bestSet || ret / stake > bestSet.roi) bestSet = { labs, roi: ret / stake, races };
+  }
+  for (const l of LABELS) if (!bestSet.labs.includes(l)) policy[l] = 'skip';
+  log(`買う区分：${bestSet.labs.join('・')}（分割外 ${bestSet.races}R・回収率 ${pc(bestSet.roi)}）`);
 }
 console.log('\n荒れ度 | 買い方 | 分割外（学習期間）：レース・回収率 | 検証期間：レース・回収率');
 for (const lab of LABELS)
-  for (const form of Object.keys(POLICY_FORMS))
+  for (const form of Object.keys(POLICY_FORMS).filter((f) => f !== 'skip'))
     console.log(`${lab} | ${POLICY_FORMS[form].label}${policy[lab] === form ? '（採用）' : ''} | ${tOof[lab][form].races}R ${pc(tOof[lab][form].roi)} | ${tTest[lab][form].races}R ${pc(tTest[lab][form].roi)}`);
+for (const lab of LABELS) if (policy[lab] === 'skip') console.log(`${lab} | 見送り（採用）`);
 const sumPolicy = (t) => {
   let stake = 0;
   let ret = 0;
   for (const lab of LABELS) {
+    if (policy[lab] === 'skip') continue;
     stake += t[lab][policy[lab]].stake;
     ret += t[lab][policy[lab]].ret;
   }
-  return { stake, ret, roi: ret / stake };
+  return { stake, ret, roi: stake ? ret / stake : 0 };
 };
 const uniform = (t, form) => {
   let stake = 0;
@@ -196,8 +213,8 @@ const uniform = (t, form) => {
   }
   return { stake, ret, roi: stake ? ret / stake : 0 };
 };
-console.log(`\n自動調整（${LABELS.map((l) => `${l}→${POLICY_FORMS[policy[l]].label}`).join('、')}）：分割外 ${pc(sumPolicy(tOof).roi)}・検証 ${pc(sumPolicy(tTest).roi)}`);
-for (const form of Object.keys(POLICY_FORMS)) console.log(`  すべて ${POLICY_FORMS[form].label}：分割外 ${pc(uniform(tOof, form).roi)}・検証 ${pc(uniform(tTest, form).roi)}`);
+console.log(`\n自動調整（${LABELS.map((l) => `${l}→${policy[l] === 'skip' ? '見送り' : POLICY_FORMS[policy[l]].label}`).join('、')}）：分割外 ${pc(sumPolicy(tOof).roi)}・検証 ${pc(sumPolicy(tTest).roi)}`);
+for (const form of Object.keys(POLICY_FORMS).filter((f) => f !== 'skip')) console.log(`  すべて ${POLICY_FORMS[form].label}：分割外 ${pc(uniform(tOof, form).roi)}・検証 ${pc(uniform(tTest, form).roi)}`);
 // 区分ごとの、予測した荒れ度と実際
 for (const [label, recs] of [['分割外', oof], ['検証', test]]) {
   const parts = LABELS.map((lab, c) => {

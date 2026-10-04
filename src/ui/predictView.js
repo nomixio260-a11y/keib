@@ -327,6 +327,8 @@ export function renderBetsPanel(pred, rec, ctx) {
         </tr>`,
         )
         .join('')
+    : rec.skipped
+    ? `<tr><td colspan="6" class="muted bt-empty">${esc(rec.skipReason || '自信度 S のレースだけ買う設定（控えめ）なので、このレースは見送りです。')}</td></tr>`
     : `<tr><td colspan="6" class="muted bt-empty">期待値の条件（${STRATEGIES[rec.strategy].minEv.toFixed(2)}以上）を満たす買い目がありません。このレースは見送りか、戦略や券種を変えてみてください。${
         state.betTypes.includes('place') && !pred.rows.some((r) => r.entry.placeMin > 1)
           ? '<br>複勝の実際のオッズは発走の2時間ほど前から取り込みます。それまでは単勝オッズからの推定（控えめ）で計算しています。'
@@ -347,6 +349,7 @@ export function renderBetsPanel(pred, rec, ctx) {
     </div>
     <div class="seg strat-seg" role="group" aria-label="買い方">${strategies}</div>
     <p class="panel-note">${esc(STRATEGIES[state.strategy].desc)}</p>
+    ${rec.formLabel ? `<p class="panel-note bt-auto">このレース：荒れ度「${esc(pred.confidence?.volatility || '')}」→ <b>${esc(rec.formLabel)}</b></p>` : ''}
     <div class="chips-row" role="group" aria-label="券種">${types}</div>
     ${
       state.betTypes.some((t) => ESTIMATED_TYPES.includes(t))

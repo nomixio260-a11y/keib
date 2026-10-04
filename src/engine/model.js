@@ -8,6 +8,7 @@ import { clamp, mean } from './util.js';
 import { CALIBRATION } from './calibration.js';
 import { GBDT_READY, GBDT_INFO, gbdtScores } from './gbdt.js';
 import { honmeiConfidence } from './confidence.js';
+import { AUTO_VOLATILITY_CUTS } from './volatility.js';
 
 /**
  * ファクター定義。
@@ -198,8 +199,8 @@ export function assignMarks(rows) {
   for (const r of rows) r.mark = marks.get(r) || '';
 }
 
-/** 荒れ度の区切り：人気3頭以外が勝つ確率（学習期間の分割外の予測の3分位。scripts/race-temp.mjs） */
-export const VOLATILITY_CUTS = [0.28, 0.39];
+/** 荒れ度の区切り：人気3頭以外が勝つ確率（学習期間の分割外の予測の3分位。scripts/fit-volatility.mjs が volatilityModel.js に書き、モデルを作り直すたびに自動で更新） */
+export const VOLATILITY_CUTS = AUTO_VOLATILITY_CUTS || [0.28, 0.39];
 export const VOLATILITY_LABELS = ['堅い', '普通', '荒れ'];
 
 /**
