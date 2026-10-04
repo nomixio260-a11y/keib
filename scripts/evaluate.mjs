@@ -80,8 +80,8 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   lines.push(`| 総合（線形モデル、AI＋人気） | ${pct(out.presets.balance.ai.winRate)} | ${pct(out.presets.balance.ai.top3Rate)} | ${out.presets.balance.ai.logLoss.toFixed(3)} |`);
   lines.push(`| AI単独（オッズを使わない） | ${pct(out.presets.ai.ai.winRate)} | ${pct(out.presets.ai.ai.top3Rate)} | ${out.presets.ai.ai.logLoss.toFixed(3)} |`);
   lines.push(`| 1番人気（単勝オッズ） | ${pct(b.fav.winRate)} | ${pct(b.fav.top3Rate)} | ${b.fav.logLoss.toFixed(3)} |`, '');
-  lines.push(`| 自信度（${mainLabel}） | レース数 | ◎の勝率 | ◎の複勝率 | 単勝◎の回収率 | 複勝◎の回収率 |`, '| --- | --- | --- | --- | --- | --- |');
-  for (const [g, v] of Object.entries(b.byGrade)) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.winRate)} | ${pct(v.top3Rate)} | ${pct(v.winRoi)} | ${pct(v.placeRoi)} |`);
+  lines.push(`| 自信度（${mainLabel}） | レース数 | ◎の勝率（予測 → 実際） | ◎の複勝率（予測 → 実際） | 単勝◎の回収率 | 複勝◎の回収率 |`, '| --- | --- | --- | --- | --- | --- |');
+  for (const [g, v] of Object.entries(b.byGrade)) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.predWinRate || 0)} → ${pct(v.winRate)} | ${pct(v.predPlaceRate || 0)} → ${pct(v.top3Rate)} | ${pct(v.winRoi)} | ${pct(v.placeRoi)} |`);
   lines.push('');
   lines.push(`| 荒れ度（${mainLabel}） | レース数 | 人気3頭以外が勝つ確率（予測 → 実際） | 1番人気の勝率 | ◎の勝率 | 単勝◎の回収率 | 勝ち馬の単勝払戻（平均） |`, '| --- | --- | --- | --- | --- | --- | --- |');
   for (const [g, v] of Object.entries(b.byVolatility || {})) if (v.n) lines.push(`| ${g} | ${v.n} | ${pct(v.predUpsetRate)} → ${pct(v.upsetRate)} | ${pct(v.favWinRate)} | ${pct(v.winRate)} | ${pct(v.winRoi)} | ${Math.round(v.meanWinnerPay).toLocaleString('ja-JP')}円 |`);

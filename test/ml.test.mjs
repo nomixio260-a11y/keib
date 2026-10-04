@@ -7,6 +7,7 @@ import { GBDT_READY, treeSum, gbdtScores } from '../src/engine/gbdt.js';
 import { GBDT_MODEL } from '../src/engine/gbdtModel.js';
 import { raceFeatures, FEATURE_NAMES, careerSnapshot, careerFromRow } from '../src/engine/features.js';
 import { predictRace, PRESETS, DEFAULT_PRESET, confidenceOf, VOLATILITY_CUTS } from '../src/engine/model.js';
+import { honmeiConfidence, legacyGrade, gradeOf } from '../src/engine/confidence.js';
 import { makeRace } from './fixtures/race.mjs';
 
 test('モデルと特徴量の並びが一致している', () => {
@@ -136,4 +137,21 @@ test('荒れ度：人気3頭以外が勝つ確率で 堅い／普通／荒れ �
   assert.ok(wild.upset > solid.upset);
   // 3頭以下は荒れ度を出さない
   assert.equal(confidenceOf(mk([0.5, 0.3, 0.2], [0.5, 0.3, 0.2])).upsetProb, 0);
+});
+
+test('自信度：◎が勝つ確率で S/A/B/C（2番手との差は使わない）、モデルがなければ従来の決め方', () => {
+  const mk = (ps) => ps.map((pWin, i) => ({ pWin, pTop2: Math.min(1, pWin * 1.8), pTop3: Math.min(1, pWin * 2.4), marketProb: ps[i], entry: { number: i + 1 } }));
+  const model = { win: { raw: true }, place: { raw: true }, cuts: [0.42, 0.3, 0.2] };
+  const rows = mk([0.33, 0.3, 0.2, 0.1, 0.05, 0.02]);
+  // 2番手との差が 3pt でも、◎が勝つ確率が 30% 以上なら A（従来の決め方では B）
+  assert.equal(honmeiConfidence(rows, { placeCount: 2, model }).grade, 'A');
+  assert.equal(honmeiConfidence(rows, { placeCount: 2, model: null }).grade, 'B');
+  assert.equal(legacyGrade(0.35, 0.3), 'B');
+  assert.equal(gradeOf(0.5, model.cuts), 'S');
+  assert.equal(gradeOf(0.19, model.cuts), 'C');
+  const c = honmeiConfidence(rows, { placeCount: 2, model });
+  assert.ok(Math.abs(c.winProb - 0.33) < 1e-9);
+  assert.ok(Math.abs(c.placeProb - 0.33 * 1.8) < 1e-9);
+  // 複勝がない頭数（4頭以下）では複勝圏の確率を出さない
+  assert.equal(honmeiConfidence(mk([0.5, 0.3, 0.2]), { placeCount: 0, model }).placeProb, null);
 });

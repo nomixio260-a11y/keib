@@ -3,11 +3,11 @@
 //   1) 学習期間を日付で5分割し、本番と同じ設定（src/engine/gbdtModel.js の params）で分割外のスコアを作る（OOF_CACHE があれば読む）
 //   2) レースごとに PL の厳密計算で ◎ の勝率・複勝圏の確率と、校正の入力（src/engine/confidence.js の confidenceInputs）
 //   3) 候補（そのまま／Platt／市場との一致などを足したロジスティック）を交差検証で比べ、良いものを選ぶ（複雑な方は 0.0005 以上良いときだけ）
-//   4) 区切り：校正した ◎ の勝つ確率の分布で S/A/B/C（既定は上位 20%・次の 30%・次の 30%・残り 20%。GRADE_SHARES で変更）
+//   4) 区切り：◎ の勝つ確率で S/A/B/C（既定 42%・30%・20%。CUTS で変更）。従来の決め方・分位の区切りとも比べて表示する
 //   5) 検証期間（本番モデルのスコア）で、従来の自信度と新しい自信度の当てはまり・分離を比べる
 //   6) src/engine/confidenceModel.js に書き出す（--dry なら書かない）
 //
-//   node scripts/fit-confidence.mjs [--dry]   環境変数：TEST_START、FOLDS=5、ROUNDS（既定は本番の本数 ÷ 1.2）、GRADE_SHARES、OOF_CACHE
+//   node scripts/fit-confidence.mjs [--dry]   環境変数：TEST_START、FOLDS=5、ROUNDS（既定は本番の本数 ÷ 1.2）、CUTS=0.42,0.30,0.20、GRADE_SHARES（比較用の分位）、OOF_CACHE
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -161,7 +161,18 @@ for (const [kind, target, rawKey] of [['win', 'yWin', 'pWin'], ['place', 'yPlace
   // より単純なものを優先：0.0005 以上良いときだけ複雑な方へ
   let pick = 'raw';
   for (const name of ['platt', 'plus', 'full']) if (cv[name] < cv[pick] - 0.0005) pick = name;
-  const spec = CANDS[kind][pick] ? fitLogistic(recs, CANDS[kind][pick], target) : { raw: true };
+  let spec = CANDS[kind][pick] ? fitLogistic(recs, CANDS[kind][pick], target) : { raw: true };
+  // 検証期間で校正前より悪くなるなら使わない（採用の基準：交差検証で良く、検証期間でマイナスでない）
+  if (!spec.raw) {
+    const tr = test.filter((r) => r[rawKey] != null);
+    const before = bll(tr, (r) => r[rawKey], target);
+    const after = bll(tr, predictor(spec, rawKey), target);
+    if (after > before) {
+      log(`${kind === 'win' ? '◎が勝つ' : '◎が複勝圏'}：${pick} は検証期間で悪化（${before.toFixed(4)} → ${after.toFixed(4)}）→ 校正しない`);
+      pick = 'raw';
+      spec = { raw: true };
+    }
+  }
   chosen[kind] = { pick, spec, cv };
   log(`${kind === 'win' ? '◎が勝つ' : '◎が複勝圏'}：交差検証の二値対数損失 ${Object.entries(cv).map(([k, v]) => `${k} ${v.toFixed(4)}`).join('、')} → ${pick}${spec.raw ? '' : `（係数 ${spec.inputs.map((k, j) => `${k} ${spec.coef[j + 1].toFixed(3)}`).join('、')}）`}`);
 }
@@ -171,8 +182,11 @@ const fPlace = predictor(chosen.place.spec, 'pPlace');
 // ---- 4) 区切り ----
 const pOof = oof.map(fWin).sort((a, b) => a - b);
 const q = (u) => pOof[Math.min(pOof.length - 1, Math.max(0, Math.floor(u * pOof.length)))];
-const cuts = [q(1 - SHARES[0]), q(1 - SHARES[0] - SHARES[1]), q(1 - SHARES[0] - SHARES[1] - SHARES[2])].map((v) => Math.round(v * 100) / 100);
-log(`区切り（校正した ◎ の勝つ確率）：S ${pc(cuts[0])} 以上・A ${pc(cuts[1])} 以上・B ${pc(cuts[2])} 以上・C それ未満（分割外の ${SHARES.map((v) => `${v * 100}%`).join('/')}）`);
+const quantCuts = [q(1 - SHARES[0]), q(1 - SHARES[0] - SHARES[1]), q(1 - SHARES[0] - SHARES[1] - SHARES[2])].map((v) => Math.round(v * 100) / 100);
+// 区切りは ◎ の勝つ確率 42%・30%・20%（従来の確率の区切りから「2番手との差」の条件を外したもの。学習期間でも検証期間でも従来より当てはまりが良い。
+// 分位で決めた区切りは学習期間でだけ良く、検証期間では悪かった）
+const cuts = (process.env.CUTS || '0.42,0.30,0.20').split(',').map(Number);
+log(`区切り（◎ の勝つ確率）：S ${pc(cuts[0])} 以上・A ${pc(cuts[1])} 以上・B ${pc(cuts[2])} 以上・C それ未満（参考：分割外の分位 ${SHARES.map((v) => `${v * 100}%`).join('/')} なら ${quantCuts.map(pc).join('・')}）`);
 const GR = ['S', 'A', 'B', 'C'];
 const newGrade = (r) => gradeOf(fWin(r), cuts);
 function gradeTable(recs, gOf) {
@@ -195,7 +209,15 @@ const report = (label, recs) => {
   console.log('自信度 | 従来：レース数・◎の勝率・複勝率 | 新：レース数・予測した勝率 → 実際・予測した複勝率 → 実際');
   for (const g of GR) console.log(`${g} | ${tl[g].n}R ${pc(tl[g].win)} ${pc(tl[g].place)} | ${tn[g].n}R ${pc(tn[g].predWin)} → ${pc(tn[g].win)}・${pc(tn[g].predPlace)} → ${pc(tn[g].place)}`);
   console.log(`S と C の差（◎の勝率）：従来 ${((tl.S.win - tl.C.win) * 100).toFixed(1)}pt・新 ${((tn.S.win - tn.C.win) * 100).toFixed(1)}pt`);
-  console.log(`自信度だけで◎の勝ちを当てる二値対数損失（小さいほど良い）：従来 ${llG(oofLegacy, (r) => r.legacy, 'win', 'yWin').toFixed(4)}・新 ${llG(oofNew, newGrade, 'win', 'yWin').toFixed(4)}。複勝圏：従来 ${llG(oofLegacy, (r) => r.legacy, 'place', 'yPlace').toFixed(4)}・新 ${llG(oofNew, newGrade, 'place', 'yPlace').toFixed(4)}`);
+  const pairedG = (key, target) => {
+    const rs = recs.filter((r) => target !== 'yPlace' || r.placeCount);
+    const lp = (p, y) => (y ? Math.log(clip(p)) : Math.log(1 - clip(p)));
+    const d = rs.map((r) => lp(oofNew[newGrade(r)][key] || 0.3, r[target]) - lp(oofLegacy[r.legacy][key] || 0.3, r[target]));
+    const m = mean(d);
+    const se = Math.sqrt(mean(d.map((v) => (v - m) ** 2)) / d.length);
+    return `${m >= 0 ? '+' : ''}${m.toFixed(4)} ± ${se.toFixed(4)}`;
+  };
+  console.log(`自信度だけで◎の勝ちを当てる二値対数損失（小さいほど良い）：従来 ${llG(oofLegacy, (r) => r.legacy, 'win', 'yWin').toFixed(4)}・新 ${llG(oofNew, newGrade, 'win', 'yWin').toFixed(4)}（新 − 従来の対の差 ${pairedG('win', 'yWin')}。プラスなら新が良い）。複勝圏：従来 ${llG(oofLegacy, (r) => r.legacy, 'place', 'yPlace').toFixed(4)}・新 ${llG(oofNew, newGrade, 'place', 'yPlace').toFixed(4)}（${pairedG('place', 'yPlace')}）`);
   console.log(`◎が勝つ確率（連続値）：校正前 対数損失 ${bll(recs, (r) => r.pWin, 'yWin').toFixed(4)}・Brier ${brier(recs, (r) => r.pWin, 'yWin').toFixed(4)}・AUC ${auc(recs, (r) => r.pWin, 'yWin').toFixed(3)} → 校正後 ${bll(recs, fWin, 'yWin').toFixed(4)}・${brier(recs, fWin, 'yWin').toFixed(4)}・${auc(recs, fWin, 'yWin').toFixed(3)}`);
   const pr = recs.filter((r) => r.placeCount);
   console.log(`◎が複勝圏（連続値）：校正前 対数損失 ${bll(pr, (r) => r.pPlace, 'yPlace').toFixed(4)}・AUC ${auc(pr, (r) => r.pPlace, 'yPlace').toFixed(3)} → 校正後 ${bll(pr, fPlace, 'yPlace').toFixed(4)}・${auc(pr, fPlace, 'yPlace').toFixed(3)}`);
@@ -212,7 +234,6 @@ if (!DRY) {
     picks: { win: chosen.win.pick, place: chosen.place.pick },
     cv: { win: chosen.win.cv, place: chosen.place.cv },
     cuts,
-    shares: SHARES,
     gradeRates: oofNew,
     trainedOn: { races: oof.length, from: oof[0].date, to: oof[oof.length - 1].date, rounds: ROUNDS },
     test: { from: TEST_START, races: test.length, grades: tt.next },

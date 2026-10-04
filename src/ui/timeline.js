@@ -128,7 +128,7 @@ function raceItem(r, ctx) {
       <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.filter((e) => !e.scratched).length}頭</span>${st === 'closing' || st === 'live' ? statusBadge(r, now) : timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
       <span class="ri-pick">${pickHtml}</span>
     </span>
-    <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度">${esc(pick.grade)}</span>${volChip(pick.vol)}` : ''}</span>
+    <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度${esc(pick.grade)}${pick.conf != null ? `（◎が勝つ確率 ${Math.round(pick.conf * 100)}%）` : ''}">${esc(pick.grade)}</span>${volChip(pick.vol)}` : ''}</span>
   </button></li>`;
 }
 

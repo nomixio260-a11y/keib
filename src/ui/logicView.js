@@ -5,6 +5,9 @@ import { FACTORS, PRESETS, DEFAULT_PRESET, tempsFor, VOLATILITY_CUTS } from '../
 import { CALIBRATION } from '../engine/calibration.js';
 import { REAL_STATS } from '../engine/realStats.js';
 import { GBDT_READY, GBDT_INFO } from '../engine/gbdt.js';
+import { CONFIDENCE_MODEL } from '../engine/confidenceModel.js';
+
+const CUTS = CONFIDENCE_MODEL?.cuts || [0.42, 0.3, 0.2];
 import { FEATURE_NAMES } from '../engine/features.js';
 import { esc, pct } from './format.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
@@ -95,7 +98,7 @@ export function renderLogic(ctx) {
     <section class="note-box">
       <h2>◎の勝率はなぜ 4割弱なのか</h2>
       <p>競馬は1レースに10頭以上が走り、いちばん人気の馬でも勝つのは3回に1回ほどです（JRA 全体でおよそ33%${vb ? `。検証期間の${REAL_BACKTEST.races}レースでは ${pct(vb.fav.winRate)}` : ''}）。単勝オッズには大勢の人の予想が織り込まれていて、公開されている情報だけでそれを大きく上回ることはできません。KEIB の◎も学習に使っていない期間で${vb ? ` ${pct(vb.ai.winRate)}` : ''}と、1番人気と同じ水準です${vb && vb.ai.logLoss < vb.fav.logLoss ? `（勝ち馬の確率の当てはまり＝対数損失では ${vb.ai.logLoss.toFixed(3)} と、オッズだけの ${vb.fav.logLoss.toFixed(3)} をわずかに上回ります）` : ''}。</p>
-      <p>ですから「勝率を上げる」より、<strong>どのレースなら当たりやすいかを見分ける</strong>ことに意味があります。自信度（S/A/B/C）は◎の勝率と2番手との差から決めていて、同じ自信度のときに実際に◎がどれだけ勝ったか（複勝率も）を本命のタイルに表示しています。自信度が高いレースだけに絞れば的中率は上がりますが、その分オッズも低く、長期的に回収率100%を超えるのは難しいことに変わりはありません。</p>
+      <p>ですから「勝率を上げる」より、<strong>どのレースなら当たりやすいかを見分ける</strong>ことに意味があります。自信度（S/A/B/C）は「◎が勝つ確率」で決めます（S：${pct(CUTS[0], 0)}以上、A：${pct(CUTS[1], 0)}以上、B：${pct(CUTS[2], 0)}以上、C：それ未満）。この確率は学習に使っていない予測でも実際の勝率とよく合っていて（分割外の予測で校正を試しても良くならなかった）、自信度ごとの予測と実際の勝率・複勝率を本命のタイルとバックテストに表示しています。以前は A に「2番手との差 8pt 以上」の条件がありましたが、外したほうが学習期間でも検証期間でも当てはまりが良かったので外しました。自信度が高いレースだけに絞れば的中率は上がりますが、その分オッズも低く、長期的に回収率100%を超えるのは難しいことに変わりはありません。</p>
     </section>
     <section class="note-box">
       <h2>ご注意</h2>

@@ -169,7 +169,7 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const calAi = emptyCal();
   const calMkt = emptyCal();
   // 自信度（S/A/B/C）ごとの◎の成績
-  const byGrade = Object.fromEntries(['S', 'A', 'B', 'C'].map((g) => [g, { n: 0, win: 0, top3: 0, winRet: 0, placeRet: 0 }]));
+  const byGrade = Object.fromEntries(['S', 'A', 'B', 'C'].map((g) => [g, { n: 0, win: 0, top3: 0, winRet: 0, placeRet: 0, predWin: 0, predPlace: 0, nPlace: 0 }]));
   // 荒れ度（堅い／普通／荒れ）ごと：予測した「人気3頭以外が勝つ確率」と実際、1番人気の勝率、◎の成績、勝ち馬の単勝払戻
   const byVolatility = Object.fromEntries(VOLATILITY_LABELS.map((g) => [g, { n: 0, predUpset: 0, upset: 0, favWin: 0, win: 0, top3: 0, winRet: 0, placeRet: 0, winnerPay: 0 }]));
   const log = [];
@@ -199,6 +199,11 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
       const g = byGrade[pred.confidence.grade] || byGrade.C;
       const f = finishOf.get(honmei.entry.number) ?? 99;
       g.n++;
+      g.predWin += pred.confidence.winProb ?? honmei.pWin;
+      if (pred.confidence.placeProb != null) {
+        g.predPlace += pred.confidence.placeProb;
+        g.nPlace++;
+      }
       if (f === 1) g.win++;
       if (f <= 3) g.top3++;
       g.winRet += payoutOf(race, 'win', [honmei.entry.number]);
@@ -266,7 +271,7 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   });
   const rate = (o) => ({ ...o, winRate: o.n ? o.win / o.n : 0, top2Rate: o.n ? o.top2 / o.n : 0, top3Rate: o.n ? o.top3 / o.n : 0, logLoss: o.n ? o.logLoss / o.n : 0 });
   const grades = Object.fromEntries(
-    Object.entries(byGrade).map(([g, v]) => [g, { ...v, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0 }]),
+    Object.entries(byGrade).map(([g, v]) => [g, { ...v, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0, predWinRate: v.n ? v.predWin / v.n : 0, predPlaceRate: v.nPlace ? v.predPlace / v.nPlace : 0 }]),
   );
   const volatility = Object.fromEntries(
     Object.entries(byVolatility).map(([g, v]) => [g, { ...v, predUpsetRate: v.n ? v.predUpset / v.n : 0, upsetRate: v.n ? v.upset / v.n : 0, favWinRate: v.n ? v.favWin / v.n : 0, winRate: v.n ? v.win / v.n : 0, top3Rate: v.n ? v.top3 / v.n : 0, winRoi: v.n ? v.winRet / (v.n * 100) : 0, placeRoi: v.n ? v.placeRet / (v.n * 100) : 0, meanWinnerPay: v.n ? v.winnerPay / v.n : 0 }]),

@@ -102,7 +102,7 @@ export function renderSummary(pred, rec, preset = 'balance') {
     <div class="tile tile-conf">
       <div class="tile-label">自信度・荒れ度</div>
       <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="vol-badge v-${['solid', 'mid', 'wild'][c.volatilityIndex ?? 1]}" title="人気3頭以外が勝つ確率 ${pct(c.upsetProb || 0)}">${esc(c.volatility || '普通')}</span><span class="meter" role="img" aria-label="荒れ度 ${c.upset} / 5">${dots}</span></div>
-      <div class="tile-sub">${gr ? `自信度${esc(c.grade)}の◎は実績で勝率 <b class="num">${pct(gr.winRate, 0)}</b>・複勝率 <b class="num">${pct(gr.top3Rate, 0)}</b><small>（${gr.n}R）</small>` : `◎と○の勝率差 <b class="num">${((c.top - c.second) * 100).toFixed(1)}</b>pt`}${vr ? `。人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b><small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : `。人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>`}</div>
+      <div class="tile-sub">◎が勝つ確率 <b class="num">${pct(c.winProb ?? c.top, 0)}</b>${c.placeProb != null ? `・複勝圏 <b class="num">${pct(c.placeProb, 0)}</b>` : ''}${gr ? `<small>（自信度${esc(c.grade)}の実績：勝率 ${pct(gr.winRate, 0)}・複勝 ${pct(gr.top3Rate, 0)}・${gr.n}R）</small>` : ''}<br>人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>${vr ? `<small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : ''}</div>
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>
