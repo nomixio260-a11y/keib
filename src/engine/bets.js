@@ -27,39 +27,58 @@ export function betView(pred, temp = BET_TEMP) {
   return view;
 }
 
+/**
+ * どの買い方でも、オッズがこれ未満の買い目は買わない（JRA のオッズは 0.1 倍刻みなので「1.1 倍以下は買わない」）。
+ * 1.1 倍の複勝は9割当たるが、当たっても1割しか増えず、外れるとその日がそのまま負けになる。学習期間の分割外（385日）で
+ * 的中重視の 1.1 倍の複勝は 327点・的中 90%・回収率 99%（利益なし）で、負けた日の主な原因だった。買わないと（1R 3,000円）
+ * 的中重視 回収率 105.4% → 111.3%・負けた日 105 → 95日、自動調整 104.8% → 115.3%・63 → 42日、控えめ 101.9% → 118.3%・49 → 16日、
+ * 検証期間（30日）でも 147.5% → 203.3%・116.5% → 162.2%・98.6% → 135.0%、負けた日はどれも 0日に。
+ * 的中率は学習期間では下がる（的中重視 76% → 63%）が、検証期間では上がる（93% → 100%）。README の開発日記 2026-10-05
+ * オッズを使わない予想（AI単独）だけは以前のまま（minOddsAi：的中重視・自動調整 1.05、ほかはなし）。AI単独で外すと検証期間の
+ * 的中率が下がり（的中重視 48.2% → 41.8%）、回収率は変わらなかった（77.1% → 77.2%）
+ */
+export const MIN_ODDS = 1.15;
+/** 画面の表記（MIN_ODDS 未満 = 0.1 倍刻みで 1.1 倍以下） */
+export const LOW_ODDS_LABEL = '1.1 倍以下';
+
 export const STRATEGIES = {
   // 的中重視・控えめ：期待値は AI の確率だけで計算し（blend 0）、0.9 以上の買い目だけ買う。学習期間の分割外（約1.2万レース・186週）と
   // 検証期間（14週）の両方で、0.5 混合・0.8 以上より回収率も週の収支も良かった（scratchpad/oof-grid*.mjs。README の開発日記）。
-  // minOdds（的中重視だけ）：オッズ 1.0 倍の買い目（当たっても元返し）は買わない（週の収支は変わらず、回収率は学習期間 107.2→107.5%・検証期間 127.8→129.2%。
-  // 控えめでは両方の期間でわずかに下がったので付けない）
+  // minOdds：上の MIN_ODDS（以前は的中重視だけ 1.05：当たっても元返しの 1.0 倍だけを買わなかった）
   // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
-  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目を選び、そこから当たる確率が 50% 以上のものだけを買います。どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal' },
+  hit: { label: '的中重視', desc: '当たりやすさを優先。AI の見立てで期待値が 0.9 以上の買い目を選び、そこから当たる確率が 50% 以上のものだけを買います。オッズ 1.1 倍以下（当たっても1割しか増えない）は買いません。どれが当たっても払戻がそろうように配分します。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal' },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
   // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、
   // 最悪の日 −31,660円 → −4,000円、検証期間でも 99.7% → 164.2%（112.6% → 277.7%）。README の開発日記 2026-10-05
-  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から確率とのバランスで選び、当たる確率が 30% 以上のものだけを買います。学習期間の約1.2万レースで回収率 100.8%（1日 1〜2レース）。', minEv: 1.0, keepMinP: 0.3, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
-  value: { label: '高配当', desc: '期待値の高い買い目を中心に、当たる確率が 20% 以上のものだけを買います。当たる回数は少なめです（学習期間の約1.2万レースで回収率 106.2%・的中率 20%、買うのは週に数レース）。', minEv: 1.15, keepMinP: 0.2, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
+  // バランスは 40% に：30〜40% の複勝（4〜6番人気）・馬連・三連複は予測ほど当たらず（複勝 予測 34% → 実際 22%、三連複 33% → 22%）、
+  // 負けた日の主な原因だった。40% と 1.1 倍以下を買わないことで（5券種・1R 3,000円）学習期間の分割外 回収率 100.8% → 117.1%・
+  // 負けた日 122 → 59日・最悪の日 −12,000円 → −6,000円、検証期間 165.7% → 282.5%・9 → 5日。45% は学習期間で 103.0% と下がった
+  balance: { label: 'バランス', desc: '期待値1.0以上の買い目から確率とのバランスで選び、当たる確率が 40% 以上のものだけを買います（オッズ 1.1 倍以下は買いません）。学習期間の約1.2万レースで回収率 117%（単勝・複勝・馬連・三連複・三連単、1日 0〜1レース）。', minEv: 1.0, minOdds: MIN_ODDS, keepMinP: 0.4, maxTickets: 8, alloc: 'kelly', betTemp: 1 },
+  value: { label: '高配当', desc: '期待値の高い買い目を中心に、当たる確率が 20% 以上のものだけを買います。当たる回数は少なく、買った日の半分以上は負けで、ときどき大きく当たります（学習期間の約1.2万レースで回収率 106%・的中率 20%、買うのは週に数レース）。', minEv: 1.15, minOdds: MIN_ODDS, keepMinP: 0.2, maxTickets: 10, alloc: 'kelly', betTemp: 1 },
   careful: {
     label: '控えめ',
-    desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースは見送ります。買う回数を大きく減らして損失を抑える買い方で、利益が出るわけではありません（検証では回収率 98〜99% 前後）。',
+    desc: '自信度 S のレースだけ、単勝・複勝を1〜2点。それ以外のレースとオッズ 1.1 倍以下は見送るので、買うのは月に1〜2レースです（学習期間の約1.2万レースで回収率 118%・的中率 78%）。',
     minEv: 0.9,
     blend: 0,
+    minOdds: MIN_ODDS,
     keepMinP: 0.5,
     maxTickets: 2,
     alloc: 'equal',
     grades: ['S'],
     onlyTypes: ['win', 'place'],
   },
-  // autoMinEv・minOdds：区分ごとの買い方を決めたあと、期待値 0.9 以上・オッズ 1.05倍以上の買い目だけを買う。区分の買い方をそのまま毎レース買うと
-  // 1日に約20レース買い、回収率は学習期間の分割外 90.1%・検証期間 87.5%（週 −4,176円）。絞ると 104.8%・116.5%、的中率 83%・91%
+  // autoMinEv・minOdds：区分ごとの買い方を決めたあと、期待値 0.9 以上・オッズ 1.2 倍以上（MIN_ODDS）の買い目だけを買う。区分の買い方をそのまま毎レース買うと
+  // 1日に約20レース買い、回収率は学習期間の分割外 90.1%・検証期間 87.5%（週 −4,176円）。期待値で絞ると 104.8%・116.5%、
+  // 1.1 倍以下も外すと 115.3%・162.2%（的中率 83% → 72%・91% → 100%）
   auto: {
     label: '自動調整',
-    desc: '荒れ度（堅い・普通・荒れ）に合わせて◎の買い方を切り替え、期待値が 0.9 以上のときだけ買います。区分ごとの買い方は、学習期間の実際の払戻で回収率が最も良かったもの（scripts/fit-volatility.mjs）。学習期間の約1.2万レースで回収率 104.8%・的中率 83%。',
+    desc: '荒れ度（堅い・普通・荒れ）に合わせて◎の買い方を切り替え、期待値が 0.9 以上のときだけ買います（オッズ 1.1 倍以下は買いません）。区分ごとの買い方は、学習期間の実際の払戻で回収率が最も良かったもの（scripts/fit-volatility.mjs）。学習期間の約1.2万レースで回収率 115.3%・的中率 72%。',
     minEv: 0,
     autoMinEv: 0.9,
-    minOdds: 1.05,
+    minOdds: MIN_ODDS,
+    minOddsAi: 1.05,
     maxTickets: 6,
     alloc: 'equal',
     auto: true,
@@ -297,7 +316,7 @@ export const DEFAULT_TYPES = ['win', 'place'];
 /** オッズを推定するしかない券種（複勝は実際のオッズがないときだけ推定） */
 export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'];
 
-/** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめ 50%、バランス 30%、高配当 20%） */
+/** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめ 50%、バランス 40%、高配当 20%） */
 export function resolveKeep(keep, strategy = null) {
   if (keep == null || keep === '' || keep === 'auto') return STRATEGIES[strategy]?.keepMinP ?? 0;
   const v = Number(keep);
@@ -305,9 +324,9 @@ export function resolveKeep(keep, strategy = null) {
 }
 
 export const KEEP_OPTIONS = [
-  { value: 'auto', label: '買い方の標準（的中重視・控えめ 50%、バランス 30%、高配当 20%以上）' },
+  { value: 'auto', label: '買い方の標準（的中重視・控えめ 50%、バランス 40%、高配当 20%以上）' },
   { value: 0, label: '絞らない' },
-  { value: 0.3, label: '30%以上（収支を重く見る）' },
+  { value: 0.3, label: '30%以上' },
   { value: 0.5, label: '50%以上' },
   { value: 0.7, label: '70%以上（当たり重視）' },
 ];
@@ -323,6 +342,8 @@ export const BLEND_OPTIONS = [
 export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto' } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   const blend = resolveBlend(blendIn, strategy);
+  // オッズの下限（MIN_ODDS）。オッズを使わない予想（AI単独）では、1.1 倍以下を外すと検証期間の的中率が下がり回収率は変わらなかったので以前のまま
+  const minOdds = pred.mlAi ? (st.minOddsAi ?? 0) : (st.minOdds ?? 0);
   // オッズが出るまでは期待値を計算できない
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
   // 自信度の条件（控えめ）：条件に合わないレースは見送り
@@ -338,11 +359,16 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
       // autoMinEv：買い方を決めたあと、期待値（的中重視と同じく少し平らにした AI の確率・オッズを混ぜない）が下限に届かない買い目は買わない
       if (st.autoMinEv > 0) {
         const view = betView(pred, st.betTemp ?? BET_TEMP);
+        let lowOdds = 0;
         raw = raw.filter((t) => {
           const c = priceTicket(t, view, 0);
-          return c.ev >= st.autoMinEv && c.odds >= (st.minOdds ?? 0);
+          if (c.ev >= st.autoMinEv && c.odds < minOdds) lowOdds++;
+          return c.ev >= st.autoMinEv && c.odds >= minOdds;
         });
-        if (!raw.length) return { strategy, budget, tickets: [], candidates: 0, skipped: true, skipReason: `期待値が ${st.autoMinEv} に届かないので見送り`, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets([], pred) };
+        if (!raw.length) {
+          const skipReason = lowOdds ? `期待値の条件を満たすのはオッズ ${LOW_ODDS_LABEL}の買い目だけなので見送り` : `期待値が ${st.autoMinEv} に届かないので見送り`;
+          return { strategy, budget, tickets: [], candidates: 0, skipped: true, skipReason, lowOdds, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets([], pred) };
+        }
       }
       const each = Math.max(100, Math.floor(budget / Math.max(1, raw.length) / 100) * 100);
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
@@ -355,7 +381,10 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   const score = SCORE[strategy] || SCORE.balance;
   // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）
   const view = betView(pred, betTemp ?? st.betTemp ?? BET_TEMP);
-  const cands = buildCandidates(view, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type] && c.odds >= (st.minOdds ?? 0));
+  const passed = buildCandidates(view, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);
+  const cands = passed.filter((c) => c.odds >= minOdds);
+  // 期待値の条件は満たすがオッズが低すぎて外した数（画面の「見送り」の理由に使う）
+  const lowOdds = passed.length - cands.length;
   cands.sort((a, b) => score(b) - score(a));
   const picked = [];
   const perType = {};
@@ -376,7 +405,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   dropped.forEach((t) => {
     t.stake = 0;
   });
-  return { strategy, budget, tickets, dropped, keepMinP, candidates: cands.length, stats: evaluateTickets(tickets, pred) };
+  return { strategy, budget, tickets, dropped, keepMinP, lowOdds, candidates: cands.length, stats: evaluateTickets(tickets, pred) };
 }
 
 /** 着順（rows のインデックス a,b,c）に対して買い目が当たっているか */

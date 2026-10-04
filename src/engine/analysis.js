@@ -2,6 +2,7 @@
 // 画面の「レース分析」（src/ui/predictView.js）が使う。数字はすべて予想（pred）と買い目（rec）と過去のレース結果から。
 
 import { COURSE_STATS } from './courseStats.js';
+import { LOW_ODDS_LABEL } from './bets.js';
 import { horseComment } from './comments.js';
 
 const STYLES = ['逃げ', '先行', '差し', '追込'];
@@ -35,6 +36,7 @@ function verdictOf(pred, rec) {
     return { kind: 'skip', title: '見送り', text: `期待値の条件を満たす買い目はありますが、当たる確率が ${pc(rec.keepMinP)} に届きません（いちばん高いもので ${pc(best.pHit)}）。当たりにくい買い目は買わない設定です。`, dropped: rec.dropped };
   }
   if (rec?.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason || '自信度 S のレースだけ買う設定（控えめ）なので見送りです。' };
+  if (rec?.lowOdds) return { kind: 'skip', title: '見送り', text: `期待値の条件を満たすのはオッズ ${LOW_ODDS_LABEL}の買い目だけです。9割当たっても1割しか増えず、外れるとその日の負けになるので買いません。` };
   return { kind: 'skip', title: '見送り', text: 'AI とオッズの見立てが近く、期待値の条件を満たす買い目がありません。オッズに対して割安な馬が見当たらないレースです。' };
 }
 

@@ -8,7 +8,7 @@ import { parseRegistrationList, parseRegistration, registrationKeyFromCname } fr
 import { registrationToRace, addProvisionalRaces, removeProvisionalRaces } from '../src/collector/registrations.js';
 import { upsertRace } from '../src/collector/bundle.js';
 import { predictRace } from '../src/engine/model.js';
-import { recommendBets, betView, BET_TEMP, priceTicket } from '../src/engine/bets.js';
+import { recommendBets, betView, BET_TEMP, priceTicket, MIN_ODDS } from '../src/engine/bets.js';
 import { raceStatus } from '../src/engine/raceTime.js';
 import { makeRace } from './fixtures/race.mjs';
 
@@ -174,8 +174,8 @@ test('バランス・高配当は当たる確率で絞り、自動調整は期�
   for (let seed = 1; seed <= 40; seed++) {
     const pred = predictRace(makeRace({ seed }), { sims: 0 });
     const bal = recommendBets(pred, { budget: 3000, strategy: 'balance', types: T5 });
-    assert.equal(bal.keepMinP, 0.3, 'バランスの標準は 30%');
-    for (const t of bal.tickets) assert.ok(t.pHit >= 0.3, `バランス ${t.type} ${t.pHit}`);
+    assert.equal(bal.keepMinP, 0.4, 'バランスの標準は 40%');
+    for (const t of bal.tickets) assert.ok(t.pHit >= 0.4, `バランス ${t.type} ${t.pHit}`);
     balanceDropped += bal.dropped.length;
     const val = recommendBets(pred, { budget: 3000, strategy: 'value', types: T5 });
     assert.equal(val.keepMinP, 0.2, '高配当の標準は 20%');
@@ -189,11 +189,43 @@ test('バランス・高配当は当たる確率で絞り、自動調整は期�
       autoBought++;
       const view = betView(pred, BET_TEMP);
       const c = priceTicket({ type: t.type, idx: t.idx }, view, 0);
-      assert.ok(c.ev >= 0.9 - 1e-9 && c.odds >= 1.05, `自動調整 ${t.type} ev ${c.ev} odds ${c.odds}`);
+      assert.ok(c.ev >= 0.9 - 1e-9 && c.odds >= MIN_ODDS, `自動調整 ${t.type} ev ${c.ev} odds ${c.odds}`);
     }
   }
   assert.ok(balanceDropped > 0, 'バランスで外す買い目がある');
   assert.ok(autoSkipped > 0, '自動調整で見送るレースがある');
+});
+
+test('どの買い方でも、オッズ 1.1 倍以下の買い目（当たっても1割しか増えない）は買わない', () => {
+  const T5 = ['win', 'place', 'quinella', 'trio', 'trifecta'];
+  assert.ok(MIN_ODDS > 1.1 && MIN_ODDS <= 1.2, String(MIN_ODDS));
+  let eligible = 0;
+  let legacy = 0;
+  let lowOnly = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    // 1番人気を前走まで全勝の大本命にして、複勝に 1.1 倍（JRA の下限〜上限 1.1〜1.2）をつける
+    const race = makeRace({ seed });
+    const fav = race.entries.find((e) => e.popularity === 1);
+    Object.assign(fav, { odds: 1.2, placeMin: 1.1, placeMax: 1.2 });
+    for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10, last3f: Math.round((p.last3f - 1.2) * 10) / 10 });
+    const pred = predictRace(race, { sims: 0 });
+    const i = pred.rows.findIndex((r) => r.entry.number === fav.number);
+    // 期待値と当たる確率の条件だけなら買う（的中重視の 0.9・50%）
+    const c = priceTicket({ type: 'place', idx: [i] }, betView(pred, BET_TEMP), 0);
+    if (c.odds === 1.1 && c.ev >= 0.9 && pred.rows[i].pTop3 >= 0.5) eligible++;
+    for (const strategy of ['hit', 'balance', 'value', 'careful', 'auto']) {
+      for (const t of recommendBets(pred, { budget: 3000, strategy, types: T5 }).tickets) assert.ok(t.odds >= MIN_ODDS, `${strategy} ${t.type} ${t.odds}`);
+      for (const t of recommendBets(pred, { budget: 3000, strategy, types: T5, keep: 0 }).tickets) assert.ok(t.odds >= MIN_ODDS, `${strategy}（絞らない） ${t.type} ${t.odds}`);
+    }
+    // オッズを使わない予想（AI単独）は以前のまま（的中重視は 1.0 倍だけ買わない）
+    if (recommendBets({ ...pred, mlAi: true }, { budget: 3000 }).tickets.some((t) => t.odds === 1.1)) legacy++;
+    // 1.1 倍の買い目しかなくて見送ったときは、その理由がわかる
+    const hit = recommendBets(pred, { budget: 3000 });
+    if (!hit.tickets.length && hit.lowOdds > 0) lowOnly++;
+  }
+  assert.ok(eligible > 0, '期待値の条件だけなら買う 1.1 倍の複勝があるレースで確かめている');
+  assert.ok(legacy > 0, 'AI単独では以前のまま 1.1 倍の複勝も買う');
+  assert.ok(lowOnly > 0, '1.1 倍の買い目だけで見送ったレースがある（lowOdds）');
 });
 
 test('レース分析：結論（買い・見送り・待ち）、有力馬、AI と人気のずれ、コースの傾向', async () => {

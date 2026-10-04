@@ -2,7 +2,7 @@
 
 import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS, PRESETS } from '../engine/model.js';
-import { BLEND_OPTIONS, KEEP_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { BLEND_OPTIONS, KEEP_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, LOW_ODDS_LABEL, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
@@ -352,6 +352,8 @@ export function renderBetsPanel(pred, rec, ctx) {
     ? `<tr><td colspan="6" class="muted bt-empty">${esc(rec.skipReason || '自信度 S のレースだけ買う設定（控えめ）なので、このレースは見送りです。')}</td></tr>`
     : rec.dropped?.length
     ? `<tr><td colspan="6" class="muted bt-empty">期待値の条件を満たす買い目はありましたが、当たる確率が ${pct(rec.keepMinP, 0)} 以上のものがないので見送りです（下の「外した買い目」）。</td></tr>`
+    : rec.lowOdds
+    ? `<tr><td colspan="6" class="muted bt-empty">期待値の条件を満たすのはオッズ ${LOW_ODDS_LABEL}の買い目だけなので見送りです（9割当たっても1割しか増えず、外れるとその日の負けになるため買いません）。</td></tr>`
     : `<tr><td colspan="6" class="muted bt-empty">期待値の条件（${STRATEGIES[rec.strategy].minEv.toFixed(2)}以上）を満たす買い目がありません。このレースは見送りか、戦略や券種を変えてみてください。${
         state.betTypes.includes('place') && !pred.rows.some((r) => r.entry.placeMin > 1)
           ? '<br>複勝の実際のオッズは発走の2時間ほど前から取り込みます。それまでは単勝オッズからの推定（控えめ）で計算しています。'
