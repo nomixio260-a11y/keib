@@ -277,7 +277,7 @@ export function renderCardTable(pred, ctx) {
         <span class="seg-label">並び順</span>
         ${sortBtn('number', '馬番')}${sortBtn('ai', '勝率順')}${hasResult ? sortBtn('finish', '着順') : ''}
       </div>
-      <p class="card-hint">${pred.noOdds ? '単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。' : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
+      <p class="card-hint">${pred.noOdds ? `単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。${pred.aiOnly ? 'いまの勝率はオッズを使わない「AI単独」の予想です（学習に使っていない期間で◎の勝率 29%。オッズが出ると機械学習の予想に切り替わります）。' : ''}` : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
     </div>
     <div class="table-scroll card-scroll"><table class="card${hasResult ? ' has-fin' : ''}">
     <thead><tr>

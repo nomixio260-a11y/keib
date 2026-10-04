@@ -236,6 +236,11 @@ export function confidenceOf(rows, { placeCount = placeCountOf(rows.length), ml 
 export function predictRace(race, settings = {}) {
   const sims = settings.sims ?? DEFAULT_SETTINGS.sims;
   if (race.jump || race.surface === '障') return { race, rows: [], n: 0, empty: true, jump: true };
+  // 単勝オッズの発売前は、オッズを使わない「AI単独」で予想する。機械学習（オッズが出発点）や総合（オッズのファクターを含む）は
+  // オッズがないと大きく外れる（検証期間でオッズを消すと◎の勝率が 機械学習 3.9%・総合 22.8%、AI単独 29.1%）
+  const oddsKnown = (race.entries || []).some((e) => !e.scratched && e.odds > 1);
+  const aiOnly = !oddsKnown && !settings.keepPresetWithoutOdds;
+  if (aiOnly) settings = { ...settings, weights: PRESETS.ai.weights, noise: PRESETS.ai.noise, ml: false };
   const scored = scoreRace(race, settings);
   const { rows } = scored;
   const n = rows.length;
@@ -307,6 +312,7 @@ export function predictRace(race, settings = {}) {
     noOdds,
     temps,
     ml: scored.ml,
+    aiOnly,
     pace: scored.pace,
     straightBias: scored.straightBias,
     drawBias: scored.drawBias,
