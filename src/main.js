@@ -50,6 +50,7 @@ function setHTML(el, html) {
 const saved = loadSaved();
 // 校正し直したら、保存してある重み付けは使わない（古い係数用の値なので）
 const sameCal = saved.calId === CALIBRATION_ID;
+const NOISE_VERSION = 2;
 const TABS = ['predict', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
@@ -77,7 +78,8 @@ const state = {
   raceId: typeof saved.raceId === 'string' ? saved.raceId : null,
   weights: { ...DEFAULT_WEIGHTS, ...(sameCal ? saved.weights || {} : {}) },
   preset: sameCal && (PRESETS[saved.preset] || saved.preset === 'custom') ? saved.preset : DEFAULT_PRESET,
-  noise: (sameCal && Number(saved.noise)) || DEFAULT_NOISE,
+  // 荒れ度：買い目の選定に「荒れ度1.2相当」を組み込んだとき（noiseVersion 2）に、保存してある値を一度だけ既定に戻す（二重にかからないように）
+  noise: (sameCal && saved.noiseVersion === NOISE_VERSION && Number(saved.noise)) || DEFAULT_NOISE,
   sims: [20000, 50000, 100000].includes(saved.sims) ? saved.sims : 50000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
   strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
@@ -110,7 +112,7 @@ let current = { pred: null, rec: null };
 
 function persist() {
   const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits } = state;
-  saveState({ calId: CALIBRATION_ID, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, edits, imported });
 }
 
 const today = () => jstParts().date;
@@ -375,7 +377,7 @@ function pickOf(pred, race) {
   // 確定したレースは、今の買い方（戦略・予算・券種）の AI推奨を実際の払戻で精算（合計の収支のため）
   let settle = null;
   if (race.result?.length) settle = settleTickets(race, pred, recommendBets(pred, betOpts()).tickets) || { stake: 0, pay: 0, hits: 0 };
-  return { number: h.entry.number, frame: h.entry.frame, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, sig: raceSig(race) };
+  return { number: h.entry.number, frame: h.entry.frame, prov: !!h.entry.provisionalNumber, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, sig: raceSig(race) };
 }
 
 /** 一覧の◎（とその日の成績）を裏で少しずつ計算 */

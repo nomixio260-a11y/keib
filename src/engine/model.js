@@ -169,8 +169,11 @@ export function scoreRace(race, settings = {}) {
   // 機械学習：スコアを決定木の出力（市場＋補正）に置き換える。ファクターの内訳は説明用に残す
   let ml = false;
   let temps = null;
-  if (settings.ml && GBDT_READY) {
-    const g = gbdtScores(race, { stats: settings.stats, careerOf: settings.careerOf, fx });
+  if (settings.ml && (GBDT_READY || settings.mlScores)) {
+    // 検証用：settings.mlScores（馬番 → スコアの Map）を渡すと、決定木の代わりにそのスコアを使う（分割外の予測で買い方を確かめるため）
+    const g = settings.mlScores
+      ? { rows: [...settings.mlScores].map(([number, score]) => ({ number, score, adj: 0, x: null })), temps: settings.mlTemps || [1, 1, 1] }
+      : gbdtScores(race, { stats: settings.stats, careerOf: settings.careerOf, fx });
     const by = new Map(g.rows.map((r) => [r.number, r]));
     for (const r of rows) {
       const m = by.get(r.entry.number);
@@ -212,7 +215,7 @@ export const VOLATILITY_LABELS = ['堅い', '普通', '荒れ'];
  *   favWinProb … 1番人気が勝つ確率（モデル）
  *   upset … 1〜5 の目盛り（画面の表示用）
  */
-export function confidenceOf(rows, { placeCount = placeCountOf(rows.length), ml = true } = {}) {
+export function confidenceOf(rows, { placeCount = placeCountOf(rows.length), ml = true, oddsKnown = true } = {}) {
   const p = rows.map((r) => r.pWin).sort((a, b) => b - a);
   const top = p[0] ?? 0;
   const second = p[1] ?? 0;
@@ -221,6 +224,8 @@ export function confidenceOf(rows, { placeCount = placeCountOf(rows.length), ml 
   const n = p.length;
   const entropy = -p.reduce((acc, v) => acc + (v > 0 ? v * Math.log(v) : 0), 0);
   const evenness = n > 1 ? entropy / Math.log(n) : 0;
+  // 単勝オッズの発表前は人気がわからないので、荒れ度（人気3頭以外が勝つ確率）は出さない
+  if (!oddsKnown) return { grade, top, second, evenness, upset: null, upsetProb: null, favWinProb: null, volatility: null, volatilityIndex: null, winProb: hc.winProb, placeProb: hc.placeProb, calibrated: hc.calibrated };
   // 人気順（市場の確率。同率は馬番）の上位3頭が勝たない確率
   const byPop = [...rows].sort((a, b) => (b.marketProb ?? 0) - (a.marketProb ?? 0) || (a.entry?.number ?? 0) - (b.entry?.number ?? 0));
   const top3 = byPop.slice(0, 3);
@@ -318,6 +323,6 @@ export function predictRace(race, settings = {}) {
     drawBias: scored.drawBias,
     nigeCount: scored.nigeCount,
     coefs: scored.coefs,
-    confidence: confidenceOf(rows, { placeCount, ml: scored.ml }),
+    confidence: confidenceOf(rows, { placeCount, ml: scored.ml, oddsKnown: !noOdds }),
   };
 }

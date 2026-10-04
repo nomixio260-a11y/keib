@@ -308,7 +308,8 @@ export function computeRaceFactors(race, opts = {}) {
       if (sb < 0) p += 0.8 * -sb * (r.raw.closing - 0.5);
     }
     r.raw.pace = p;
-    const inner = gates > 1 ? 1 - (2 * (r.entry.number - 1)) / (gates - 1) : 0;
+    // 暫定のレース（特別登録。馬番は未定で仮の番号）では枠順を見ない
+    const inner = gates > 1 && !race.provisional ? 1 - (2 * (r.entry.number - 1)) / (gates - 1) : 0;
     r.inner = inner;
     r.raw.draw = db * inner * (0.6 + 0.8 * e) * (entries.length <= 10 ? 0.6 : 1);
   }

@@ -2,7 +2,7 @@
 
 import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS, PRESETS } from '../engine/model.js';
-import { BLEND_OPTIONS, STRATEGIES, ESTIMATED_TYPES, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { BLEND_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
@@ -11,7 +11,7 @@ import { volatilityFactors } from '../engine/volatility.js';
 import { VOLATILITY_MODEL } from '../engine/volatilityModel.js';
 import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
-import { esc, fixed, frameBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
+import { esc, fixed, frameBadge, entryBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
 import { gradeChip, statusBadge } from './timeline.js';
 import { renderResultPanel } from './resultView.js';
 
@@ -34,6 +34,7 @@ function renderHead(race, ctx) {
   const surf = race.surface === '障' ? '障害' : surfaceName(race.surface);
   let source = '';
   if (race.imported) source = '<span class="pill pill-import">取り込みデータ</span>';
+  else if (race.provisional) source = '<span class="src-note">JRA 特別レース登録馬（出馬表の前）</span>';
   else if (race.status === 'result') source = '<span class="src-note">JRA 確定オッズ・結果</span>';
   else if (race.source === 'JRA') {
     const hasOdds = race.entries.some((e) => e.odds > 1);
@@ -53,8 +54,15 @@ function renderHead(race, ctx) {
       ${race.ageCond ? `<span class="chip">${esc(race.ageCond)}</span>` : ''}
       ${race.grade ? `<span class="chip">${esc(gradeLabel(race.grade))}</span>` : ''}
       ${race.weightRule ? `<span class="chip">${esc(race.weightRule)}</span>` : ''}
-      <span class="chip">${race.entries.filter((e) => !e.scratched).length}頭</span>
+      <span class="chip">${race.provisional ? `登録${race.entries.length}頭${race.maxRunners ? `（出走できるのは${race.maxRunners}頭まで）` : ''}` : `${race.entries.filter((e) => !e.scratched).length}頭`}</span>
     </div>
+    ${
+      race.provisional
+        ? `<p class="prov-note">特別登録の段階の<b>暫定の予想</b>です。枠順・騎手・単勝オッズは出馬表（土曜のレースは木曜、日曜・月曜のレースは金曜〜土曜）で決まり、出たら自動で予想を出し直します。いまの勝率は、登録馬の前4走・負担重量・厩舎などからオッズを使わずに計算した「AI単独」の予想です（騎手・枠順はまだ使っていません）。${
+            race.maxRunners && race.entries.length > race.maxRunners ? `登録が${race.entries.length}頭で出走できる頭数（${race.maxRunners}頭）より多いので、除外・抽選で出走馬が変わります。` : ''
+          }</p>`
+        : ''
+    }
     ${
       race.jump
         ? ''
@@ -109,7 +117,7 @@ export function renderSummary(pred, rec, preset = 'balance') {
   return `<div class="summary">
     <div class="tile tile-honmei">
       <div class="tile-label">本命</div>
-      <div class="tile-main"><span class="mark mk-h big">◎</span>${frameBadge(e.frame, e.number)}<span class="tile-horse">${esc(e.name)}</span></div>
+      <div class="tile-main"><span class="mark mk-h big">◎</span>${entryBadge(e)}<span class="tile-horse">${esc(e.name)}</span></div>
       <div class="tile-sub">勝率 <b class="num">${pct(h.pWin)}</b>・複勝率 <b class="num">${pct(h.pTop3)}</b>${h.odds ? `・単勝 <b class="num">${odds(h.odds)}</b>倍` : ''}</div>
     </div>
     <div class="tile tile-pace">
@@ -119,14 +127,24 @@ export function renderSummary(pred, rec, preset = 'balance') {
     </div>
     <div class="tile tile-conf">
       <div class="tile-label">自信度・荒れ度</div>
-      <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span><span class="vol-badge v-${['solid', 'mid', 'wild'][c.volatilityIndex ?? 1]}" title="人気3頭以外が勝つ確率 ${pct(c.upsetProb || 0)}">${esc(c.volatility || '普通')}</span><span class="meter" role="img" aria-label="荒れ度 ${c.upset} / 5">${dots}</span></div>
-      <div class="tile-sub">◎が勝つ確率 <b class="num">${pct(c.winProb ?? c.top, 0)}</b>${c.placeProb != null ? `・複勝圏 <b class="num">${pct(c.placeProb, 0)}</b>` : ''}${gr ? `<small>（自信度${esc(c.grade)}の実績：勝率 ${pct(gr.winRate, 0)}・複勝 ${pct(gr.top3Rate, 0)}・${gr.n}R）</small>` : ''}<br>人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>${vr ? `<small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : ''}</div>
+      <div class="tile-main"><span class="grade-big g-${c.grade}">${c.grade}</span>${
+        c.volatility
+          ? `<span class="vol-badge v-${['solid', 'mid', 'wild'][c.volatilityIndex ?? 1]}" title="人気3頭以外が勝つ確率 ${pct(c.upsetProb || 0)}">${esc(c.volatility)}</span><span class="meter" role="img" aria-label="荒れ度 ${c.upset} / 5">${dots}</span>`
+          : '<span class="vol-badge v-mid" title="単勝オッズの発表後に計算します">荒れ度は—</span>'
+      }</div>
+      <div class="tile-sub">◎が勝つ確率 <b class="num">${pct(c.winProb ?? c.top, 0)}</b>${c.placeProb != null ? `・複勝圏 <b class="num">${pct(c.placeProb, 0)}</b>` : ''}${gr && !pred.aiOnly ? `<small>（自信度${esc(c.grade)}の実績：勝率 ${pct(gr.winRate, 0)}・複勝 ${pct(gr.top3Rate, 0)}・${gr.n}R）</small>` : ''}<br>${
+        c.volatility
+          ? `人気3頭以外が勝つ確率 <b class="num">${pct(c.upsetProb || 0, 0)}</b>${vr ? `<small>（「${esc(c.volatility)}」の実績 ${pct(vr.upsetRate, 0)}・${vr.n}R）</small>` : ''}`
+          : '人気3頭以外が勝つ確率（荒れ度）は、単勝オッズの発表後に計算します'
+      }</div>
       ${renderVolFactors(pred)}
     </div>
     <a class="tile tile-link tile-bets" href="#panel-bets" data-action="goto-bets">
       <div class="tile-label">AI推奨（${esc(STRATEGIES[rec.strategy].label)}）</div>
       ${
-        rec.noOdds
+        rec.noOdds && pred.race.provisional
+          ? '<div class="tile-main"><span class="tile-strong">出馬表待ち</span></div><div class="tile-sub">枠順・騎手・単勝オッズが出たら買い目を計算します</div>'
+          : rec.noOdds
           ? '<div class="tile-main"><span class="tile-strong">オッズ待ち</span></div><div class="tile-sub">単勝オッズが出たら買い目を計算します</div>'
           : `<div class="tile-main"><span class="tile-strong num">${rec.tickets.length}点</span><span class="tile-strong num">${yen(total)}</span></div>
       <div class="tile-sub">${rec.tickets.length ? `的中率 <b class="num">${pct(rec.stats.hitRate)}</b>・AI想定の回収率 <b class="num">${pct(rec.stats.roi, 0)}</b>` : '条件に合う買い目なし（見送り）'}</div>`
@@ -261,8 +279,8 @@ export function renderCardTable(pred, ctx) {
       return `<tr class="row${open ? ' is-open' : ''}${scratched ? ' is-scratched' : ''}" data-num="${esc(e.number)}">
         ${finCell(race, e.number)}
         <td class="c-mark">${r?.mark ? `<span class="mark ${markClass(r.mark)}">${esc(r.mark)}</span>` : ''}</td>
-        <td class="c-frame f${esc(e.frame)}"><span>${esc(e.frame)}</span></td>
-        <td class="c-num"><span class="num-box">${esc(e.number)}</span></td>
+        <td class="c-frame f${e.provisionalNumber ? '0' : esc(e.frame)}"><span>${e.provisionalNumber ? '' : esc(e.frame)}</span></td>
+        <td class="c-num"><span class="num-box">${e.provisionalNumber ? '—' : esc(e.number)}</span></td>
         <td class="c-horse"><span class="h-name">${esc(e.name)}</span><span class="h-sub">${esc(`${e.sex || ''}${e.age ?? ''}`)}${e.weight ? ` · ${esc(e.weight)}kg` : ''}${e.jockey ? ` · ${esc(e.jockey)}` : ''}</span></td>
         <td class="c-style">${r ? `<span class="style-chip ${STYLE_CLASS[r.style.style]}">${esc(r.style.style)}</span>` : ''}</td>
         ${cells}
@@ -275,9 +293,9 @@ export function renderCardTable(pred, ctx) {
   return `<div class="card-tools">
       <div class="seg" role="group" aria-label="並び順">
         <span class="seg-label">並び順</span>
-        ${sortBtn('number', '馬番')}${sortBtn('ai', '勝率順')}${hasResult ? sortBtn('finish', '着順') : ''}
+        ${sortBtn('number', race.provisional ? '登録順' : '馬番')}${sortBtn('ai', '勝率順')}${hasResult ? sortBtn('finish', '着順') : ''}
       </div>
-      <p class="card-hint">${pred.noOdds ? `単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。${pred.aiOnly ? 'いまの勝率はオッズを使わない「AI単独」の予想です（学習に使っていない期間で◎の勝率 29%。オッズが出ると機械学習の予想に切り替わります）。' : ''}` : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
+      <p class="card-hint">${race.provisional ? '特別登録の馬（50音順）です。枠・馬番・騎手は出馬表で決まります。行を押すと前4走と評価の内訳が開きます。' : pred.noOdds ? `単勝オッズの発表前です。人気・期待値はオッズが出てから表示します。${pred.aiOnly ? 'いまの勝率はオッズを使わない「AI単独」の予想です（学習に使っていない期間で◎の勝率 29%。オッズが出ると機械学習の予想に切り替わります）。' : ''}` : '行を押すと馬柱・評価の内訳・オッズ修正が開きます'}</p>
     </div>
     <div class="table-scroll card-scroll"><table class="card${hasResult ? ' has-fin' : ''}">
     <thead><tr>
@@ -312,7 +330,9 @@ export function renderBetsPanel(pred, rec, ctx) {
       `<label class="toggle-chip"><input type="checkbox" data-bettype="${t}" ${state.betTypes.includes(t) ? 'checked' : ''}><span>${esc(BET_LABEL[t])}</span></label>`,
   ).join('');
   const total = rec.tickets.reduce((a, t) => a + t.stake, 0);
-  const body = rec.noOdds
+  const body = rec.noOdds && pred.race.provisional
+    ? '<tr><td colspan="6" class="muted bt-empty">特別登録の段階です。出馬表（枠順・騎手）と単勝オッズが出てから、期待値で買い目を選びます。</td></tr>'
+    : rec.noOdds
     ? '<tr><td colspan="6" class="muted bt-empty">単勝オッズの発表前です。オッズが出ると、期待値から買い目を選びます（土曜のレースは金曜、日曜のレースは土曜に前日発売が始まります）。</td></tr>'
     : rec.tickets.length
     ? rec.tickets
@@ -364,6 +384,11 @@ export function renderBetsPanel(pred, rec, ctx) {
         ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${Number(state.blend) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
     </div>
+    <p class="panel-note">買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）選びます。予想の勝率どおりに選ぶより回収率が上がりました（的中重視・単勝/複勝：学習期間の分割外 約1.2万レースで 90.9% → 94.6%、検証期間 887レースで 95.8% → 99.2%）。的中率・期待値の欄はこの値です。${
+      state.strategy === 'hit' && state.betTypes.some((t) => ['quinella', 'trio', 'trifecta', 'exacta', 'wide'].includes(t))
+        ? '<br><span class="bet-caution">的中重視に馬連・三連複・三連単を足すと、学習期間の約1.2万レースでは回収率が下がりました（単勝/複勝だけ 94.6% → 足すと 88.1%）。</span>'
+        : ''
+    }</p>
     <div class="table-scroll"><table class="bets">
       <thead><tr><th>券種</th><th>買い目</th><th>的中率</th><th>オッズ</th><th title="(1−混合率)×AIの確率＋混合率×オッズの確率 で計算">期待値</th><th>金額</th></tr></thead>
       <tbody>${body}</tbody>

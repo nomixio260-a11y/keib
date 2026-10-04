@@ -16,7 +16,7 @@ export function emptyBundle() {
   return { version: BUNDLE_VERSION, source: 'JRA', generatedAt: null, days: [] };
 }
 
-function upsertRace(bundle, race) {
+export function upsertRace(bundle, race) {
   let day = bundle.days.find((d) => d.date === race.date);
   if (!day) {
     day = { date: race.date, races: [] };
@@ -28,7 +28,7 @@ function upsertRace(bundle, race) {
   return day.races[i >= 0 ? i : day.races.length - 1];
 }
 
-function sortBundle(bundle) {
+export function sortBundle(bundle) {
   bundle.days.sort((a, b) => (a.date < b.date ? -1 : 1));
   for (const d of bundle.days) {
     // 競馬場は JRA の場コード順（東京・中山 → 中京・京都・阪神 …）

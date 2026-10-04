@@ -67,7 +67,8 @@ export function paceMap(pred) {
   const xOf = (e) => padL + r + e * (W - padL - padR - 2 * r);
   const gates = Math.max(...pred.rows.map((x) => x.entry.number));
   const items = pred.rows
-    .map((row) => ({ row, e: row.style.early ?? 0.45, pref: (row.entry.number - 1) / Math.max(1, gates - 1) }))
+    // 特別登録の暫定のレースは枠順が未定なので、内外は決めない
+    .map((row) => ({ row, e: row.style.early ?? 0.45, pref: row.entry.provisionalNumber ? 0.5 : (row.entry.number - 1) / Math.max(1, gates - 1) }))
     .sort((a, b) => b.e - a.e);
   const placed = [];
   let maxSlot = 0;
@@ -97,11 +98,11 @@ export function paceMap(pred) {
       const y = top + 4 + p.slot * slot + r;
       const e = p.row.entry;
       const unknown = p.row.style.early == null;
-      const tip = `${e.number}番 ${e.name}\n${p.row.style.style}${unknown ? '（データなし）' : `・先行力 ${(p.row.style.early * 100).toFixed(0)}`}`;
+      const tip = `${e.provisionalNumber ? '' : `${e.number}番 `}${e.name}\n${p.row.style.style}${unknown ? '（データなし）' : `・先行力 ${(p.row.style.early * 100).toFixed(0)}`}`;
       const mark = p.row.mark ? `<text x="${p.x}" y="${y - r - 3}" class="pm-mark ${p.row.mark === '◎' ? 'is-h' : ''}">${esc(p.row.mark)}</text>` : '';
       return `<g class="pm-horse${unknown ? ' is-unknown' : ''}" tabindex="0" data-tip="${esc(tip)}">
-        <circle cx="${p.x}" cy="${y}" r="${r}" class="f${esc(e.frame)}"/>
-        <text x="${p.x}" y="${y + 4}" class="pm-num fi${esc(e.frame)}">${esc(e.number)}</text>${mark}
+        <circle cx="${p.x}" cy="${y}" r="${r}" class="f${e.provisionalNumber ? '0' : esc(e.frame)}"/>
+        <text x="${p.x}" y="${y + 4}" class="pm-num fi${esc(e.frame)}">${e.provisionalNumber ? '' : esc(e.number)}</text>${mark}
       </g>`;
     })
     .join('');

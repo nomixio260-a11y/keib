@@ -3,6 +3,28 @@
 import { BET_LABEL, BET_TYPES } from './constants.js';
 import { estimateOdds } from './market.js';
 import { AUTO_POLICY, POLICY_FORMS } from './volatility.js';
+import { exactPL } from './simulate.js';
+
+/**
+ * 買い目の選定（期待値・最低的中確率・並べ替え）に使う勝率の「平らさ」。予想の勝率（着順の温度）をこの倍率で平らにしてから選ぶ。
+ * 予想そのもの（一覧の勝率・自信度・荒れ度）は平らにしない。利用者の指摘（荒れ度 1.2 のほうが成績が良い）を、
+ * 学習期間の分割外 11,991レースと検証期間 887レースの実際の払戻で確かめて採用（scratchpad/oof-bets.mjs・setting-check.mjs）。
+ */
+export const BET_TEMP = 1.2;
+
+/** 買い目を選ぶための予想（勝率・連対率・複勝率・券種の確率を温度 temp で平らにしたもの）。temp=1 ならそのまま */
+export function betView(pred, temp = BET_TEMP) {
+  if (!temp || temp === 1 || !pred?.temps || !pred.rows?.length) return pred;
+  const cache = pred._betViews || (pred._betViews = new Map());
+  if (cache.has(temp)) return cache.get(temp);
+  const ex = exactPL(
+    pred.rows.map((r) => r.score),
+    { temps: pred.temps.map((t) => t * temp) },
+  );
+  const view = { ...pred, rows: pred.rows.map((r, i) => ({ ...r, pWin: ex.win[i], pTop2: ex.top2[i], pTop3: ex.top3[i] })), combos: ex.combos, betTemp: temp };
+  cache.set(temp, view);
+  return view;
+}
 
 export const STRATEGIES = {
   hit: { label: '的中重視', desc: '当たりやすさを優先。どれが当たっても払戻がそろうように配分します。', minEv: 0.8, maxTickets: 6, alloc: 'equal' },
@@ -258,7 +280,7 @@ export const BLEND_OPTIONS = [
   { value: 0.7, label: '70%' },
 ];
 
-export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend = DEFAULT_BLEND } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend = DEFAULT_BLEND, betTemp = null } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   // オッズが出るまでは期待値を計算できない
   if (pred.noOdds) return { strategy, budget, tickets: [], candidates: 0, noOdds: true, stats: evaluateTickets([], pred) };
@@ -276,12 +298,14 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
       return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };
     }
-    return recommendBets(pred, { budget, strategy: 'hit', types, blend });
+    return recommendBets(pred, { budget, strategy: 'hit', types, blend, betTemp });
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
-  const cands = buildCandidates(pred, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);
+  // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）
+  const view = betView(pred, betTemp ?? st.betTemp ?? BET_TEMP);
+  const cands = buildCandidates(view, types, blend).filter((c) => c.ev >= st.minEv && c.pEv >= minP[c.type]);
   cands.sort((a, b) => score(b) - score(a));
   const picked = [];
   const perType = {};

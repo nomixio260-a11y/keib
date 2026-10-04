@@ -15,6 +15,8 @@ export function startMs(race) {
 /** result（確定）・live（発走済みで結果待ち）・closing（締切間近）・open（発売中） */
 export function raceStatus(race, now = Date.now()) {
   if (race?.result?.length) return 'result';
+  // 特別登録の暫定のレース（出馬表の前）
+  if (race?.provisional) return 'registration';
   const st = startMs(race);
   if (!st) return 'open';
   if (now >= st) return 'live';
@@ -22,7 +24,7 @@ export function raceStatus(race, now = Date.now()) {
   return 'open';
 }
 
-export const STATUS_LABEL = { result: '確定', live: '結果待ち', closing: '締切間近', open: '発売中' };
+export const STATUS_LABEL = { result: '確定', live: '結果待ち', closing: '締切間近', open: '発売中', registration: '特別登録' };
 
 /** 'あと1時間5分' のような表記 */
 export function untilText(ms) {

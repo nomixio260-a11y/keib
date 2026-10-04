@@ -500,3 +500,134 @@ export function parseHorsePage(html) {
   }
   return out;
 }
+
+// ---- 特別登録（来週・再来週の特別レースの登録馬）----
+// 出馬表（枠順・騎手・単勝オッズ）は木曜〜金曜に出る。それより前に、特別レース（9〜11R など）の登録馬と
+// 負担重量・前4走が「特別レース登録馬」（日曜の夕方〜）に出るので、それで暫定の予想を出す。
+
+/** 特別登録の CNAME（pw03tde00…＝一覧表示、pw03tdd00…＝馬柱）→ レースの番号・日付。raceId は出馬表と同じ形 */
+export function registrationKeyFromCname(cname) {
+  const m = String(cname || '').match(/pw03td[de]00(\d{2})(\d{2})(\d{2})(\d{2})(\d{8})/);
+  if (!m) return null;
+  const [, courseCode, kai, day, race, ymd] = m;
+  const year = ymd.slice(0, 4);
+  return {
+    raceId: `${year}${courseCode}${kai}${day}${race}`,
+    courseCode,
+    course: COURSE_BY_CODE[courseCode] || null,
+    year: Number(year),
+    kai: Number(kai),
+    day: Number(day),
+    raceNo: Number(race),
+    date: `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`,
+  };
+}
+
+/** 特別レース登録馬のレース選択（pw03trl00）→ [{ cname, raceId, date, course, raceNo, name, grade, className, distance, surface }] */
+export function parseRegistrationList(html) {
+  const root = parse(html);
+  const out = [];
+  const seen = new Set();
+  for (const a of root.querySelectorAll('.link_list li a')) {
+    const cname = cnameFrom(a.getAttribute('onclick'));
+    const key = registrationKeyFromCname(cname);
+    if (!key || seen.has(key.raceId)) continue;
+    seen.add(key.raceId);
+    const copy = parse(a.toString());
+    copy.querySelectorAll('.opt, .grade_icon').forEach((n) => n.remove());
+    const name = clean(copy.text);
+    const gradeIcon = a.querySelector('.grade_icon img')?.getAttribute('alt') || clean(a.querySelector('.grade_icon')?.text || '');
+    const className = clean(a.querySelector('.cell.class')?.text || '');
+    const distText = clean(a.querySelector('.cell.dist')?.text || '');
+    const dm = distText.replace(/,/g, '').match(/(\d{3,4})\s*メートル\s*(芝|ダート|障害)/);
+    out.push({
+      cname,
+      ...key,
+      name,
+      gradeIcon,
+      grade: normalizeGrade(gradeIcon, className, name),
+      className,
+      distance: dm ? Number(dm[1]) : null,
+      surface: dm ? (dm[2] === 'ダート' ? 'ダ' : dm[2] === '障害' ? '障' : '芝') : null,
+      cap: clean(a.querySelector('.cap')?.text || ''),
+    });
+  }
+  return out;
+}
+
+/** 馬柱の過去走1走（JRA のレースは結果ページの CNAME から raceId がわかる。地方・海外は着順と距離だけ）。転入などの行は null */
+function parseRegistrationPast(td) {
+  if (!td || !td.querySelector('.place_line')) return null;
+  const nameA = td.querySelector('.race_line .name a');
+  const raceName = clean(td.querySelector('.race_line .name')?.text || '');
+  const classEl = td.querySelector('.r_class .grade_icon');
+  const classText = clean(classEl?.querySelector('img')?.getAttribute('alt') || classEl?.text || '');
+  const placeText = clean(td.querySelector('.place_line .place')?.text || '');
+  const numText = clean(td.querySelector('.place_line .num')?.text || '');
+  const distText = clean(td.querySelector('.dist')?.text || '');
+  const dm = distText.match(/(\d{3,4})\s*(芝|ダ|障)/);
+  const key = raceKeyFromCname(nameA?.getAttribute('href') || '');
+  return {
+    raceId: key?.raceId || null,
+    date: parseJpDate(td.querySelector('.date')?.text || ''),
+    course: clean(td.querySelector('.rc')?.text || ''),
+    raceName,
+    grade: normalizeGrade(classText, raceName),
+    finish: /^\d+/.test(placeText) ? toInt(placeText) : 0,
+    status: /^\d+/.test(placeText) ? '' : placeText.replace(/着$/, ''),
+    fieldSize: toInt((numText.match(/(\d+)頭/) || [])[1] || ''),
+    popularity: toInt((numText.match(/(\d+)番人気/) || [])[1] || ''),
+    distance: dm ? Number(dm[1]) : null,
+    surface: dm ? dm[2] : null,
+    time: null,
+    going: null,
+    passing: [],
+    last3f: null,
+    margin: null,
+    weight: null,
+    jockey: '',
+  };
+}
+
+/**
+ * 特別登録の1レース（一覧表示 pw03tde00 または 馬柱 pw03tdd00）。
+ * 返り値：見出し（日付・競馬場・クラス・距離など）＋ registered（登録頭数）・maxRunners（出走可能頭数）・
+ * horses（一覧表示：馬名・馬ID・負担重量、馬柱：加えて性齢・毛色・厩舎・前4走）・umabashiraCnames（同じレースの馬柱のページ）
+ */
+export function parseRegistration(html) {
+  const root = parse(html);
+  const header = parseHeader(root);
+  let registered = null;
+  let maxRunners = null;
+  for (const p of root.querySelectorAll('.entry_num')) {
+    const t = clean(p.text);
+    const n = toInt(p.querySelector('.num')?.text || '');
+    if (/特別登録/.test(t)) registered = n;
+    else if (/出走可能頭数/.test(t)) maxRunners = n;
+  }
+  const horses = [];
+  const ub = root.querySelector('.umabashira');
+  const rows = ub ? ub.querySelectorAll('tbody tr') : root.querySelectorAll('.horse_list tbody tr');
+  for (const tr of rows) {
+    const horseTd = tr.querySelector('td.horse');
+    if (!horseTd) continue;
+    const a = horseTd.querySelector('a');
+    const hid = ((a?.getAttribute('href') || '').match(/pw01dud\d0(\d{10})/) || [])[1] || null;
+    const weightText = clean(tr.querySelector('td.weight')?.text || '');
+    const h = { name: clean(a?.text || horseTd.text), horseId: hid, weight: /\d/.test(weightText) ? toFloat(weightText) : null };
+    if (ub) {
+      const ageText = clean(tr.querySelector('td.age .age')?.text || '');
+      const am = ageText.match(/^(牡|牝|せん|騸|セ)(\d+)(?:\/(\S+))?/);
+      const trainerA = tr.querySelector('td.age .trainer a');
+      h.sex = am ? (am[1] === '騸' || am[1] === 'せん' ? 'セ' : am[1]) : '';
+      h.age = am ? Number(am[2]) : null;
+      h.coat = am?.[3] || '';
+      h.trainer = clean(trainerA?.text || tr.querySelector('td.age .trainer')?.text || '');
+      h.trainerId = ((trainerA?.getAttribute('onclick') || '').match(/pw05cmk00(\d+)/) || [])[1] || null;
+      h.past = ['p1', 'p2', 'p3', 'p4'].map((p) => parseRegistrationPast(tr.querySelector(`td.past.${p}`))).filter(Boolean);
+    }
+    horses.push(h);
+  }
+  const umabashiraCnames = [...new Set([...String(html).matchAll(/'(pw03tdd00\d+\/[0-9A-F]{2})'/g)].map((m) => m[1]))];
+  return { ...header, registered, maxRunners, horses, umabashiraCnames };
+}

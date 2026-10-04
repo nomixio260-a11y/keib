@@ -3583,3 +3583,36 @@ table.bt-table {
   .bet-sheet { font-size: 11px; }
   .bet-sheet .sheet-table td, .bet-sheet .sheet-table th { padding: 4px; }
 }
+
+/* 特別登録の暫定のレース（出馬表の前） */
+.num-badge.f0,
+.card td.f0 {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.status-badge.sb-registration {
+  background: color-mix(in srgb, var(--turf) 14%, transparent);
+  color: var(--turf);
+}
+.race-item.is-registration .ri-name::after {
+  content: '暫定';
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.day-chip.is-prov .dc-kind {
+  color: var(--turf);
+}
+.prov-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--turf) 8%, transparent);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.pm-horse circle.f0 { fill: var(--surface-3); }

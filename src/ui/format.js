@@ -22,6 +22,12 @@ export function frameBadge(frame, number, extra = '') {
   return `<span class="num-badge f${esc(frame)} ${extra}" aria-label="${esc(frame)}枠${esc(number)}番">${esc(number)}</span>`;
 }
 
+/** 出走馬の枠番・馬番のバッジ。特別登録の暫定のレース（馬番は未定で仮の番号）は「—」 */
+export function entryBadge(e, extra = '') {
+  if (e?.provisionalNumber) return `<span class="num-badge f0 ${extra}" aria-label="馬番未定" title="馬番は出馬表で決まります">—</span>`;
+  return frameBadge(e?.frame, e?.number, extra);
+}
+
 export const STYLE_CLASS = { 逃げ: 'st-nige', 先行: 'st-senko', 差し: 'st-sashi', 追込: 'st-oikomi', 不明: 'st-none' };
 
 export const markClass = (m) => ({ '◎': 'mk-h', '○': 'mk-t', '▲': 'mk-s', '△': 'mk-r', '☆': 'mk-a' })[m] || '';

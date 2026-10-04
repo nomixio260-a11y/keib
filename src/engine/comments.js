@@ -106,12 +106,14 @@ const PACE_NAME = { H: 'ハイペース', M: 'ミドルペース', S: 'スロー
 /** 展開の説明文 */
 export function paceComment(pred) {
   const { pace, rows, straightBias } = pred;
-  const nige = rows.filter((r) => r.style.style === '逃げ').map((r) => r.entry.number);
+  // 特別登録の暫定のレースは馬番が未定（仮の番号）なので馬名で書く
+  const prov = rows.some((r) => r.entry.provisionalNumber);
+  const nige = rows.filter((r) => r.style.style === '逃げ').map((r) => (prov ? r.entry.name : r.entry.number));
   const senko = rows.filter((r) => r.style.style === '先行').map((r) => r.entry.number);
   const parts = [];
   if (nige.length === 0) parts.push('はっきりした逃げ馬が不在');
-  else if (nige.length === 1) parts.push(`逃げ候補は${nige[0]}番の1頭だけ`);
-  else parts.push(`逃げ候補が${nige.join('・')}番と${nige.length}頭`);
+  else if (nige.length === 1) parts.push(`逃げ候補は${nige[0]}${prov ? '' : '番'}の1頭だけ`);
+  else parts.push(`逃げ候補が${nige.join('・')}${prov ? '' : '番'}と${nige.length}頭`);
   if (senko.length) parts.push(`先行勢は${senko.length}頭`);
   let tail;
   if (pace.label === 'H') tail = '前半から流れが速くなりそうで、差し・追込に向く展開。';

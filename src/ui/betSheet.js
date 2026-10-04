@@ -1,7 +1,7 @@
 // 買い目表：選んだ開催日の全レースの印・買い目・状態を1枚の表にまとめる（印刷・コピー向け）。
 // 買い目は今の買い方（戦略・予算・券種）と発売中のオッズで計算し、確定したレースは実際の払戻で精算する。
 
-import { esc, frameBadge, pct, yen, odds, markClass } from './format.js';
+import { esc, frameBadge, entryBadge, pct, yen, odds, markClass } from './format.js';
 import { raceStatus, startMs, untilText } from '../engine/raceTime.js';
 import { BET_LABEL } from '../engine/constants.js';
 import { ticketLabel, STRATEGIES } from '../engine/bets.js';
@@ -37,6 +37,7 @@ export function statusText(race, st, now) {
     return `発走済み（${m}分前）・結果は数分後に反映`;
   }
   if (st === 'closing') return '締切間近';
+  if (st === 'registration') return '特別登録（暫定）・出馬表は木〜金曜';
   return t ? `発売中・${untilText(t - now)}` : '発売中';
 }
 
@@ -84,6 +85,7 @@ function resultCell(row) {
 
 function betsCell(row) {
   const { rec, settle } = row;
+  if (rec.noOdds && row.race.provisional) return '<span class="muted">出馬表待ち<br><small>枠順・騎手・オッズが出たら計算します</small></span>';
   if (rec.noOdds) return '<span class="muted">オッズ待ち<br><small>単勝オッズが出たら計算します</small></span>';
   if (!rec.tickets.length) return `<span class="muted">見送り${rec.skipped ? `<br><small>${esc(rec.skipReason || '自信度の条件に合わないレース')}</small>` : '<br><small>期待値の条件に合う買い目なし</small>'}</span>`;
   const lines = rec.tickets.map((t, i) => {
@@ -98,7 +100,7 @@ function marksCell(row) {
   return row.marks
     .map((h, k) => {
       const e = h.entry;
-      return `<div class="sheet-mark"><span class="mark ${markClass(MARKS[k])}">${MARKS[k]}</span>${frameBadge(e.frame, e.number, 'sm')} <span class="sheet-horse">${esc(e.name)}</span> <small class="num">${pct(h.pWin, 0)}${h.odds ? `・${odds(h.odds)}倍` : ''}</small></div>`;
+      return `<div class="sheet-mark"><span class="mark ${markClass(MARKS[k])}">${MARKS[k]}</span>${entryBadge(e, 'sm')} <span class="sheet-horse">${esc(e.name)}</span> <small class="num">${pct(h.pWin, 0)}${h.odds ? `・${odds(h.odds)}倍` : ''}</small></div>`;
     })
     .join('');
 }

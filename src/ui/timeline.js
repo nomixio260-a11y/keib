@@ -1,7 +1,7 @@
 // レース一覧：開催日（過去・今日・これから）→ 競馬場 → レース。発走までの時間と、確定したレースの結果を並べる
 
 import { raceStatus, STATUS_LABEL, untilText, startMs } from '../engine/raceTime.js';
-import { esc, frameBadge, pct } from './format.js';
+import { esc, frameBadge, entryBadge, pct } from './format.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -194,14 +194,14 @@ function raceItem(r, ctx) {
   if (r.jump) pickHtml = '<span class="ri-wait">障害（予想対象外）</span>';
   else if (pick && !pick.jump) {
     const fin = r.result?.length ? r.finishes?.[pick.number] : null;
-    pickHtml = `<span class="mark mk-h">◎</span>${frameBadge(pick.frame, pick.number, 'sm')}<span class="ri-horse">${esc(pick.name)}</span>${finishChip(fin)}`;
+    pickHtml = `<span class="mark mk-h">◎</span>${pick.prov ? entryBadge({ provisionalNumber: true }, 'sm') : frameBadge(pick.frame, pick.number, 'sm')}<span class="ri-horse">${esc(pick.name)}</span>${finishChip(fin)}`;
   } else pickHtml = '<span class="ri-wait">計算中…</span>';
   const timeText = st === 'open' || st === 'closing' ? (t && t - now < 3 * 3600 * 1000 ? untilText(t - now) : '') : '';
   return `<li><button type="button" class="race-item${on ? ' is-on' : ''} is-${st}" data-race="${esc(r.id)}" aria-current="${on ? 'true' : 'false'}">
     <span class="ri-no">${esc(r.raceNo)}<small>R</small></span>
     <span class="ri-body">
       <span class="ri-top"><span class="ri-name">${esc(r.name)}</span>${gradeChip(r.grade)}</span>
-      <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.entries.filter((e) => !e.scratched).length}頭</span>${st === 'closing' || st === 'live' ? statusBadge(r, now) : timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
+      <span class="ri-meta">${r.startTime ? `<span class="num">${esc(r.startTime)}</span>` : ''}${surfaceChip(r)}<span>${r.provisional ? `登録${r.entries.length}頭` : `${r.entries.filter((e) => !e.scratched).length}頭`}</span>${st === 'closing' || st === 'live' || st === 'registration' ? statusBadge(r, now) : timeText ? `<span class="ri-until">${esc(timeText)}</span>` : ''}</span>
       <span class="ri-pick">${pickHtml}</span>
     </span>
     <span class="ri-side">${pick && !pick.jump ? `<span class="ri-grade g-${esc(pick.grade)}" title="自信度${esc(pick.grade)}${pick.conf != null ? `（◎が勝つ確率 ${Math.round(pick.conf * 100)}%）` : ''}">${esc(pick.grade)}</span>${volChip(pick.vol)}` : ''}</span>
@@ -214,8 +214,11 @@ export function renderRail(ctx) {
     .map((d) => {
       const on = d.date === state.day;
       const kind = dayKind(d.date, today);
-      return `<button type="button" class="day-chip is-${kind}${on ? ' is-on' : ''}" data-day="${esc(d.date)}" aria-pressed="${on}">
-        <span class="dc-date">${esc(dayLabel(d.date))}</span><span class="dc-kind">${esc(kindText(d.date, today))}</span>
+      // 特別登録の暫定のレースだけの日（出馬表の前）
+      const dayRaces = racesOf(d.date, null);
+      const prov = dayRaces.length > 0 && dayRaces.every((r) => r.provisional);
+      return `<button type="button" class="day-chip is-${kind}${prov ? ' is-prov' : ''}${on ? ' is-on' : ''}" data-day="${esc(d.date)}" aria-pressed="${on}" ${prov ? 'title="特別登録の段階の暫定の予想（特別レースのみ）。出馬表は木〜金曜"' : ''}>
+        <span class="dc-date">${esc(dayLabel(d.date))}</span><span class="dc-kind">${esc(prov ? `${kindText(d.date, today)}・登録` : kindText(d.date, today))}</span>
       </button>`;
     })
     .join('');
