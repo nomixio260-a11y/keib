@@ -2,6 +2,7 @@
 // 過去のレースの確定オッズ（馬連・ワイド・3連複）を JRA から集める（検証用）。
 //
 //   node scripts/collect-exotic.mjs 2026-07-01 2026-09-30
+//   環境変数 EXOTIC_KINDS=quinella,wide,trio,exacta（取る券種。既定は4つ）。保存済みのファイルに足りない券種があれば、その分だけ取って書き足す
 //
 // 単勝・複勝のオッズページ（収集済みでキャッシュにある）から各券種のページへのリンクをたどり、
 // data/odds-final/{年}/{レースID}.json に { quinella, wide, trio } を保存する。保存済みは飛ばす。
@@ -19,6 +20,7 @@ if (!from || !to) {
   console.log('使い方: node scripts/collect-exotic.mjs <YYYY-MM-DD> <YYYY-MM-DD>');
   process.exit(1);
 }
+const KINDS = (process.env.EXOTIC_KINDS || 'quinella,wide,trio,exacta').split(',').filter(Boolean);
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const client = createJraClient({ minIntervalMs: Number(process.env.KEIB_INTERVAL_MS || 1200), cacheDir: CACHE_DIR, log });
 const todayYm = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 7);
@@ -39,7 +41,9 @@ for (const ym of months) {
     const races = await listRaces(client, meeting);
     for (const link of races) {
       const file = path.join(DATA_DIR, 'odds-final', link.date.slice(0, 4), `${link.raceId}.json`);
-      if (existsSync(file)) {
+      const existing = existsSync(file) ? await readJson(file) : null;
+      const missing = KINDS.filter((k) => !existing?.[k]);
+      if (existing && !missing.length) {
         skipped++;
         continue;
       }
@@ -47,8 +51,8 @@ for (const ym of months) {
       try {
         const tanpuku = await client.page(link.oddsCname, { cache: 'forever' });
         const links = parseOddsLinks(tanpuku);
-        const out = { id: link.raceId, date: link.date, course: link.course, raceNo: link.raceNo };
-        for (const kind of ['quinella', 'wide', 'trio']) {
+        const out = existing || { id: link.raceId, date: link.date, course: link.course, raceNo: link.raceNo };
+        for (const kind of missing) {
           if (!links[kind]) continue;
           const parsed = parseExoticOdds(await client.page(links[kind], { cache: 'forever' }));
           out[kind] = parsed.odds;
