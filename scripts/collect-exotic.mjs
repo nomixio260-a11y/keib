@@ -42,7 +42,8 @@ for (const ym of months) {
     for (const link of races) {
       const file = path.join(DATA_DIR, 'odds-final', link.date.slice(0, 4), `${link.raceId}.json`);
       const existing = existsSync(file) ? await readJson(file) : null;
-      const missing = KINDS.filter((k) => !existing?.[k]);
+      // ライブで取った暫定のオッズ（source: 'live'）は公式の確定オッズで取り直す
+      const missing = existing?.source === 'live' ? KINDS : KINDS.filter((k) => !existing?.[k]);
       if (existing && !missing.length) {
         skipped++;
         continue;
@@ -51,7 +52,7 @@ for (const ym of months) {
       try {
         const tanpuku = await client.page(link.oddsCname, { cache: 'forever' });
         const links = parseOddsLinks(tanpuku);
-        const out = existing || { id: link.raceId, date: link.date, course: link.course, raceNo: link.raceNo };
+        const out = existing && existing.source !== 'live' ? existing : { id: link.raceId, date: link.date, course: link.course, raceNo: link.raceNo };
         for (const kind of missing) {
           if (!links[kind]) continue;
           const parsed = parseExoticOdds(await client.page(links[kind], { cache: 'forever' }));

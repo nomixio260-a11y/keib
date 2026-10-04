@@ -10,16 +10,18 @@
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
 //             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
 //             --history <dir>（結果の記録を読む場所。既定は data/history。GitHub Actions では data ブランチの history/）
+//             --exotic <dir>（馬連・ワイド・三連複・馬単の確定オッズの置き場。既定は data/odds-final。確定したレースのライブのオッズもここに残す）
 //
 // 集めたデータは個人の分析用です。不特定多数が見られる場所には置かないでください。
 
 import path from 'node:path';
 import { copyFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createJraClient } from '../src/collector/client.js';
 import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs } from '../src/collector/bundle.js';
 import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
-import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, ROOT } from '../src/collector/store.js';
+import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, FINAL_ODDS_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory, attachCareer } from '../src/data/history.js';
 
 const args = process.argv.slice(2);
@@ -31,6 +33,7 @@ const flag = (name) => args.includes(`--${name}`);
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const keepPast = Number(opt('past', 4));
+const exoticDir = opt('exotic', null) ? path.resolve(opt('exotic', null)) : undefined;
 const out = path.resolve(opt('out', BUNDLE_FILE));
 const today = jstParts().date;
 
@@ -41,7 +44,7 @@ const records = await loadHistory(opt('history', null) ? path.resolve(opt('histo
 if (records.length) {
   const dates = [...new Set(records.filter((r) => r.date < today).map((r) => r.date))].sort().slice(-keepPast);
   addPastDaysFromHistory(bundle, records, indexHistory(records), dates);
-  const n = await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races));
+  const n = await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races), exoticDir);
   log(`過去の開催日：${dates.join(', ') || 'なし'}（data/history ${records.length}レースから。確定オッズあり ${n}レース）`);
 }
 
@@ -90,6 +93,20 @@ if (!flag('offline')) {
   log(`JRA：出馬表 ${cards}件・結果 ${results}件（通信 ${client.stats().requests}回）`);
 } else bundle.generatedAt = new Date().toISOString();
 
+// 確定したレースの最後に取れた馬連・ワイド・三連複・馬単のオッズを残す（機械学習の特徴量に使う。公式の確定オッズは scripts/collect-exotic.mjs が後で上書き）
+{
+  let saved = 0;
+  for (const race of bundle.days.flatMap((d) => d.races)) {
+    if (race.status !== 'result' || !race.exoticOdds || !race.date) continue;
+    const file = path.join(exoticDir || FINAL_ODDS_DIR, race.date.slice(0, 4), `${race.id}.json`);
+    if (existsSync(file)) continue;
+    await writeJson(file, { id: race.id, date: race.date, course: race.course, raceNo: race.raceNo, source: 'live', ...race.exoticOdds });
+    saved++;
+  }
+  if (saved) log(`確定レースのオッズ（馬連・ワイド・三連複・馬単）を保存：${saved}レース`);
+}
+// 当日のレースにも、確定オッズの保存があれば付ける（データベースのない環境で past days を作り直したとき用）
+await attachFinalExoticOdds(bundle.days.flatMap((d) => d.races).filter((r) => !r.exoticOdds), exoticDir);
 pruneBundle(bundle, { keepPast, today });
 attachDayVariants(bundle, records, REAL_STATS, { today });
 // 機械学習の特徴量に使う馬ごとの通算要約。データベースがあればそのレースより前の出走から、なければ src/data/horses.json

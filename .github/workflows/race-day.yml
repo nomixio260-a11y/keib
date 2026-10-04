@@ -85,7 +85,7 @@ jobs:
             echo "== $n 回目 $(date -u +%FT%TZ)"
             # ほかから data ブランチに push されたもの（過去の結果の記録など）を取り込む
             if git -C out fetch -q origin data 2>/dev/null; then git -C out reset -q --hard FETCH_HEAD; fi
-            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --skip-if-idle"
+            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --exotic out/odds-final --skip-if-idle"
             [ -s out/data.json ] && args="$args --previous out/data.json"
             if node scripts/build-data.mjs $args > build.log 2>&1; then
               tail -12 build.log

@@ -108,7 +108,7 @@ export const FEATURE_NAMES = [
 ];
 
 // 別の投票市場（馬連・ワイド・三連複・馬単）の特徴量を使うか。true にしたら npm run ml で学習し直す（モデルの列と一致しないと機械学習が止まる）
-export const INCLUDE_EXOTIC = false;
+export const INCLUDE_EXOTIC = true;
 if (INCLUDE_EXOTIC) FEATURE_NAMES.push(...EXOTIC_FEATURE_NAMES);
 
 const F = Object.fromEntries(FEATURE_NAMES.map((k, i) => [k, i]));
