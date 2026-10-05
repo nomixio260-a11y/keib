@@ -104,7 +104,7 @@ function dayBudgetText(sum) {
   if (!d) return '';
   if (d.limit == null) return `1日の予算はなし（買い目の合計 ${yen(d.total)}・${d.races}レース）`;
   return d.over
-    ? `1日の予算 ${yen(d.limit)}（1レースの予算の${d.mult}倍）：買い目の合計 ${yen(d.total)}（${d.races}レース）が予算を超えるので、リスクに対する期待値の高い買い目から順に ${yen(d.used)} まで買います${sum.dayOut ? `（入らなかった ${sum.dayOut}レースは見送り）` : ''}`
+    ? `1日の予算 ${yen(d.limit)}（1レースの予算の${d.mult}倍）：買い目の合計 ${yen(d.total)}（${d.races}レース）が予算を超えるので、発走の早いレースから順に ${yen(d.used)} まで買います${sum.dayOut ? `（入らなかった ${sum.dayOut}レースは見送り）` : ''}`
     : `1日の予算 ${yen(d.limit)}（1レースの予算の${d.mult}倍）：買い目の合計 ${yen(d.total)}（${d.races}レース）は予算の範囲内`;
 }
 

@@ -106,7 +106,7 @@ const state = {
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
   // 当たる確率で絞る：選択肢は「自動」だけ（keepVersion 4 で、以前の「自動・多め」「自動・絞る」・数値は自動に戻す）
   keep: saved.keepVersion === KEEP_VERSION && KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
-  // 1日の予算（的中重視の自動）：朝にまとめて買う前提で、その日の買い目の合計を 1レースの予算×倍数 までに（リスクに対する期待値の高い順）
+  // 1日の予算（的中重視の自動）：朝にまとめて買う前提で、その日の買い目の合計を 1レースの予算×倍数 までに（発走の早いレースから順に）
   dayBudget: DAY_BUDGET_OPTIONS.some((o) => o.value === saved.dayBudget) ? saved.dayBudget : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
@@ -484,7 +484,7 @@ const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: 
 
 /**
  * 1日の予算：朝にまとめて買う前提で、その日の全レースの推奨買い目を出し、合計が 1レースの予算×倍数 を超えたら
- * リスクに対する期待値の高い順に予算まで割り振る（planDay）。結果は見ない（確定したレースも、その日の買い目として同じに扱う）。
+ * 発走の早いレースから順に予算まで割り振る（planDay。後のレースの買い目は見ない）。結果は見ない（確定したレースも、その日の買い目として同じに扱う）。
  * 日付・設定・データが変わるまでキャッシュ
  */
 const dayPlanCache = new Map();

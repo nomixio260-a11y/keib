@@ -384,7 +384,7 @@ export function renderBetsPanel(pred, rec, ctx) {
       rec.auto && rec.day
         ? `<p class="panel-note">${
             rec.day.limit != null
-              ? `1日の予算 ${yen(rec.day.limit)}：この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}${rec.day.over ? ` → 予算の範囲で ${yen(rec.day.used)}（リスクに対する期待値の高い買い目から順に）` : '（予算の範囲内）'}。`
+              ? `1日の予算 ${yen(rec.day.limit)}：この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}${rec.day.over ? ` → 予算の範囲で ${yen(rec.day.used)}（発走の早いレースから順に）` : '（予算の範囲内）'}。`
               : `1日の予算はなし：この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}。`
           }${rec.day.over && rec.tickets?.some((t) => t.dayCut) ? '<br><span class="bet-caution">このレースは1日の予算の残りの分だけ買います（金額を減らしています）。</span>' : ''}${rec.day.over && !rec.tickets?.length && rec.dropped?.some((t) => t.why === 'day') ? '<br><span class="bet-caution">このレースの買い目は1日の予算に入らなかったので見送りです。</span>' : ''}</p>`
         : ''

@@ -189,7 +189,7 @@ function renderBetSection(ctx) {
     </div>
     <p class="panel-note">${
       mult > 0
-        ? `朝や前日にまとめて買っても効くように、レースの結果を見ずに1日分の買い目で決めます。その日の買い目の合計が1日の予算（${yen(mult * state.budget)}）を超えたら、リスクに対する期待値の高い買い目から順に予算まで買い、入らない買い目は見送ります。1日の負けは最大でも1日の予算までです。${DAY_BUDGET_NOTE[mult] || ''}`
+        ? `朝や前日にまとめて買っても効くように、レースの結果を見ずに決めます（1日の予算 ${yen(mult * state.budget)}）。${DAY_BUDGET_NOTE[mult] || ''}`
         : DAY_BUDGET_NONE_NOTE
     }</p>`
         : ''
