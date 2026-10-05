@@ -92,34 +92,43 @@ test('1日の予算：合計が予算の範囲内なら買い目を変えない�
   assert.deepEqual(planDay(items, { budget: 3000, dayBudget: 2 }).map((r) => r.tickets.map((t) => t.stake)), plan.map((r) => r.tickets.map((t) => t.stake)));
 });
 
-test('期待値の余裕：人気馬（当たる確率 70% 以上）でも、期待値が 1.2 に届かない買い目は買わない（発走前のオッズは確定までに動く）', () => {
+test('期待値の余裕：人気馬（当たる確率 70% 以上）でも、期待値 1.2 未満は上限まで買わない（1.1 以上は少額の2段目、1.1 未満は見送り）', () => {
   let below = 0;
-  let above = 0;
-  // 1番人気を大本命にして、複勝の上限を少しずつ広げ、期待値が 1.2 をまたぐ場面を作る
+  let small = 0;
+  let full = 0;
+  const T2 = AUTO_STAKE.tier2;
+  // 1番人気を大本命にして、複勝の上限を少しずつ広げ、期待値が 1.1・1.2 をまたぐ場面を作る
   for (let seed = 1; seed <= 12; seed++) for (let k = 0; k <= 60; k += 3) {
     const race = withPlace(makeRace({ seed }));
     const fav = race.entries.find((e) => e.popularity === 1);
     for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
-    Object.assign(fav, { odds: 1.6, placeMin: 1.3, placeMax: Math.round((1.3 + k * 0.03) * 100) / 100 });
+    Object.assign(fav, { odds: 1.6, placeMin: 1.2, placeMax: Math.round((1.2 + k * 0.02) * 100) / 100 });
     const pred = predictRace(race, { sims: 0 });
     const rec = recommendBets(pred, { budget: 3000 });
     const i = pred.rows.findIndex((r) => r.entry.number === fav.number);
-    const pTop3 = pred.rows[i].pTop3;
-    if (!(pTop3 >= AUTO_STAKE.hiP)) continue;
+    if (!(pred.rows[i].pTop3 >= AUTO_STAKE.hiP)) continue;
     const t = rec.tickets.find((x) => x.type === 'place' && x.idx[0] === i);
     const cand = rec.dropped?.find((x) => x.type === 'place' && x.idx[0] === i);
     const ev = t ? t.ev : cand ? cand.ev : null;
     if (ev == null) continue;
-    if (ev < AUTO_STAKE.minEv) {
+    if (ev < T2.minEv) {
       assert.ok(!t, `期待値 ${ev.toFixed(3)} は買わない`);
       below++;
-    } else if (t) {
+    } else if (ev < AUTO_STAKE.minEv) {
+      if (t) {
+        assert.equal(t.auto, 'tier2');
+        assert.equal(t.stake, Math.floor((3000 * T2.share) / 100) * 100);
+        small++;
+      }
+    } else if (t && t.auto === 'kelly') {
       assert.ok(!t.favThin);
-      above++;
+      assert.ok(t.stake > Math.floor((3000 * T2.share) / 100) * 100);
+      full++;
     }
   }
-  assert.ok(below > 0, '期待値 1.2 未満の人気馬の複勝を見送る場面で確かめている');
-  assert.ok(above >= 0);
+  assert.ok(below > 0, '期待値 1.1 未満の人気馬の複勝を見送る場面で確かめている');
+  assert.ok(small > 0, '期待値 1.1〜1.2 の人気馬の複勝を少額で買う場面で確かめている');
+  assert.ok(full >= 0);
 });
 
 test('その日の収支の見込み：確定したレースは実際の収支、まだのレースは着順の確率から。買うレースを減らすと最悪が小さくなる', () => {

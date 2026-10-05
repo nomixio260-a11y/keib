@@ -1404,7 +1404,7 @@ function onChange(e) {
   }
   if (t.matches('[data-keep]')) {
     markBeforeChange();
-    state.keep = t.value === 'auto' || t.value === 'more' ? t.value : Number(t.value);
+    state.keep = t.value === 'auto' || t.value === 'more' || t.value === 'strict' ? t.value : Number(t.value);
     return afterSettingsChange('bets');
   }
   if (t.matches('[data-blend]')) {

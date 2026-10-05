@@ -86,16 +86,23 @@ export const LOW_ODDS_LABEL = '1.1 倍以下';
 export const AUTO_STAKE = {
   minP: 0.55, minEv: 1.2, lowP: 0.8, fullAt: 0.03, classic: false, classicKeep: 0.5, minProfit: 100, maxTickets: 1, minOdds: 1.05, placeAlpha: [0.4594, -0.1652, -0.1447],
   hiP: 0.7, hiEv: 1.02, hiCut: 0.5,
+  // 2段目（参加するレースを増やす。利用者の依頼 2026-10-05「ほとんど買っていない、参加レースを増やせ」）：1段目（当たる確率 55% 以上・
+  // 期待値 1.2 以上）に届かないレースで、当たる確率 50% 以上・期待値 1.1 以上の単勝・複勝を予算の 3割で1点。発走10分前のオッズの推定
+  // （乱数3通り・1R 1,000円・scratchpad/ml8/tier2.mjs）で、検証期間の30日 45 → 116レース・回収率 111.3% → 108.3%・収支 +5k → +6k、
+  // 学習に使っていない 2024年 99.1% → 98.6%・2025年〜 105.8% → 103.1%（長い期間の収支は少し減るが、損にはならない見込み）
+  tier2: { minP: 0.5, minEv: 1.1, share: 0.3, types: ['place', 'win'] },
   // 追加の買い目（馬連・三連複・複勝）は、発走前のオッズで選ぶと学習期間のどの年も損だったのでやめた（null）
   extra: null,
   dayBudget: { mult: 7 },
 };
 /**
- * 自動・多め（「当たる確率で絞る」の選択肢）：買うレースを増やしたい人向け。当たる確率 50% 以上・期待値 1.05 以上。
- * 発走10分前のオッズで選んだ場合の推定（乱数3通りの平均・1R 1,000円）：検証期間の30日で約160レース・的中率 約65%・回収率 約105%
- * と多く買えるが、学習に使っていない 2024年〜2026年6月では 2024年 回収率 約95%・2025年〜 約100% で、長い期間ではわずかに損の見込み
+ * 自動・多め（「当たる確率で絞る」の選択肢）：2段目の期待値の下限を 1.1 → 1.05 にして、参加するレースをさらに増やす。
+ * 発走10分前のオッズの推定（乱数3通り・1R 1,000円）：検証期間の30日で約160レース・的中率 約64%・回収率 約108%、
+ * 学習に使っていない 2024年 回収率 約97%・2025年〜 約102%（長い期間ではほぼ損得なし）
  */
-export const AUTO_STAKE_MORE = { ...AUTO_STAKE, minP: 0.5, minEv: 1.05 };
+export const AUTO_STAKE_MORE = { ...AUTO_STAKE, tier2: { ...AUTO_STAKE.tier2, minEv: 1.05 } };
+/** 自動・絞る：1段目だけ（当たる確率 55% 以上・期待値 1.2 以上。検証期間の30日で約45レース・回収率 約111%） */
+export const AUTO_STAKE_STRICT = { ...AUTO_STAKE, tier2: null };
 /** 以前の規則（規則I。確定オッズで選ぶ検証で決めたもの）：発走前のオッズで選ぶ検証との比較用 */
 export const AUTO_STAKE_I = {
   ...AUTO_STAKE,
@@ -204,7 +211,7 @@ export const STRATEGIES = {
   // minOdds：上の MIN_ODDS（以前は的中重視だけ 1.05：当たっても元返しの 1.0 倍だけを買わなかった）
   // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
-  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、当たる確率 55% 以上で期待値が 1.2 以上の買い目だけを買います（1レース1点・予算まで。予算は上限で、使い切るとは限りません）。期待値の余裕は、発走前のオッズが確定までに動く分です（余裕が小さいと、確定オッズでは損になる買い目まで買ってしまう）。当たっても 100円の利益に届かない買い目は買いません。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない 2024年〜2026年6月、その時点より前のデータだけで学習したモデル）：買うのは1日に約1.5レース・的中率 約63%・回収率 99〜106%。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
+  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、1段目：当たる確率 55% 以上で期待値が 1.2 以上の買い目を自信に応じて上限まで、それがないレースは2段目：当たる確率 50% 以上で期待値が 1.1 以上の単勝・複勝を予算の3割で、どちらも1点だけ買います（予算は上限で、使い切るとは限りません）。期待値の余裕は、発走前のオッズが確定までに動く分です。当たっても 100円の利益に届かない買い目は買いません。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない期間、その時点より前のデータだけで学習したモデル）は、バックテスト画面にあります。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
   // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、
@@ -482,14 +489,15 @@ export const ESTIMATED_TYPES = ['quinella', 'wide', 'exacta', 'trio', 'trifecta'
 
 /** 2段目の絞り込み（当たる確率の下限）：'auto'（既定）は買い方ごとの標準（的中重視・控えめ 50%、バランス 40%、高配当 20%） */
 export function resolveKeep(keep, strategy = null) {
-  if (keep == null || keep === '' || keep === 'auto' || keep === 'more') return STRATEGIES[strategy]?.keepMinP ?? 0;
+  if (keep == null || keep === '' || keep === 'auto' || keep === 'more' || keep === 'strict') return STRATEGIES[strategy]?.keepMinP ?? 0;
   const v = Number(keep);
   return Number.isFinite(v) ? v : 0;
 }
 
 export const KEEP_OPTIONS = [
-  { value: 'auto', label: '自動（的中重視は当たる確率 55% 以上・期待値 1.2 以上だけ。控えめ 50%・バランス 40%・高配当 20%以上）' },
-  { value: 'more', label: '自動・多め（的中重視で買うレースを増やす。当たる確率 50% 以上・期待値 1.05 以上。長い期間ではわずかに損の見込み）' },
+  { value: 'auto', label: '自動（的中重視は 55%・期待値 1.2 以上を上限まで＋50%・期待値 1.1 以上を少額。控えめ 50%・バランス 40%・高配当 20%以上）' },
+  { value: 'more', label: '自動・多め（的中重視で参加するレースをさらに増やす。少額の買い目を期待値 1.05 以上まで）' },
+  { value: 'strict', label: '自動・絞る（的中重視で 55%・期待値 1.2 以上だけ。1日に1〜2レース）' },
   { value: 0, label: '絞らない' },
   { value: 0.3, label: '30%以上' },
   { value: 0.5, label: '50%以上' },
@@ -543,6 +551,19 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
         continue;
       }
     }
+    // 2段目（参加するレースを増やす）：当たる確率 tier2.minP 以上・期待値 tier2.minEv 以上の単勝・複勝を、予算の tier2.share で
+    const T2 = A.tier2;
+    if (T2 && f > 0 && T2.types.includes(c.type) && c.odds >= MIN_ODDS && c.p >= T2.minP && ev >= T2.minEv) {
+      const stake = Math.floor((budget * T2.share) / unit) * unit;
+      if (stake >= unit && stake * (c.odds - 1) >= A.minProfit) {
+        main.push({ ...t, stake, auto: 'tier2', favThin: false });
+        continue;
+      }
+      if (stake >= unit) {
+        near.push({ ...t, why: 'thin' });
+        continue;
+      }
+    }
     // 追加の買い目：当たる確率はやや低いが期待値の高いもの（金額は主な買い目と同じく有利さに応じて）
     const L = X?.[c.type];
     if (L && f > 0 && c.odds >= MIN_ODDS && c.p >= L[0] && ev >= L[1]) {
@@ -555,7 +576,7 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
     if (c.p >= 0.5 && ev >= 0.95) near.push({ ...t, why: c.odds < MIN_ODDS && c.p >= A.minP && ev >= A.minEv ? 'low' : 'weak' });
   }
   // 主な買い目は、人気馬で期待値に余裕のないもの（金額を減らしたもの）を後回しに
-  main.sort((a, b) => (a.favThin ? 1 : 0) - (b.favThin ? 1 : 0) || b.stake - a.stake || b.p - a.p);
+  main.sort((a, b) => (a.auto === 'tier2' ? 1 : 0) - (b.auto === 'tier2' ? 1 : 0) || (a.favThin ? 1 : 0) - (b.favThin ? 1 : 0) || b.stake - a.stake || b.p - a.p);
   extra.sort((a, b) => b.kelly - a.kelly || b.ev - a.ev);
   // 1レースで買うのは主な買い目 maxTickets 点と追加の買い目 k 点まで。馬連・三連複の追加（extra.first）は主な買い目より先に予算を入れる
   const top = extra.slice(0, X?.k ?? 0);
@@ -584,7 +605,7 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
     ? null
     : placeWaiting
     ? '複勝の実際のオッズ（発走の2時間ほど前から）が出たら、自信に応じて金額を決めます'
-    : `利益の見込める買い目がないので見送り（当たる確率 ${Math.round(A.minP * 100)}% 以上で、期待値が ${A.minEv.toFixed(1)} 以上の買い目がない。期待値の余裕は、発走前のオッズが確定までに動く分）${
+    : `利益の見込める買い目がないので見送り（当たる確率 ${Math.round(A.minP * 100)}% 以上で期待値が ${A.minEv.toFixed(1)} 以上${A.tier2 ? `、または当たる確率 ${Math.round(A.tier2.minP * 100)}% 以上で期待値が ${A.tier2.minEv.toFixed(2)} 以上（少額）` : ''}の買い目がない。期待値の余裕は、発走前のオッズが確定までに動く分）${
         near.some((t) => t.why === 'thin') ? `。当たりやすい買い目はありますが、当たっても利益が ${A.minProfit}円に届かないので買いません` : near.some((t) => t.why === 'low') ? `。下限 ${LOW_ODDS_LABEL}の複勝は、一緒に来る馬しだいで払戻がぶれるので、当たる確率 ${Math.round(A.lowP * 100)}% 以上のときだけ買います` : ''
       }`;
   // 的中率・期待回収率・プラス収支の確率は、払戻の見込み（複勝は下限〜上限の幅から）で出す（表の期待値と同じ）
@@ -631,7 +652,7 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   // 的中重視の自動（既定）：毎レース、当たる確率と払戻の見込みから自信に応じて金額まで決める。AI単独（オッズを使わない予想）は以前のまま
-  if (st.autoStake && (isAutoKeep(keep) || keep === 'more') && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn, rule: keep === 'more' ? AUTO_STAKE_MORE : AUTO_STAKE });
+  if (st.autoStake && (isAutoKeep(keep) || keep === 'more' || keep === 'strict') && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn, rule: keep === 'more' ? AUTO_STAKE_MORE : keep === 'strict' ? AUTO_STAKE_STRICT : AUTO_STAKE });
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
   // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）
