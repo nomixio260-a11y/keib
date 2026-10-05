@@ -1,10 +1,12 @@
 # 自動更新（止まらない版）。GitHub の schedule は頻繁に落ちる（10分ごとの指定で1日2回、毎時の指定も動かない日があった）ので、
 # 1回の実行の中で「JRA から取り込み → data ブランチに data.json を push」を繰り返し、実行時間の上限（約6時間）が近づいたら
 # 自分で次の実行を予約する（workflow_dispatch）。schedule は止まったときの再開用。
-# 画面（GitHub Pages）は data ブランチの data.json を読むので、Pages を公開し直さなくても更新される。
+# 画面（GitHub Pages）は data ブランチの data.json を読むので、Pages を公開し直さなくても更新される。発走の近いレースは
+# near.json（数十KB）だけで差し替える（構成の署名が同じとき。data.json は圧縮後でも約1MBあるので、スマホの通信量を抑える）。
 #
 #   取り込みの間隔は build-data が状況から決める（NEXT=秒。src/collector/bundle.js の nextRefreshSec）：
-#     - 今日の未確定レースの発走 20分前から発走まで … 2分半ごと（買う直前のオッズを新しくする。即PAT の締切は発走1分前）
+#     - 今日の未確定レースの発走 8分前から発走まで … 1分ごと（そのレースの出馬表とオッズのページだけ取り直す。即PAT の締切は発走1分前）
+#     - 今日の未確定レースの発走 20分前から発走まで … 2分半ごと（買う直前のオッズを新しくする）
 #     - 今日の未確定レースの発走 90分前から結果が出るまで … 5分ごと
 #     - それ以外の開催日・前日発売中（24時間以内に発走）… 20分ごと
 #     - 深夜（JST 0〜7時）・開催がなく出馬表にも変化がない … 1時間ごと（開催一覧を1回見るだけ）
@@ -90,7 +92,7 @@ jobs:
             echo "== $n 回目 $(date -u +%FT%TZ)"
             # ほかから data ブランチに push されたもの（過去の結果の記録など）を取り込む
             if git -C out fetch -q origin data 2>/dev/null; then git -C out reset -q --hard FETCH_HEAD; fi
-            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --history-keep-days 400 --exotic out/odds-final --days-dir out/days --picks out/picks --registrations --skip-if-idle"
+            args="--out out/data.json --near out/near.json --snapshots out/odds --records out/history --history out/history --history-keep-days 400 --exotic out/odds-final --days-dir out/days --picks out/picks --registrations --skip-if-idle"
             [ -s out/data.json ] && args="$args --previous out/data.json"
             if node scripts/build-data.mjs $args > build.log 2>&1; then
               tail -12 build.log

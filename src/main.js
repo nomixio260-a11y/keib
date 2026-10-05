@@ -10,7 +10,7 @@ import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { reviewRace } from './engine/review.js';
 import { runBacktest } from './engine/backtest.js';
 import { buildImportedRace, parseRacesJSON, raceToJSON, CARD_HEADER, PAST_HEADER } from './engine/importer.js';
-import { jstParts, raceStatus, startMs, visibleDays } from './engine/raceTime.js';
+import { jstParts, raceStatus, startMs, visibleDays, NEAR_POST_MIN, applyNear } from './engine/raceTime.js';
 import {
   renderRaceMain,
   renderSummary,
@@ -85,7 +85,8 @@ const shaState = { sha: null, backoffUntil: 0 };
 async function latestDataSha() {
   if (!REMOTE_REPO || Date.now() < shaState.backoffUntil) return null;
   try {
-    const res = await fetch(`https://api.github.com/repos/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/commits/data`, { headers: { Accept: 'application/vnd.github.sha' }, cache: 'no-store' });
+    // cache: 'no-cache'：ブラウザが ETag で確かめ直し、変わっていなければ 304（GitHub の回数の上限に数えられない。2026-10-06 に確認）
+    const res = await fetch(`https://api.github.com/repos/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/commits/data`, { headers: { Accept: 'application/vnd.github.sha' }, cache: 'no-cache' });
     if (!res.ok) {
       shaState.backoffUntil = Date.now() + 15 * 60 * 1000;
       return null;
@@ -396,6 +397,29 @@ function unloadArchive() {
   renderPredict();
 }
 
+/**
+ * 発走の近いレース（data ブランチの near.json。数十KB）：data.json（圧縮後でも約1MB）を読み直さずに、そのレースだけ差し替える。
+ * 前回 data.json を読んだときと構成の署名（レース・結果・取消・馬場）が同じで、10分以内のときだけ（ほかのレースのオッズなどは10分ごとに読み直す）
+ */
+const nearState = { sig: null, fullAt: 0 };
+const NEAR_FULL_EVERY_MS = 10 * 60 * 1000;
+async function tryNear(sha) {
+  if (!sha || !REMOTE_REPO || !data.bundle || !nearState.sig || Date.now() - nearState.fullAt > NEAR_FULL_EVERY_MS) return false;
+  try {
+    const res = await fetch(`https://raw.githubusercontent.com/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/${sha}/near.json`);
+    if (!res.ok) return false;
+    const near = await res.json();
+    if (!near || near.sig !== nearState.sig || !Array.isArray(near.races)) return false;
+    if (String(near.generatedAt || '') < String(data.bundle.nearAt || data.bundle.generatedAt || '')) return false;
+    for (const r of applyNear(data.bundle, near)) raceIndex.set(r.id, r);
+    shaState.sha = sha;
+    data.lastFetch = new Date().toISOString();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
 async function fetchBundle() {
   try {
@@ -406,6 +430,8 @@ async function fetchBundle() {
       data.lastFetch = new Date().toISOString();
       return false;
     }
+    // 構成が同じなら、発走の近いレースだけ差し替える（near.json）
+    if (await tryNear(sha)) return true;
     const remote = sha ? `https://raw.githubusercontent.com/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/${sha}/data.json` : REMOTE_DATA_URL ? `${REMOTE_DATA_URL}?t=${Date.now()}` : null;
     const urls = remote ? [remote, DATA_URL] : [DATA_URL];
     let json = null;
@@ -431,7 +457,8 @@ async function fetchBundle() {
       const inline = inlineBundle();
       if (inline && String(inline.generatedAt || '') > String(json.generatedAt || '')) json = inline;
     }
-    if (data.bundle && String(json.generatedAt || '') < String(data.bundle.generatedAt || '')) return false;
+    // 古い data.json は採用しない（near.json で差し替えたレースより古いものも）
+    if (data.bundle && String(json.generatedAt || '') < String(data.bundle.nearAt || data.bundle.generatedAt || '')) return false;
     data.lastFetch = new Date().toISOString();
     if (data.bundle && json.generatedAt === data.bundle.generatedAt && !!json.live === data.live) {
       // 中身は同じ：確認した時刻だけ更新
@@ -439,6 +466,8 @@ async function fetchBundle() {
       return false;
     }
     setBundle(json);
+    nearState.sig = json.sig || null;
+    nearState.fullAt = Date.now();
     data.loadError = '';
     return true;
   } catch (e) {
@@ -778,7 +807,7 @@ function statusHtml() {
   const t = today();
   const upcoming = days().filter((d) => d.date >= t);
   const label = upcoming.length ? upcoming.map((d) => dayLabel(d.date)).join('・') : data.nextMeeting ? `次の開催 ${dayLabel(data.nextMeeting.date)}（出馬表待ち）` : `${dayLabel(days()[days().length - 1].date)}まで`;
-  const at = data.bundle.checkedAt || data.bundle.generatedAt;
+  const at = [data.bundle.checkedAt || data.bundle.generatedAt, data.bundle.nearAt].filter(Boolean).sort().pop();
   const gen = at ? new Date(Date.parse(at) + 9 * 3600 * 1000).toISOString() : '';
   const genText = gen ? `${Number(gen.slice(5, 7))}/${Number(gen.slice(8, 10))} ${gen.slice(11, 16)}` : '';
   const liveLink = data.liveUrl ? `<a class="live-link" href="${esc(data.liveUrl)}" target="_blank" rel="noopener">リアルタイム版（1分更新）を開く</a>` : '';
@@ -1113,8 +1142,11 @@ function applyDataUpdate() {
   if (state.tab === 'predict') {
     const before = current.pred?.race ? raceSig(current.pred.race) : null;
     const base = state.raceId ? baseRace(state.raceId) : null;
-    if (!current.pred || !base || raceSig(base) !== before) refreshPrediction();
-    else {
+    if (!current.pred || !base || raceSig(base) !== before) {
+      refreshPrediction();
+      // ヘッダーの「更新」の時刻も（near.json で発走の近いレースだけ差し替えたときも）
+      renderTopStatus();
+    } else {
       renderTopStatus();
       renderRailOnly();
       scheduleQuickPicks();
@@ -1140,18 +1172,24 @@ async function poll() {
 }
 
 /**
- * 次に data.json を確かめるまで（ミリ秒）。リアルタイム版は1分。GitHub Pages は、発走30分前〜発走直後のレースがあれば2分
- * （買う直前のオッズを早く出す。data ブランチは発走20分前から約3分ごとに更新）、ほかは5分
+ * 次に data.json を確かめるまで（ミリ秒）。リアルタイム版は1分。GitHub Pages は、発走8分前〜発走のレースがあれば45秒（data ブランチは
+ * 発走8分前から約1分ごとに更新。確かめるのは 304 で回数に数えられず、変わったときは near.json だけ読む）、発走30分前〜発走直後のレースが
+ * あれば2分、ほかは5分
  */
 function pollDelay(now = Date.now()) {
   if (data.live) return 60 * 1000;
-  const soon = (data.bundle?.days || []).some((d) =>
-    d.races.some((r) => {
+  let near = false;
+  let soon = false;
+  for (const d of data.bundle?.days || []) {
+    for (const r of d.races) {
       const st = startMs(r);
-      return st && r.status !== 'result' && st - now > -5 * 60 * 1000 && st - now < 30 * 60 * 1000;
-    }),
-  );
-  return soon ? 2 * 60 * 1000 : 5 * 60 * 1000;
+      if (!st || r.status === 'result') continue;
+      const u = st - now;
+      if (u > 0 && u <= NEAR_POST_MIN * 60 * 1000) near = true;
+      if (u > -5 * 60 * 1000 && u < 30 * 60 * 1000) soon = true;
+    }
+  }
+  return near && REMOTE_REPO ? 45 * 1000 : soon ? 2 * 60 * 1000 : 5 * 60 * 1000;
 }
 
 // ---------------------------------------------------------------------------

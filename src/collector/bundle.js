@@ -5,7 +5,8 @@
 import { listCardMeetings, listRecentResultMeetings, listRaces, fetchCard, fetchResult, fetchOdds, cardToRace, resultToRecord, recordCoverage } from './collect.js';
 import { raceKeyFromCname, CODE_BY_COURSE, parseOdds, parseOddsLinks, parseExoticOdds } from './jra.js';
 import { preRaceCard, computeDayVariants } from '../data/history.js';
-import { jstParts, startMs } from '../engine/raceTime.js';
+import { jstParts, startMs, NEAR_POST_MIN } from '../engine/raceTime.js';
+export { NEAR_POST_MIN };
 
 export { jstParts, startMs, raceStatus } from '../engine/raceTime.js';
 
@@ -105,9 +106,10 @@ export function addPastDaysFromHistory(bundle, records, index, dates) {
 
 /**
  * 次の取り込みまでの目安（秒。Race day ワークフローの間隔）：深夜（JST 0〜7時）は 3600。今日のまだ確定していないレースが
- * 発走20分前〜発走のときは 150（買う直前のオッズを新しくする。発走前のオッズで選ぶ推定では、買う時刻が発走に近いほど収支が良く、
- * 発走10分前に買うと最後の更新の約半分、60分前では損だった。README の開発日記 2026-10-06）、発走90分前〜結果待ちは 300、
- * それ以外の今日と前日発売中（24時間以内に発走）は 1200、開催のない日は 3600。JRA への取得は間隔に関係なく 1.2 秒に1回まで
+ * 発走8分前〜発走のときは 60、発走20分前〜のときは 150（買う直前のオッズを新しくする。発走前のオッズで選ぶ推定では、買う時刻が
+ * 発走に近いほど収支が良く、発走10分前に買うと最後の更新の約半分、60分前では損だった。README の開発日記 2026-10-06）、
+ * 発走90分前〜結果待ちは 300、それ以外の今日と前日発売中（24時間以内に発走）は 1200、開催のない日は 3600。
+ * JRA への取得は間隔に関係なく 1.2 秒に1回まで（発走8分前〜は、そのレースの出馬表とオッズのページだけが取り直しの対象になる：cardTtl）
  */
 export function nextRefreshSec(bundle, { now = Date.now(), today = jstParts(now).date } = {}) {
   const all = bundle.days.flatMap((d) => d.races);
@@ -116,11 +118,54 @@ export function nextRefreshSec(bundle, { now = Date.now(), today = jstParts(now)
   const pendingToday = all.filter((r) => r.date === today && r.status !== 'result');
   if (pendingToday.length) {
     const untils = pendingToday.map((r) => (startMs(r) ? startMs(r) - now : -Infinity));
+    if (untils.some((u) => u > 0 && u <= NEAR_POST_MIN * MIN)) return 60;
     if (untils.some((u) => u > 0 && u <= 20 * MIN)) return 150;
     return untils.some((u) => u < 90 * MIN) ? 300 : 1200;
   }
   const soon = all.some((r) => r.status !== 'result' && startMs(r) && startMs(r) > now && startMs(r) - now < 24 * 3600 * 1000);
   return soon ? 1200 : 3600;
+}
+
+/**
+ * バンドルの構成の署名：開催日・レース・状態（結果の有無）・取消・馬場。オッズや馬体重は入れない。
+ * 画面は、data.json を読んだときの署名と near.json の署名が同じなら、発走の近いレースだけを差し替える（違えば data.json を読み直す）
+ */
+export function bundleSig(bundle) {
+  let h = 2166136261;
+  const add = (v) => {
+    const str = `${v ?? ''}|`;
+    for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  };
+  for (const d of bundle.days || []) {
+    add(d.date);
+    for (const r of d.races || []) {
+      add(r.id);
+      add(r.status);
+      add(r.provisional ? 1 : 0);
+      add(r.result?.length || 0);
+      add(r.entries?.length || 0);
+      add((r.entries || []).filter((e) => e.scratched).length);
+      add(r.going);
+    }
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+/** 発走の近いレース（near.json）：今日のまだ確定していないレースで、発走の30分前〜発走15分後のもの（レースはバンドルと同じ形） */
+export function nearRaces(bundle, { now = Date.now(), today = jstParts(now).date, before = 30, after = 15 } = {}) {
+  const out = [];
+  for (const d of bundle.days || []) {
+    if (d.date !== today) continue;
+    for (const r of d.races || []) {
+      const st = startMs(r);
+      if (!st || r.status === 'result' || r.provisional) continue;
+      if (st - now <= before * MIN && now - st <= after * MIN) out.push(r);
+    }
+  }
+  return out;
+}
+/** near.json の中身（data.json と同じ取り込みの回で作る）。generatedAt と sig は data.json と同じ */
+export function nearFile(bundle, opts = {}) {
+  return { version: 1, generatedAt: bundle.generatedAt, sig: bundle.sig || bundleSig(bundle), races: nearRaces(bundle, opts) };
 }
 
 /** 出馬表（オッズ）を取り直す間隔：発走が近いほど短く */
@@ -129,6 +174,7 @@ export function cardTtl(race, now) {
   if (!st) return 10 * MIN;
   const until = st - now;
   if (until <= 0) return 3 * MIN; // 発走後：締切時点のオッズを一度取り直す
+  if (until <= NEAR_POST_MIN * MIN) return 45 * 1000; // 発走8分前〜：取り込みのたびに（約1分ごと）
   if (until <= 60 * MIN) return 2 * MIN;
   if (until <= 3 * 60 * MIN) return 10 * MIN;
   return 30 * MIN;

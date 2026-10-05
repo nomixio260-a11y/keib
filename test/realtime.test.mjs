@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { jstParts, startMs, raceStatus, untilText, visibleDays, RECENT_DAYS } from '../src/engine/raceTime.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, pruneBundle, cardTtl, nextRefreshSec } from '../src/collector/bundle.js';
+import { jstParts, startMs, raceStatus, untilText, visibleDays, RECENT_DAYS, NEAR_POST_MIN, applyNear } from '../src/engine/raceTime.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, pruneBundle, cardTtl, nextRefreshSec, bundleSig, nearRaces, nearFile } from '../src/collector/bundle.js';
 import { indexHistory, preRaceCard, computeStats, jockeyRates } from '../src/data/history.js';
 import { speedFigure } from '../src/engine/speed.js';
 import { predictRace } from '../src/engine/model.js';
@@ -32,6 +32,9 @@ test('出馬表を取り直す間隔は発走が近いほど短い', () => {
   const race = { date: '2026-10-04', startTime: '15:45' };
   const st = startMs(race);
   assert.equal(cardTtl(race, st - 30 * MIN), 2 * MIN);
+  // 発走8分前〜：取り込みのたびに取り直す（約1分ごと）
+  assert.equal(cardTtl(race, st - (NEAR_POST_MIN - 1) * MIN), 45 * 1000);
+  assert.equal(cardTtl(race, st - (NEAR_POST_MIN + 1) * MIN), 2 * MIN);
   assert.equal(cardTtl(race, st - 2 * 60 * MIN), 10 * MIN);
   assert.equal(cardTtl(race, st - 24 * 60 * MIN), 30 * MIN);
   assert.equal(cardTtl(race, st + MIN), 3 * MIN);
@@ -74,19 +77,65 @@ function record(id, date, horses, { course = '東京', distance = 1600, surface 
   };
 }
 
-test('取り込みの間隔：発走20分前〜発走は2分半ごと（買う直前のオッズを新しく）、90分前〜結果待ちは5分、深夜は1時間', () => {
+test('取り込みの間隔：発走8分前〜発走は1分、20分前〜は2分半ごと（買う直前のオッズを新しく）、90分前〜結果待ちは5分、深夜は1時間', () => {
   const today = '2026-10-10';
   const at = (hhmm) => Date.parse(`${today}T${hhmm}:00+09:00`);
   const race = (startTime, status = 'card') => ({ date: today, startTime, status });
   const b = { days: [{ date: today, races: [race('10:05'), race('12:00'), race('16:30')] }] };
   assert.equal(nextRefreshSec(b, { now: at('09:00'), today }), 300);
   assert.equal(nextRefreshSec(b, { now: at('09:50'), today }), 150);
+  assert.equal(nextRefreshSec(b, { now: at('09:58'), today }), 60);
+  assert.equal(nextRefreshSec(b, { now: at('10:04'), today }), 60);
   assert.equal(nextRefreshSec(b, { now: at('10:20'), today }), 300);
   b.days[0].races[0].status = 'result';
   assert.equal(nextRefreshSec(b, { now: at('10:20'), today }), 1200);
   assert.equal(nextRefreshSec(b, { now: at('11:45'), today }), 150);
   assert.equal(nextRefreshSec(b, { now: at('03:00'), today }), 3600);
   assert.equal(nextRefreshSec({ days: [] }, { now: at('12:00'), today }), 3600);
+});
+
+test('発走の近いレース（near.json）：発走30分前〜発走15分後のまだ確定していないレース、構成の署名、画面での差し替え', () => {
+  const today = '2026-10-10';
+  const at = (hhmm) => Date.parse(`${today}T${hhmm}:00+09:00`);
+  const mk = (id, startTime, extra = {}) => ({ id, date: today, startTime, status: 'card', going: '良', entries: [{ number: 1, odds: 2.5 }, { number: 2, odds: 4.1 }], ...extra });
+  const bundle = { generatedAt: '2026-10-10T01:00:00.000Z', days: [{ date: '2026-10-04', races: [mk('old', '15:00', { date: '2026-10-04', status: 'result', result: [1, 2] })] }, { date: today, races: [mk('a', '10:05'), mk('b', '10:40'), mk('c', '11:30'), mk('d', '09:40', { status: 'result', result: [2, 1] })] }] };
+  // 10:00：a（5分後）と b（40分後 → 窓の外）、d は確定済み
+  assert.deepEqual(nearRaces(bundle, { now: at('10:00'), today }).map((r) => r.id), ['a']);
+  // 10:15：a（10分前に発走・結果待ち）と b（25分後）
+  assert.deepEqual(nearRaces(bundle, { now: at('10:15'), today }).map((r) => r.id), ['a', 'b']);
+  // 署名：オッズ・馬体重が変わっても同じ、結果・取消・馬場・レースの増減で変わる
+  const sig = bundleSig(bundle);
+  assert.match(sig, /^[0-9a-f]{8}$/);
+  const odds = structuredClone(bundle);
+  odds.days[1].races[0].entries[0].odds = 1.9;
+  odds.days[1].races[0].entries[0].bodyWeight = 480;
+  assert.equal(bundleSig(odds), sig);
+  for (const change of [
+    (b) => Object.assign(b.days[1].races[1], { status: 'result', result: [1, 2] }),
+    (b) => (b.days[1].races[2].entries[1].scratched = true),
+    (b) => (b.days[1].races[0].going = '稍重'),
+    (b) => b.days[1].races.push(mk('e', '12:00')),
+  ]) {
+    const x = structuredClone(bundle);
+    change(x);
+    assert.notEqual(bundleSig(x), sig);
+  }
+  // near.json：data.json と同じ generatedAt・署名
+  const near = nearFile({ ...bundle, sig }, { now: at('10:15'), today });
+  assert.equal(near.sig, sig);
+  assert.equal(near.generatedAt, bundle.generatedAt);
+  assert.deepEqual(near.races.map((r) => r.id), ['a', 'b']);
+  // 画面：同じ ID のレースだけ差し替える（generatedAt はそのまま、nearAt に near.json の時刻）
+  const app = structuredClone(bundle);
+  const fresh = { ...near, generatedAt: '2026-10-10T01:16:00.000Z', races: [{ ...near.races[0], oddsAt: '2026-10-10T01:15:30.000Z', entries: [{ number: 1, odds: 2.2 }, { number: 2, odds: 4.6 }] }, mk('zz', '10:20')] };
+  const replaced = applyNear(app, fresh);
+  assert.deepEqual(replaced.map((r) => r.id), ['a']);
+  assert.equal(app.days[1].races[0].entries[0].odds, 2.2);
+  assert.equal(app.days[1].races.length, 4);
+  assert.equal(app.generatedAt, bundle.generatedAt);
+  assert.equal(app.nearAt, '2026-10-10T01:16:00.000Z');
+  assert.deepEqual(applyNear(null, fresh), []);
+  assert.deepEqual(applyNear(app, null), []);
 });
 
 test('レース前時点の出馬表は、そのレースより前の走だけを使う', () => {

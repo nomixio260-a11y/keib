@@ -16,6 +16,8 @@
 //             --past-days 14（data.json に入れる過去の期間。日数。少なくとも --past の開催日数は入れる）
 //             --registrations（特別登録＝来週の特別レースの登録馬から、出馬表が出る前の暫定のレースを入れる。出馬表が出たら消える）
 //             --history-keep-days 400（--history の置き場から、この日数より古い結果の記録を消す。data ブランチが大きくなりすぎないように）
+//             --near <path>（発走の近いレース：今日のまだ確定していないレースで発走30分前〜発走15分後のものだけの小さなファイル。
+//                           画面は構成の署名が同じなら data.json を読み直さずにこれで差し替える）
 //
 // 集めたデータは個人の分析用です。不特定多数が見られる場所には置かないでください。
 
@@ -23,7 +25,7 @@ import path from 'node:path';
 import { copyFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createJraClient } from '../src/collector/client.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs, upsertRace, sortBundle, nextRefreshSec } from '../src/collector/bundle.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs, upsertRace, sortBundle, nextRefreshSec, bundleSig, nearFile } from '../src/collector/bundle.js';
 import { listRegistrations, fetchRegistrations, registrationToRace, addProvisionalRaces, removeProvisionalRaces } from '../src/collector/registrations.js';
 import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
@@ -194,7 +196,15 @@ if (opt('picks', null)) {
     log(`買い目の記録に失敗：${e.message}`);
   }
 }
+// 構成の署名（画面が near.json だけで差し替えてよいかを決める）
+bundle.sig = bundleSig(bundle);
 await writeJson(out, bundle);
+// 発走の近いレース（--near <path>）：画面は data.json（数MB）を読み直さずに、これ（数十KB）で発走前のオッズを新しくする
+if (opt('near', null)) {
+  const near = nearFile(bundle, { today });
+  await writeJson(path.resolve(opt('near', null)), near);
+  log(`発走の近いレース：${near.races.length}レース（near.json）`);
+}
 // 結果の出そろった日をアーカイブに書く（変わっていなければ書かない）
 if (daysDir) {
   let wrote = 0;

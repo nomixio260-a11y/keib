@@ -107,12 +107,15 @@ test('自動の金額：強い買い目（当たる確率 55% 以上・期待値
   assert.ok(Math.abs(autoShare({ ...base, r: L1.minR }).share - L1.share) < 1e-9);
   assert.ok(Math.abs(autoShare({ ...base, r: L1.minR + 0.02 }).share - (L1.share + L1.slope * 0.02)) < 1e-9);
   assert.equal(autoShare({ ...base, r: 2 }).share, 1);
-  // 単勝は R̂ の下限が高い（minRBy.win。直前のオッズでは単勝の R̂ 0.92〜0.96 は損だった）
-  const winMin = L1.minRBy.win;
-  assert.ok(winMin > L1.minR);
-  assert.equal(autoShare({ ...base, type: 'win', r: winMin - 0.001 }).share, 0);
-  assert.ok(Math.abs(autoShare({ ...base, type: 'win', r: winMin }).share - L1.share) < 1e-9);
-  assert.ok(Math.abs(autoShare({ ...base, type: 'win', r: winMin + 0.01 }).share - (L1.share + L1.slope * 0.01)) < 1e-9);
+  // 調整は複勝だけ（直前のオッズでは単勝の調整の買い目は損だった）。単勝は強い買い目の条件を満たすときだけ
+  assert.ok(A.adjust.every((L) => !L.types.includes('win')));
+  assert.equal(autoShare({ ...base, type: 'win', r: 1.2 }).share, 0);
+  assert.equal(autoShare({ ...base, type: 'win', p: 0.6, odds: 2.2, ev: 1.32, kelly: 0.27, r: 1.0 }).level, 'strong');
+  // minRBy：券種ごとの下限を指定できる（いまは使っていない）
+  const byType = { ...A, adjust: [{ ...L1, types: ['win', 'place'], minRBy: { win: 0.96 } }] };
+  assert.equal(autoShare({ ...base, type: 'win', r: 0.95 }, byType).share, 0);
+  assert.ok(Math.abs(autoShare({ ...base, type: 'win', r: 0.96 }, byType).share - L1.share) < 1e-9);
+  assert.ok(Math.abs(autoShare({ ...base, type: 'place', r: L1.minR }, byType).share - L1.share) < 1e-9);
   // 当たる確率が1つ目の下限（45%）未満は、複勝で R̂ が2つ目の下限以上のときだけ（単勝は買わない）
   assert.equal(autoShare({ ...base, type: 'win', p: L1.minP - 0.03, r: 1.0 }).share, 0);
   assert.ok(autoShare({ ...base, type: 'place', p: L1.minP - 0.03, r: L2.minR + 0.01 }).share > 0);
@@ -163,8 +166,13 @@ test('利益 100円に届かない金額は届く最低額まで上げる（予�
   assert.equal(up.picked[0].auto, 'adjust');
   // オッズが古いときは上げない（参加の買い目も出さない）→ 見送り
   assert.equal(pickAuto([t], 1000, A, { fresh: false }).picked.length, 0);
-  // 1.2 倍は 500円要る（予算の 40% を超える）→ 上げない。参加の買い目（当たる確率 55% 以上・R̂ 0.90 以上、40% まで）にも届かない
-  assert.equal(pickAuto([{ ...t, odds: 1.2 }], 1000).picked.length, 0);
+  // 1.2 倍は 500円要る（予算の 40% を超える）→ 上げない。当たる確率 60% 以上・R̂ 0.92 以上なら参加の買い目の上の段（60% まで）で 500円
+  const t12 = pickAuto([{ ...t, odds: 1.2 }], 1000).picked;
+  assert.equal(t12.length, 1);
+  assert.equal(t12[0].auto, 'join');
+  assert.equal(t12[0].stake, 500);
+  // 当たる確率 58% では上の段に届かず、下の段（40% まで）にも入らない → 見送り
+  assert.equal(pickAuto([{ ...t, odds: 1.2, p: 0.58 }], 1000).picked.length, 0);
   // 参加の買い目：R̂ が下限に届かない（強い買い目でもない）複勝で、当たる確率 55% 以上・R̂ 0.90 以上 → 当たって +100円の最低額
   const j1 = { type: 'place', idx: [1], p: 0.58, odds: 1.4, ev: 0.98, kelly: 0, r: A.join.minR + 0.005 };
   const j2 = { type: 'place', idx: [2], p: 0.7, odds: 1.25, ev: 0.97, kelly: 0, r: A.join.minR + 0.01 };
@@ -181,6 +189,16 @@ test('利益 100円に届かない金額は届く最低額まで上げる（予�
   assert.equal(pickAuto([{ ...j1, p: A.join.minP - 0.01 }, { ...j2, r: A.join.minR - 0.01 }, w], 1000).picked.length, 0);
   // 予算が小さいと最低額が予算の 40% を超える → 見送り
   assert.equal(pickAuto([j2], 500).picked.length, 0);
+  // 上の段（当たる確率 60% 以上・R̂ 0.92 以上）は予算の 60% まで：1.2 倍の複勝（500円）も買い、下の段より先に選ぶ
+  const H = A.join.high;
+  const h1 = { type: 'place', idx: [4], p: 0.78, odds: 1.2, ev: 0.96, kelly: 0, r: H.minR + 0.005 };
+  const hp = pickAuto([j1, j2, h1], 1000);
+  assert.equal(hp.picked[0].idx[0], 4);
+  assert.equal(hp.picked[0].stake, 500);
+  assert.equal(hp.picked[0].auto, 'join');
+  // R̂ が上の段の下限に届かなければ、500円は予算の 40% を超えるので買わない（下の段の j2 を選ぶ）
+  const hp2 = pickAuto([j1, j2, { ...h1, r: H.minR - 0.005 }], 1000);
+  assert.equal(hp2.picked[0].idx[0], 2);
 });
 
 test('オッズの新しさ：発走の freshMin 分前より後に取ったオッズ・結果の出たレース・時刻のわからないレースは新しい', () => {

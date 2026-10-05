@@ -178,7 +178,7 @@ export function joinSection(model = STAKE_MODEL) {
         <thead><tr><th>期間</th><th>買い方</th><th>買ったレース<small>（全レースのうち）</small></th><th>的中率</th><th>回収率</th><th>収支</th></tr></thead>
         <tbody>${body}</tbody>
       </table></div>
-      <p class="panel-note">見送りのレースでいちばん多いのは、当たる確率 5割以上の複勝はあるが、このレースの条件で見込む回収率（R̂）が下限に届かないレースでした。直前のオッズでは、当たる確率 ${pct(J.minP, 0)} 以上・R̂ ${pct(J.minR, 0)} 以上の複勝は回収率 約97%・的中率 約64% で、ほとんど損をしません。そこで、①ほかに買い目がないレースではこの複勝を<b>参加の買い目</b>（「参加」）として、当たって +${AUTO_STAKE.minProfit}円になる最低額で買い、②当たっても +${AUTO_STAKE.minProfit}円に届かない金額の買い目は最低額まで上げ（予算の ${pct(AUTO_STAKE.minStakeUp, 0)} まで）、③単勝の R̂ の下限を ${pct(AUTO_STAKE.adjust[0].minRBy?.win ?? AUTO_STAKE.adjust[0].minR, 0)} に上げました（直前のオッズでは単勝の R̂ 92〜96% は回収率 約93% で損）。参加の買い目は発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけで（10分前のオッズでは回収率 92% と損）、1日の予算の最後の ${AUTO_STAKE.dayBudget.reserve}レース分は使いません（早いレースの参加の買い目が、後のレースの強い買い目の予算を食わないように）。</p>
+      <p class="panel-note">「前の規則」は参加の買い目を入れる前（2026-10-06 の7時まで）です。見送りのレースでいちばん多いのは、当たる確率 5割以上の複勝はあるが、このレースの条件で見込む回収率（R̂）が下限に届かないレースでした。直前のオッズでは、当たる確率 ${pct(J.minP, 0)} 以上・R̂ ${pct(J.minR, 0)} 以上の複勝は回収率 97〜99%・的中率 64〜70% で、ほとんど損をしません。そこで、①ほかに買い目がないレースではこの複勝を<b>参加の買い目</b>（「参加」）として、当たって +${AUTO_STAKE.minProfit}円になる最低額で買い（予算の ${pct(J.maxShare, 0)} まで。当たる確率 ${pct(J.high.minP, 0)} 以上・R̂ ${pct(J.high.minR, 0)} 以上なら ${pct(J.high.maxShare, 0)} まで：オッズ 1.2 倍の当たりやすい複勝も入る）、②当たっても +${AUTO_STAKE.minProfit}円に届かない金額の買い目は最低額まで上げ（予算の ${pct(AUTO_STAKE.minStakeUp, 0)} まで）、③単勝は強い買い目だけにしました（直前のオッズでは、単勝の調整の買い目は R̂ 96% 以上でも回収率 約95% で損）。参加の買い目は発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけで（10分前のオッズでは回収率 92% と損）、1日の予算の最後の ${AUTO_STAKE.dayBudget.reserve}レース分は使いません（早いレースの参加の買い目が、後のレースの強い買い目の予算を食わないように）。</p>
     </section>`;
 }
 
@@ -215,7 +215,7 @@ export function adjustSection(model = STAKE_MODEL) {
         <tbody>${causes}</tbody>
       </table></div>
       <p class="panel-note">負けの原因は2つでした。(1) <b>いま高く見えるオッズほど確定までに下がる</b>：選んだ買い目の払戻は見込みの 85〜93%（発走前のオッズのずれで、たまたま高く見えている買い目を選びやすい）。(2) <b>AI と市場（単勝オッズ）の見立ての差が大きいほど、当たる確率を高く見すぎる</b>（見込みより 3〜4ポイント低い）。この2つで、2段目は回収率 96%・3段目のワイドは 91% と、長い期間で損でした。</p>
-      <p class="panel-note">そこで、買い目ごとに<b>そのレースの条件（AI の期待値・市場の期待値・オッズ・頭数）で見込む回収率 R̂</b> を出し、2段目・3段目をやめて、R̂ に応じて金額を決めるようにしました（R̂ ${pct(L1.minR, 0)} で予算の ${pct(L1.share, 0)}、1ポイントごとに ${L1.slope}%。単勝は R̂ ${pct(L1.minRBy?.win ?? L1.minR, 0)} から。複勝は当たる確率 ${pct(L2.minP, 0)} 以上・R̂ ${pct(L2.minR, 0)} から）。R̂ の関係は、確かめる期間より前の買い目だけで推定しています（${esc(model.rows ? `単勝 ${model.rows.win.toLocaleString('ja-JP')}・複勝 ${model.rows.place.toLocaleString('ja-JP')}点` : '')}）。</p>
+      <p class="panel-note">そこで、買い目ごとに<b>そのレースの条件（AI の期待値・市場の期待値・オッズ・頭数）で見込む回収率 R̂</b> を出し、2段目・3段目をやめて、R̂ に応じて金額を決めるようにしました（R̂ ${pct(L1.minR, 0)} で予算の ${pct(L1.share, 0)}、1ポイントごとに ${L1.slope}%。当たる確率 ${pct(L2.minP, 0)} 以上の複勝は R̂ ${pct(L2.minR, 0)} から。2026-10-06 の8時から、調整の買い目は複勝だけ）。R̂ の関係は、確かめる期間より前の買い目だけで推定しています（${esc(model.rows ? `単勝 ${model.rows.win.toLocaleString('ja-JP')}・複勝 ${model.rows.place.toLocaleString('ja-JP')}点` : '')}）。</p>
       <div class="table-scroll"><table class="bt-table bt-adjust-table">
         <thead><tr><th>期間</th><th>買い方</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
         <tbody>${rows}</tbody>

@@ -79,16 +79,19 @@ export const AUTO_STAKE = {
   // 自動で使う券種（組み合わせの券種は、発走前のオッズで選ぶと学習期間のどの年も損だった）
   types: ['win', 'place'],
   // レースごとの調整：R̂ の下限 minR・その時の割合 share・R̂ が 0.01 上がるごとに slope × 0.01 だけ増やす（上限は予算の全額）
-  // minRBy：券種ごとの下限（単勝は 0.96 から。直前のオッズで買うと、単勝の R̂ 0.92〜0.96 は回収率 約93% で損だった。2026-10-06）
+  // 調整は複勝だけ（直前のオッズでは、単勝の調整の買い目は R̂ 0.96 以上でも回収率 約95% で損だった。外すと 2024年4月〜2026年6月の
+  // 収支 +2.5k・的中率 +0.5 ポイント、買うレースはほぼ同じ。2026-10-06 8時）。minRBy で券種ごとの下限も指定できる
   adjust: [
-    { types: ['win', 'place'], minP: 0.45, minEv: 1.0, minR: 0.92, minRBy: { win: 0.96 }, share: 0.2, slope: 15 },
+    { types: ['place'], minP: 0.45, minEv: 1.0, minR: 0.92, share: 0.2, slope: 15 },
     { types: ['place'], minP: 0.4, minEv: 0, minR: 0.97, share: 0.2, slope: 10 },
   ],
   // 金額が小さくて当たっても利益が minProfit 円に届かない買い目は、届く最低額まで上げる（予算のこの割合まで。それより多く要るなら見送り）
   minStakeUp: 0.4,
   // 参加の買い目（見送りを減らす。2026-10-06）：ほかに買い目がないレースで、当たる確率 minP 以上・R̂ minR 以上の複勝のうち
   // 当たる確率のいちばん高い1点を、当たって minProfit 円になる最低額で（予算の maxShare まで）。直前のオッズで回収率 約97%・的中率 約64%
-  join: { types: ['place'], minP: 0.55, minR: 0.9, maxShare: 0.4 },
+  // high：先に試す上の段（当たる確率 60% 以上・R̂ 0.92 以上なら予算の 60% まで。オッズの低い当たりやすい複勝も入る。直前のオッズで
+  // 回収率 約99%・的中率 約68%。2026-10-06 8時）。なければ下の段（minP・minR・maxShare）
+  join: { types: ['place'], minP: 0.55, minR: 0.9, maxShare: 0.4, high: { minP: 0.6, minR: 0.92, maxShare: 0.6 } },
   // 参加の買い目と最低額へ上げる買い目は、オッズが発走の freshMin 分前より後に取ったものだけ（直前のオッズなら回収率 約97%、
   // 発走10分前のオッズでは 92% と損だった。2026-10-06）。結果の出たレース・オッズの時刻がわからない過去のレースは対象
   freshMin: 8,
@@ -202,18 +205,24 @@ export function pickAuto(cands, budget, A = AUTO_STAKE, { fresh = true } = {}) {
   if (j) picked.push(j);
   return { picked, ranked };
 }
-/** 参加の買い目（A.join）：当たる確率 minP 以上・R̂ minR 以上の複勝のうち、当たる確率のいちばん高い1点を、当たって minProfit 円になる最低額で */
+/**
+ * 参加の買い目（A.join）：当たる確率 minP 以上・R̂ minR 以上の複勝のうち、当たる確率のいちばん高い1点を、当たって minProfit 円になる
+ * 最低額で（予算の maxShare まで）。上の段（J.high）を先に試し、なければ下の段
+ */
 export function joinPick(cands, budget, A = AUTO_STAKE, left = budget) {
   const J = A.join;
   if (!J) return null;
-  let best = null;
-  for (const t of cands) {
-    if (!J.types.includes(t.type) || !(t.odds >= MIN_ODDS) || !(t.p >= J.minP) || !(t.r >= J.minR)) continue;
-    const need = minStakeFor(t.odds, A.minProfit);
-    if (need > budget * J.maxShare || need > left) continue;
-    if (!best || t.p > best.p) best = { ...t, stake: need, share: need / budget, auto: 'join' };
+  for (const T of [J.high, J].filter(Boolean)) {
+    let best = null;
+    for (const t of cands) {
+      if (!J.types.includes(t.type) || !(t.odds >= MIN_ODDS) || !(t.p >= T.minP) || !(t.r >= T.minR)) continue;
+      const need = minStakeFor(t.odds, A.minProfit);
+      if (need > budget * T.maxShare || need > left) continue;
+      if (!best || t.p > best.p) best = { ...t, stake: need, share: need / budget, auto: 'join' };
+    }
+    if (best) return best;
   }
-  return best;
+  return null;
 }
 /** 1日の予算の選択肢（1レースの予算の何倍まで）。'auto' は AUTO_STAKE.dayBudget.mult、0 は上限なし */
 export const DAY_BUDGET_OPTIONS = [
@@ -320,7 +329,7 @@ export const STRATEGIES = {
   // minOdds：上の MIN_ODDS（以前は的中重視だけ 1.05：当たっても元返しの 1.0 倍だけを買わなかった）
   // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
-  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、単勝・複勝の買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、さらにそのレースの条件（AI と市場の見立て・オッズ・頭数）で見込む回収率（R̂）を出して、1つの式で金額を決め、1レース1点を買います。当たる確率 55% 以上で期待値が 1.2 以上の強い買い目は自信に応じて上限まで、それ以外は R̂ が高いほど多く（R̂ が 92% 未満なら買わない。単勝は 96% から。予算は上限で、使い切るとは限りません）。どれもないレースでも、発走直前のオッズで当たる確率 55% 以上・R̂ 90% 以上の複勝があれば、参加の買い目として当たって 100円の利益になる最低額で買います。当たっても 100円の利益に届かない金額なら、届く最低額まで上げます（予算の4割まで）。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない期間、その時点より前のデータだけで学習したモデル）は、バックテスト画面にあります。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
+  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、単勝・複勝の買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、さらにそのレースの条件（AI と市場の見立て・オッズ・頭数）で見込む回収率（R̂）を出して、1つの式で金額を決め、1レース1点を買います。当たる確率 55% 以上で期待値が 1.2 以上の強い買い目は自信に応じて上限まで、それ以外は複勝で R̂ が高いほど多く（R̂ が 92% 未満なら買わない。単勝は強い買い目だけ。予算は上限で、使い切るとは限りません）。どれもないレースでも、発走直前のオッズで当たる確率 55% 以上・R̂ 90% 以上の複勝があれば、参加の買い目として当たって 100円の利益になる最低額で買います（当たる確率 60% 以上・R̂ 92% 以上なら予算の6割まで、ほかは4割まで）。当たっても 100円の利益に届かない金額なら、届く最低額まで上げます（予算の4割まで）。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない期間、その時点より前のデータだけで学習したモデル）は、バックテスト画面にあります。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
   // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、

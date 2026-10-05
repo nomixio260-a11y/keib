@@ -14,6 +14,28 @@ export function startMs(race) {
   return Date.parse(`${race.date}T${race.startTime}:00+09:00`);
 }
 
+/** 発走の近いレース（分）：この時間より発走が近いレースは、オッズを取り直す間隔を短くし（Race day）、画面も短い間隔で確かめる */
+export const NEAR_POST_MIN = 8;
+
+/**
+ * 画面：near.json（発走の近いレース）のレースを、読み込み中のバンドルに差し替える（同じ ID のレースだけ）。
+ * 差し替えたレースを返す。near.json の時刻は bundle.nearAt に入れる（generatedAt は data.json を読んだときのまま。
+ * 次に data.json を読むとき、ほかのレースの更新を「同じ中身」と見落とさないように）
+ */
+export function applyNear(bundle, near) {
+  const out = [];
+  if (!bundle || !Array.isArray(near?.races)) return out;
+  for (const r of near.races) {
+    const day = bundle.days?.find((d) => d.date === r.date);
+    const i = day ? day.races.findIndex((x) => x.id === r.id) : -1;
+    if (i < 0) continue;
+    day.races[i] = r;
+    out.push(r);
+  }
+  if (near.generatedAt) bundle.nearAt = near.generatedAt;
+  return out;
+}
+
 /** result（確定）・live（発走済みで結果待ち）・closing（締切間近）・open（発売中） */
 export function raceStatus(race, now = Date.now()) {
   if (race?.result?.length) return 'result';
