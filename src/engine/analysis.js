@@ -3,6 +3,7 @@
 
 import { COURSE_STATS } from './courseStats.js';
 import { LOW_ODDS_LABEL, AUTO_STAKE, MIN_ODDS } from './bets.js';
+import { BET_LABEL } from './constants.js';
 import { horseComment } from './comments.js';
 
 const STYLES = ['逃げ', '先行', '差し', '追込'];
@@ -23,14 +24,18 @@ function verdictOf(pred, rec) {
   const race = pred.race;
   if (race.provisional) return { kind: 'wait', title: '出馬表待ち', text: '特別登録の段階です。枠順・騎手・単勝オッズが出てから、期待値と当たる確率で買い目を決めます。' };
   if (pred.noOdds || rec?.noOdds) return { kind: 'wait', title: 'オッズ待ち', text: '単勝オッズが出たら、期待値と当たる確率で買い目を決めます。' };
-  // 的中重視の自動：自信に応じて金額まで決めた買い目
+  // 的中重視の自動：自信に応じて金額まで決めた買い目（買う順：馬連・三連複の追加 → 主な買い目 → 複勝の追加）
   if (rec?.auto && rec.tickets?.length) {
-    const t = rec.tickets.find((x) => x.auto !== 'extra');
-    const ex = rec.tickets.filter((x) => x.auto === 'extra');
-    const exText = ex.length ? `${t ? 'ほかに、' : ''}当たる確率はやや低いが期待値の高い買い目（${ex.map((x) => `当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}`).join('、')}）を控えめの金額（${ex.map((x) => `${x.stake.toLocaleString('ja-JP')}円`).join('・')}）で${t ? '足します' : '買います'}。` : '';
-    if (!t) return { kind: 'buy', title: '買い（控えめ）', text: exText, tickets: rec.tickets };
-    const why = t.auto === 'classic' ? 'これまでの的中重視の条件' : `当たる確率 ${pc(t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv} 以上`;
-    return { kind: 'buy', title: '買い', text: `${why}を満たす、利益の見込める買い目があります（当たる確率 ${pc(t.pHit)}・期待値 ${t.ev.toFixed(2)}）。自信に応じて予算の ${Math.round((t.share ?? 1) * 100)}%（${t.stake.toLocaleString('ja-JP')}円）を買い、当たれば少なくとも +${Math.round(t.stake * (t.odds - 1)).toLocaleString('ja-JP')}円です。${exText}`, tickets: rec.tickets };
+    const part = (x) => {
+      const head =
+        x.auto === 'extra'
+          ? `期待値の高い追加の買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}）`
+          : `${x.auto === 'classic' ? 'これまでの的中重視の条件' : `当たる確率 ${pc(x.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 超`}を満たす買い目（当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}）`;
+      return `${head}に予算の ${Math.round((x.share ?? 1) * 100)}%（${x.stake.toLocaleString('ja-JP')}円）。当たれば少なくとも +${Math.round(x.stake * (x.odds - 1)).toLocaleString('ja-JP')}円`;
+    };
+    const hasMain = rec.tickets.some((x) => x.auto !== 'extra');
+    const firstNote = hasMain && rec.tickets[0].auto === 'extra' ? '馬連・三連複は学習期間で回収率がいちばん高いので先に予算を入れ、主な買い目は残りの予算で買います。' : '';
+    return { kind: 'buy', title: hasMain ? '買い' : '買い（期待値重視）', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${firstNote}`, tickets: rec.tickets };
   }
   if (rec?.auto && rec.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason, dropped: rec.dropped };
   if (rec?.tickets?.length) {
