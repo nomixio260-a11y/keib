@@ -1,7 +1,7 @@
 // バックテスト：結果のわかっている過去レースで予想と買い方を検証する。
 
 import { predictRace, VOLATILITY_LABELS } from './model.js';
-import { recommendBets, buildCandidates, marksToIndex, ticketLabel, resolveBlend } from './bets.js';
+import { recommendBets, buildCandidates, marksToIndex, ticketLabel, resolveBlend, DEFAULT_TYPES } from './bets.js';
 
 /** 払戻表のキー（馬番で表す） */
 export function payoutKey(type, nums) {
@@ -72,8 +72,9 @@ export const BT_STRATEGIES = [
   },
   {
     key: 'ai',
-    label: 'AI推奨（的中重視の自動・単複・1R上限千円）',
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, types: TANPUKU, blend: settings?.blend }).tickets,
+    label: 'AI推奨（的中重視の自動・既定の券種・1R上限千円）',
+    // 既定の券種（ワイド以外）：自動では期待値の高い馬連・三連複を追加の買い目にする（2026-10-05）。AI単独は以前の買い方なので単複のまま
+    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, types: pred.mlAi ? TANPUKU : DEFAULT_TYPES, blend: settings?.blend }).tickets,
   },
   {
     key: 'aiCareful',
