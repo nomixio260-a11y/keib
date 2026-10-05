@@ -106,4 +106,9 @@ test('1日分の記録：発走1分前を過ぎたレースは記録しない。
     }
   }
   assert.ok(cut > 0, '予算があれば買っていたレースで確かめている');
+  // r1 の結果が出ても同じ（記録した金額は使ったまま。結果の出たレースを外すと、後のレースに予算が戻ってしまう）
+  const withResult = races.map((r, i) => (i === 0 ? { ...r, result: r.entries.slice(0, 3).map((e) => e.number), status: 'result' } : r));
+  const after2 = dayPicks(withResult, big, { now: T0 + 31 * 60000 });
+  assert.deepEqual(Object.keys(after2).sort(), Object.keys(after).sort());
+  for (const e of Object.values(after2)) assert.equal(e.used, 0);
 });

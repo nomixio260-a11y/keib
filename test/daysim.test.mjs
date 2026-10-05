@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { predictRace } from '../src/engine/model.js';
-import { recommendBets, planDay, ticketSharpe, AUTO_STAKE, resolveDayBudget, DAY_BUDGET_OPTIONS, autoShare, pickAuto, expectedReturn } from '../src/engine/bets.js';
+import { recommendBets, planDay, ticketSharpe, AUTO_STAKE, resolveDayBudget, DAY_BUDGET_OPTIONS, autoShare, pickAuto, expectedReturn, profitOk, minStakeFor, oddsFresh } from '../src/engine/bets.js';
 import { raceOutcomes, simulateDay } from '../src/engine/daySim.js';
 import { makeRace } from './fixtures/race.mjs';
 
@@ -101,30 +101,115 @@ test('自動の金額：強い買い目（当たる確率 55% 以上・期待値
   // 1.1 倍以下は当たる確率 lowP 以上だけ
   assert.equal(autoShare({ type: 'place', p: 0.7, odds: 1.1, ev: 1.25, kelly: 0.5, r: null }).share, 0);
   assert.equal(autoShare({ type: 'place', p: 0.85, odds: 1.1, ev: 1.25, kelly: 0.5, r: null }).level, 'strong');
-  // レースごとの調整：R̂ が下限ちょうどで share、0.01 上がるごとに slope × 0.01、上限は全額
-  const base = { type: 'win', p: 0.52, odds: 2.1, ev: 1.05, kelly: 0.05 };
+  // レースごとの調整：R̂ が下限ちょうどで share、0.01 上がるごとに slope × 0.01、上限は全額（複勝）
+  const base = { type: 'place', p: 0.52, odds: 2.1, ev: 1.05, kelly: 0.05 };
   assert.deepEqual(autoShare({ ...base, r: L1.minR - 0.001 }), { share: 0, level: null });
   assert.ok(Math.abs(autoShare({ ...base, r: L1.minR }).share - L1.share) < 1e-9);
   assert.ok(Math.abs(autoShare({ ...base, r: L1.minR + 0.02 }).share - (L1.share + L1.slope * 0.02)) < 1e-9);
   assert.equal(autoShare({ ...base, r: 2 }).share, 1);
+  // 単勝は R̂ の下限が高い（minRBy.win。直前のオッズでは単勝の R̂ 0.92〜0.96 は損だった）
+  const winMin = L1.minRBy.win;
+  assert.ok(winMin > L1.minR);
+  assert.equal(autoShare({ ...base, type: 'win', r: winMin - 0.001 }).share, 0);
+  assert.ok(Math.abs(autoShare({ ...base, type: 'win', r: winMin }).share - L1.share) < 1e-9);
+  assert.ok(Math.abs(autoShare({ ...base, type: 'win', r: winMin + 0.01 }).share - (L1.share + L1.slope * 0.01)) < 1e-9);
   // 当たる確率が1つ目の下限（45%）未満は、複勝で R̂ が2つ目の下限以上のときだけ（単勝は買わない）
-  assert.equal(autoShare({ ...base, p: L1.minP - 0.03, r: 1.0 }).share, 0);
+  assert.equal(autoShare({ ...base, type: 'win', p: L1.minP - 0.03, r: 1.0 }).share, 0);
   assert.ok(autoShare({ ...base, type: 'place', p: L1.minP - 0.03, r: L2.minR + 0.01 }).share > 0);
   assert.equal(autoShare({ ...base, type: 'place', p: 0.35, r: 1.2 }).share, 0);
   // ワイドなど自動で使わない券種は 0
   assert.equal(autoShare({ ...base, type: 'wide', p: 0.6, r: 1.2 }).share, 0);
   // pickAuto：割合のいちばん大きい1点。当たっても利益が 100円に届かなければ見送り（2番目に替えない）
   const a = { ...base, type: 'place', idx: [0], p: 0.6, odds: 1.6, r: 1.0 };
-  const b = { ...base, type: 'win', idx: [1], p: 0.55, odds: 2.4, r: 0.95 };
+  const b = { ...base, type: 'win', idx: [1], p: 0.55, odds: 2.4, r: 0.99 };
   const { picked } = pickAuto([b, a], 1000);
   assert.equal(picked.length, 1);
   assert.equal(picked[0].idx[0], 0);
   assert.equal(picked[0].stake, Math.floor((1000 * autoShare(a).share) / 100) * 100);
-  // いちばん割合の大きい買い目（1.15 倍・予算 500円）が当たっても利益 75円 → 見送り（2番目の単勝には替えない）
+  // いちばん割合の大きい買い目（1.15 倍・予算 500円）が当たっても利益 75円 → 当たって 100円にするには 700円（予算の 40% を超える）→ 見送り
+  // （2番目の単勝には替えない。参加の買い目の条件にも届かない）
   const thin = pickAuto([{ ...a, odds: 1.15, r: 1.0 }, b], 500);
   assert.equal(thin.ranked[0].idx[0], 0);
   assert.equal(thin.picked.length, 0);
   assert.equal(thin.ranked[0].why, 'thin');
+});
+
+test('利益 100円の判定と、届く最低額（オッズは 0.1 倍刻み。小数の誤差で落とさない）', () => {
+  assert.ok(profitOk(500, 1.2));
+  assert.ok(!profitOk(400, 1.2));
+  assert.ok(profitOk(100, 2.0));
+  assert.ok(!profitOk(100, 1.9));
+  assert.equal(minStakeFor(1.2), 500);
+  assert.equal(minStakeFor(1.3), 400);
+  assert.equal(minStakeFor(1.5), 200);
+  assert.equal(minStakeFor(2.0), 100);
+  assert.equal(minStakeFor(1.0), Infinity);
+  for (let o = 1.1; o < 5; o += 0.1) {
+    const odds = Math.round(o * 10) / 10;
+    const need = minStakeFor(odds);
+    assert.ok(profitOk(need, odds) && !profitOk(need - 100, odds), `${odds} ${need}`);
+  }
+});
+
+test('利益 100円に届かない金額は届く最低額まで上げる（予算の minStakeUp まで）。ほかに買い目がなければ参加の買い目（オッズが新しいときだけ）', () => {
+  const A = AUTO_STAKE;
+  const [L1] = A.adjust;
+  // R̂ が下限ちょうど → 予算の 20%（200円）。1.3 倍では当たって +60円 → 400円（予算の 40%）に上げる
+  const t = { type: 'place', idx: [0], p: 0.62, odds: 1.3, ev: 1.05, kelly: 0.05, r: L1.minR };
+  const up = pickAuto([t], 1000);
+  assert.equal(up.picked.length, 1);
+  assert.equal(up.picked[0].stake, 400);
+  assert.equal(up.picked[0].raised, true);
+  assert.equal(up.picked[0].auto, 'adjust');
+  // オッズが古いときは上げない（参加の買い目も出さない）→ 見送り
+  assert.equal(pickAuto([t], 1000, A, { fresh: false }).picked.length, 0);
+  // 1.2 倍は 500円要る（予算の 40% を超える）→ 上げない。参加の買い目（当たる確率 55% 以上・R̂ 0.90 以上、40% まで）にも届かない
+  assert.equal(pickAuto([{ ...t, odds: 1.2 }], 1000).picked.length, 0);
+  // 参加の買い目：R̂ が下限に届かない（強い買い目でもない）複勝で、当たる確率 55% 以上・R̂ 0.90 以上 → 当たって +100円の最低額
+  const j1 = { type: 'place', idx: [1], p: 0.58, odds: 1.4, ev: 0.98, kelly: 0, r: A.join.minR + 0.005 };
+  const j2 = { type: 'place', idx: [2], p: 0.7, odds: 1.25, ev: 0.97, kelly: 0, r: A.join.minR + 0.01 };
+  const w = { type: 'win', idx: [3], p: 0.6, odds: 1.8, ev: 1.08, kelly: 0.1, r: 0.93 };
+  const jp = pickAuto([j1, j2, w], 1000);
+  assert.equal(jp.picked.length, 1);
+  assert.equal(jp.picked[0].auto, 'join');
+  assert.equal(jp.picked[0].idx[0], 2); // 当たる確率の高い方
+  assert.equal(jp.picked[0].stake, minStakeFor(1.25));
+  assert.ok(profitOk(jp.picked[0].stake, 1.25));
+  assert.equal(jp.ranked.length, 0);
+  assert.equal(pickAuto([j1, j2, w], 1000, A, { fresh: false }).picked.length, 0);
+  // 当たる確率・R̂ が足りない複勝、単勝は参加の買い目にしない
+  assert.equal(pickAuto([{ ...j1, p: A.join.minP - 0.01 }, { ...j2, r: A.join.minR - 0.01 }, w], 1000).picked.length, 0);
+  // 予算が小さいと最低額が予算の 40% を超える → 見送り
+  assert.equal(pickAuto([j2], 500).picked.length, 0);
+});
+
+test('オッズの新しさ：発走の freshMin 分前より後に取ったオッズ・結果の出たレース・時刻のわからないレースは新しい', () => {
+  const race = { date: '2026-10-10', startTime: '15:40' };
+  const at = (min) => new Date(Date.parse('2026-10-10T15:40:00+09:00') - min * 60000).toISOString();
+  assert.ok(oddsFresh({ ...race, oddsAt: at(3) }));
+  assert.ok(oddsFresh({ ...race, oddsAt: at(AUTO_STAKE.freshMin) }));
+  assert.ok(!oddsFresh({ ...race, oddsAt: at(AUTO_STAKE.freshMin + 1) }));
+  assert.ok(!oddsFresh({ ...race, oddsAt: at(60) }));
+  assert.ok(oddsFresh({ ...race, oddsAt: at(60), result: [1, 2, 3] }));
+  assert.ok(oddsFresh({ ...race }));
+  assert.ok(oddsFresh({ ...race, oddsAt: at(60), result: [1, 2, 3], oddsBefore: 1 }));
+  assert.ok(!oddsFresh({ ...race, result: [1, 2, 3], oddsBefore: 10 }));
+});
+
+test('1日の予算：参加の買い目・最低額へ上げた買い目は、最後の reserve 倍を使わない（発走順に先着、その時点までに使った額だけで決まる）', () => {
+  const base = predictRace(makeRace({ seed: 3 }), { sims: 0 });
+  const mk = (i, t) => ({ pred: { ...base, race: { ...base.race, id: `R${i}`, date: '2026-10-10', startTime: `1${i}:00`, raceNo: i } }, rec: { auto: true, budget: 1000, tickets: [t] } });
+  const strong = (i) => mk(i, { type: 'place', idx: [0], p: 0.6, odds: 2.0, oddsExp: 2.0, stake: 1000, auto: 'strong' });
+  const join = (i) => mk(i, { type: 'place', idx: [0], p: 0.7, odds: 1.4, oddsExp: 1.4, stake: 300, auto: 'join' });
+  // 強い買い目 4,000円のあと、参加の買い目は 7,000 − 2,000（残す分）− 4,000 = 1,000円まで（300円 × 3）、4つ目は見送り。最後の強い買い目は残した分で買える
+  const items = [strong(0), strong(1), strong(2), strong(3), join(4), join(5), join(6), join(7), strong(8)];
+  const out = planDay(items, { budget: 1000, dayBudget: 'auto' });
+  assert.deepEqual(out.map((r) => r.tickets.reduce((a, t) => a + t.stake, 0)), [1000, 1000, 1000, 1000, 300, 300, 300, 0, 1000]);
+  assert.match(out[7].skipReason, /残りが少ない/);
+  // 合計が予算の範囲内で、参加の買い目が残す分にかからなければそのまま
+  const few = planDay([strong(0), join(1), join(2)], { budget: 1000, dayBudget: 'auto' });
+  assert.deepEqual(few.map((r) => r.tickets[0].stake), [1000, 300, 300]);
+  assert.equal(few[0].day.over, false);
 });
 
 test('自動の買い目は、レースごとの期待回収率 R̂ と1つの式（autoShare）で決めた金額', () => {
@@ -140,10 +225,18 @@ test('自動の買い目は、レースごとの期待回収率 R̂ と1つの�
     for (const t of rec.tickets) {
       assert.ok(['win', 'place'].includes(t.type));
       assert.equal(t.r, expectedReturn(t, pred.rows.length));
+      assert.ok(profitOk(t.stake, t.odds));
+      if (t.auto === 'join') {
+        // 参加の買い目：当たる確率・R̂ の下限以上の複勝を、当たって +100円の最低額で
+        assert.equal(t.type, 'place');
+        assert.ok(t.p >= AUTO_STAKE.join.minP && t.r >= AUTO_STAKE.join.minR);
+        assert.equal(t.stake, minStakeFor(t.odds));
+        adjust++;
+        continue;
+      }
       const { share, level } = autoShare(t);
       assert.equal(t.auto, level);
-      assert.equal(t.stake, Math.floor((3000 * share) / 100) * 100);
-      assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
+      assert.equal(t.stake, t.raised ? minStakeFor(t.odds) : Math.floor((3000 * share) / 100) * 100);
       if (level === 'adjust') {
         assert.ok(t.r >= Math.min(...AUTO_STAKE.adjust.map((L) => L.minR)) - 1e-12);
         adjust++;

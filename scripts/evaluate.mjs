@@ -101,7 +101,8 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
     const preset = PRESETS[key];
     const runs = [];
     for (let k = 1; k <= seeds; k++) {
-      const cards = test.map((c) => perturb(c, `${c.id}|${k}`));
+      // oddsBefore：発走の何分前のオッズか（参加の買い目は、発走 freshMin 分前より後のオッズのときだけ。bets.js の oddsFresh）
+      const cards = test.map((c) => ({ ...perturb(c, `${c.id}|${k}`), oddsBefore: minutes }));
       const res = await runBacktest(cards, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml, mlAi: !!preset.mlAi }, { sims: 0 });
       const ai = res.strategies.find((x) => x.key === 'ai');
       runs.push(sumDaily(ai.daily || []));

@@ -5,6 +5,7 @@ import { estimateOdds } from './market.js';
 import { AUTO_POLICY, POLICY_FORMS } from './volatility.js';
 import { exactPL } from './simulate.js';
 import { STAKE_MODEL } from './stakeModel.js';
+import { startMs } from './raceTime.js';
 
 /**
  * 買い目の選定（期待値・最低的中確率・並べ替え）に使う勝率の「平らさ」。予想の勝率（着順の温度）をこの倍率で平らにしてから選ぶ。
@@ -78,12 +79,51 @@ export const AUTO_STAKE = {
   // 自動で使う券種（組み合わせの券種は、発走前のオッズで選ぶと学習期間のどの年も損だった）
   types: ['win', 'place'],
   // レースごとの調整：R̂ の下限 minR・その時の割合 share・R̂ が 0.01 上がるごとに slope × 0.01 だけ増やす（上限は予算の全額）
+  // minRBy：券種ごとの下限（単勝は 0.96 から。直前のオッズで買うと、単勝の R̂ 0.92〜0.96 は回収率 約93% で損だった。2026-10-06）
   adjust: [
-    { types: ['win', 'place'], minP: 0.45, minEv: 1.0, minR: 0.92, share: 0.2, slope: 15 },
+    { types: ['win', 'place'], minP: 0.45, minEv: 1.0, minR: 0.92, minRBy: { win: 0.96 }, share: 0.2, slope: 15 },
     { types: ['place'], minP: 0.4, minEv: 0, minR: 0.97, share: 0.2, slope: 10 },
   ],
-  dayBudget: { mult: 7 },
+  // 金額が小さくて当たっても利益が minProfit 円に届かない買い目は、届く最低額まで上げる（予算のこの割合まで。それより多く要るなら見送り）
+  minStakeUp: 0.4,
+  // 参加の買い目（見送りを減らす。2026-10-06）：ほかに買い目がないレースで、当たる確率 minP 以上・R̂ minR 以上の複勝のうち
+  // 当たる確率のいちばん高い1点を、当たって minProfit 円になる最低額で（予算の maxShare まで）。直前のオッズで回収率 約97%・的中率 約64%
+  join: { types: ['place'], minP: 0.55, minR: 0.9, maxShare: 0.4 },
+  // 参加の買い目と最低額へ上げる買い目は、オッズが発走の freshMin 分前より後に取ったものだけ（直前のオッズなら回収率 約97%、
+  // 発走10分前のオッズでは 92% と損だった。2026-10-06）。結果の出たレース・オッズの時刻がわからない過去のレースは対象
+  freshMin: 8,
+  // 1日の予算：1レースの予算の mult 倍まで（発走の早いレースから順に）。参加の買い目と最低額へ上げる買い目には、
+  // 最後の reserve 倍を使わない（後のレースの強い買い目のために残す。その時点までに使った額だけで決まる）
+  dayBudget: { mult: 7, reserve: 2 },
 };
+/** 当たったときの利益が minProfit 円以上か（オッズは 0.1 倍刻み。小数の誤差で 500円 × 1.2 倍 = +100円 を落とさない） */
+export function profitOk(stake, odds, minProfit = AUTO_STAKE.minProfit) {
+  return stake * (odds - 1) >= minProfit - 1e-6;
+}
+/** 当たって minProfit 円以上の利益になる最低の金額（unit 円単位） */
+export function minStakeFor(odds, minProfit = AUTO_STAKE.minProfit, unit = 100) {
+  return odds > 1 ? Math.ceil(minProfit / (odds - 1) / unit - 1e-9) * unit : Infinity;
+}
+/**
+ * オッズが新しいか（発走の freshMin 分前より後に取った）。参加の買い目と最低額へ上げる買い目の条件。
+ * 結果の出たレースは確定オッズ（attachResult が置き換える）・時刻がわからないレースは新しいとみなす。
+ * 検証で発走前のオッズを作ったレースは oddsBefore（発走の何分前のオッズか。scripts/evaluate.mjs）で決める
+ */
+export function oddsFresh(race, A = AUTO_STAKE) {
+  if (!race || !A.freshMin) return true;
+  if (race.oddsBefore != null) return race.oddsBefore <= A.freshMin;
+  if (race.result?.length) return true;
+  const st = startMs(race);
+  const at = race.oddsAt ? Date.parse(race.oddsAt) : NaN;
+  if (!st || !Number.isFinite(at)) return true;
+  return st - at <= A.freshMin * 60 * 1000;
+}
+/** 優先の低い買い目（参加の買い目・最低額へ上げた買い目）か。1日の予算の最後の reserve 倍を使わない */
+export const lowPriority = (t) => t.auto === 'join' || !!t.raised;
+/** 1日の予算の残り left のうち、この買い目に使える額 */
+export function dayRoom(t, left, budget, A = AUTO_STAKE) {
+  return lowPriority(t) ? left - (A.dayBudget?.reserve || 0) * budget : left;
+}
 /**
  * レースごとの期待回収率 R̂（1点に賭けた金額に対して、実際に戻る金額の見込み）。そのレースの条件（AI の期待値・単勝オッズから見た
  * 市場の期待値・オッズ・頭数）から、学習期間に発走前のオッズで選んだ同じような買い目の実際の払戻との関係（準ポアソン回帰、券種ごと）で出す。
@@ -116,8 +156,9 @@ export function autoShare(t, A = AUTO_STAKE) {
     level = 'strong';
   }
   for (const L of A.adjust || []) {
-    if (!L.types.includes(t.type) || !(t.odds >= MIN_ODDS) || t.p < L.minP || t.ev < (L.minEv ?? 0) || !(t.r >= L.minR)) continue;
-    const s = Math.min(1, L.share + L.slope * (t.r - L.minR));
+    const minR = L.minRBy?.[t.type] ?? L.minR;
+    if (!L.types.includes(t.type) || !(t.odds >= MIN_ODDS) || t.p < L.minP || t.ev < (L.minEv ?? 0) || !(t.r >= minR)) continue;
+    const s = Math.min(1, L.share + L.slope * (t.r - minR));
     if (s > share) {
       share = s;
       level = 'adjust';
@@ -127,10 +168,11 @@ export function autoShare(t, A = AUTO_STAKE) {
 }
 /**
  * 1レースの買い目を決める：金額の割合（autoShare）のいちばん大きい1点（同じなら当たる確率の高い方）を、予算 × 割合（100円単位）で。
- * 当たっても利益が minProfit 円に届かなければ見送り（2番目には替えない）。cands：{ type, p, odds, ev, kelly, r, ... }
- * 返り値 { picked: [{ ...t, stake, share, auto }], ranked }（ranked は割合のある候補を並べたもの）
+ * 当たっても利益が minProfit 円に届かない金額なら、届く最低額まで上げる（予算の minStakeUp まで。それより多く要るなら見送り。2番目には替えない）。
+ * ほかに買い目がなければ、参加の買い目（join：当たる確率の高い複勝を、当たって minProfit 円になる最低額で）。cands：{ type, p, odds, ev, kelly, r, ... }
+ * 返り値 { picked: [{ ...t, stake, share, auto }], ranked }（ranked は割合のある候補を並べたもの。auto：'strong'・'adjust'・'join'）
  */
-export function pickAuto(cands, budget, A = AUTO_STAKE) {
+export function pickAuto(cands, budget, A = AUTO_STAKE, { fresh = true } = {}) {
   const unit = 100;
   const ranked = [];
   for (const t of cands) {
@@ -141,15 +183,37 @@ export function pickAuto(cands, budget, A = AUTO_STAKE) {
   const picked = [];
   let left = budget;
   for (const t of ranked.slice(0, A.maxTickets)) {
-    const stake = Math.min(Math.floor((budget * t.share) / unit) * unit, Math.floor(left / unit) * unit);
-    if (stake < unit || stake * (t.odds - 1) < A.minProfit) {
+    let stake = Math.min(Math.floor((budget * t.share) / unit) * unit, Math.floor(left / unit) * unit);
+    if (A.minStakeUp && fresh && stake >= unit && !profitOk(stake, t.odds, A.minProfit)) {
+      const need = minStakeFor(t.odds, A.minProfit, unit);
+      if (need <= budget * A.minStakeUp && need <= left) {
+        stake = need;
+        t.raised = true;
+      }
+    }
+    if (stake < unit || !profitOk(stake, t.odds, A.minProfit)) {
       t.why = stake < unit ? 'small' : 'thin';
       continue;
     }
     picked.push({ ...t, stake });
     left -= stake;
   }
+  const j = !picked.length && fresh ? joinPick(cands, budget, A, left) : null;
+  if (j) picked.push(j);
   return { picked, ranked };
+}
+/** 参加の買い目（A.join）：当たる確率 minP 以上・R̂ minR 以上の複勝のうち、当たる確率のいちばん高い1点を、当たって minProfit 円になる最低額で */
+export function joinPick(cands, budget, A = AUTO_STAKE, left = budget) {
+  const J = A.join;
+  if (!J) return null;
+  let best = null;
+  for (const t of cands) {
+    if (!J.types.includes(t.type) || !(t.odds >= MIN_ODDS) || !(t.p >= J.minP) || !(t.r >= J.minR)) continue;
+    const need = minStakeFor(t.odds, A.minProfit);
+    if (need > budget * J.maxShare || need > left) continue;
+    if (!best || t.p > best.p) best = { ...t, stake: need, share: need / budget, auto: 'join' };
+  }
+  return best;
 }
 /** 1日の予算の選択肢（1レースの予算の何倍まで）。'auto' は AUTO_STAKE.dayBudget.mult、0 は上限なし */
 export const DAY_BUDGET_OPTIONS = [
@@ -186,7 +250,10 @@ export function planDay(items, { budget, dayBudget = 'auto' } = {}) {
   const total = list.reduce((a, it) => a + it.t.stake, 0);
   const races = new Set(list.map((it) => it.i)).size;
   const info = { limit: Number.isFinite(limit) ? limit : null, mult, total, races };
-  if (!(total > limit)) return items.map(({ rec }) => (rec?.auto ? { ...rec, day: { ...info, used: total, over: false } } : rec));
+  const reserve = (AUTO_STAKE.dayBudget?.reserve || 0) * budget;
+  const lowTotal = list.filter((it) => lowPriority(it.t)).reduce((a, it) => a + it.t.stake, 0);
+  // 合計が予算の範囲内で、参加の買い目などが残しておく分にかからなければ、そのまま（発走順に先着しても削られない）
+  if (!(total > limit) && (lowTotal === 0 || total <= limit - reserve)) return items.map(({ rec }) => (rec?.auto ? { ...rec, day: { ...info, used: total, over: false } } : rec));
   // 発走順に先着：前のレースを買う時点では、後のレースのオッズ（買い目）はわからない。後のレースの買い目を見て前のレースを削ると、
   // 検証だけが「その日の良い買い目を先に知っている」形になる（以前はその日の全レースをリスクに対する期待値の順に並べていた）。
   // 同じレースの中は、リスクに対する期待値の高い順
@@ -202,13 +269,14 @@ export function planDay(items, { budget, dayBudget = 'auto' } = {}) {
   let left = limit;
   const stakeOf = new Map();
   for (const it of order) {
-    const st = Math.min(it.t.stake, Math.floor(left / 100) * 100);
-    if (st >= 100 && st * (it.t.odds - 1) >= AUTO_STAKE.minProfit) {
+    const st = Math.min(it.t.stake, Math.floor(dayRoom(it.t, left, budget) / 100) * 100);
+    if (st >= 100 && profitOk(st, it.t.odds)) {
       stakeOf.set(it, st);
       left -= st;
     }
   }
   const used = limit - left;
+  if (list.every((it) => stakeOf.get(it) === it.t.stake)) return items.map(({ rec }) => (rec?.auto ? { ...rec, day: { ...info, used, over: false } } : rec));
   return items.map(({ pred, rec }, i) => {
     if (!rec?.auto) return rec;
     const mine = list.filter((it) => it.i === i);
@@ -221,8 +289,11 @@ export function planDay(items, { budget, dayBudget = 'auto' } = {}) {
       else out.push({ ...it.t, stake: 0, why: 'day' });
     }
     const dropped = [...out, ...(rec.dropped || [])].slice(0, 5);
+    const lowOut = out.length && out.every((t) => lowPriority(t));
     const skipReason = tickets.length
       ? null
+      : lowOut
+      ? `この日は買い目が多く、1日の予算（${limit.toLocaleString('ja-JP')}円）の残りが少ないので見送り（参加の買い目には、後のレースの強い買い目のために最後の ${reserve.toLocaleString('ja-JP')}円を使いません）`
       : `この日は買い目の合計（${races}レース・${total.toLocaleString('ja-JP')}円）が1日の予算（${limit.toLocaleString('ja-JP')}円）を超えるので、発走の早いレースから順に予算まで買います。このレースの前で予算を使い切ったので見送り`;
     const stats = evaluateTickets(tickets.map((t) => ({ ...t, odds: t.oddsExp || t.odds })), pred);
     return { ...rec, tickets, dropped, used: tickets.reduce((a, t) => a + t.stake, 0), skipped: !tickets.length, skipReason, stats, day: { ...info, used, over: true, out: out.length } };
@@ -249,7 +320,7 @@ export const STRATEGIES = {
   // minOdds：上の MIN_ODDS（以前は的中重視だけ 1.05：当たっても元返しの 1.0 倍だけを買わなかった）
   // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
-  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、単勝・複勝の買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、さらにそのレースの条件（AI と市場の見立て・オッズ・頭数）で見込む回収率（R̂）を出して、1つの式で金額を決め、1レース1点を買います。当たる確率 55% 以上で期待値が 1.2 以上の強い買い目は自信に応じて上限まで、それ以外は R̂ が高いほど多く（R̂ が 92% 未満なら買わない。予算は上限で、使い切るとは限りません）。当たっても 100円の利益に届かない買い目は買いません。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない期間、その時点より前のデータだけで学習したモデル）は、バックテスト画面にあります。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
+  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、単勝・複勝の買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で期待値を出し、さらにそのレースの条件（AI と市場の見立て・オッズ・頭数）で見込む回収率（R̂）を出して、1つの式で金額を決め、1レース1点を買います。当たる確率 55% 以上で期待値が 1.2 以上の強い買い目は自信に応じて上限まで、それ以外は R̂ が高いほど多く（R̂ が 92% 未満なら買わない。単勝は 96% から。予算は上限で、使い切るとは限りません）。どれもないレースでも、発走直前のオッズで当たる確率 55% 以上・R̂ 90% 以上の複勝があれば、参加の買い目として当たって 100円の利益になる最低額で買います。当たっても 100円の利益に届かない金額なら、届く最低額まで上げます（予算の4割まで）。その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、発走の早いレースから順に予算まで買います。発走10分前のオッズで選んだ場合の推定（学習に使っていない期間、その時点より前のデータだけで学習したモデル）は、バックテスト画面にあります。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
   // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、
@@ -571,7 +642,8 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
     scored.push(t);
     if (c.odds < MIN_ODDS && c.p >= A.minP && ev >= A.minEv && c.p < A.lowP) lowOnly = true;
   }
-  const { picked, ranked } = pickAuto(scored, budget, A);
+  const fresh = oddsFresh(pred.race, A);
+  const { picked, ranked } = pickAuto(scored, budget, A, { fresh });
   const tickets = picked.map((t) => ({ ...t, share: t.stake / budget }));
   const used = tickets.reduce((s, t) => s + t.stake, 0);
   // 買わなかった候補（画面で「なぜ買わないか」）：1レース1点のため・当たっても利益が薄い・見込みが足りない（当たる確率の高い順に5点）
@@ -579,23 +651,33 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
   const rankedKeys = new Set(ranked.map(ticketKey));
   const dropped = [
     ...ranked.filter((t) => !pickedKeys.has(ticketKey(t))).map((t) => ({ ...t, why: t.why || 'one' })),
-    ...scored.filter((t) => !rankedKeys.has(ticketKey(t)) && t.p >= 0.4 && (t.ev >= 0.95 || t.r >= 0.9)).map((t) => ({ ...t, why: t.odds < MIN_ODDS && t.p >= A.minP && t.ev >= A.minEv ? 'low' : 'weak' })),
+    ...scored.filter((t) => !rankedKeys.has(ticketKey(t)) && !pickedKeys.has(ticketKey(t)) && t.p >= 0.4 && (t.ev >= 0.95 || t.r >= 0.9)).map((t) => ({ ...t, why: t.odds < MIN_ODDS && t.p >= A.minP && t.ev >= A.minEv ? 'low' : 'weak' })),
   ]
     .sort((a, b) => b.p - a.p)
     .slice(0, 5)
     .map((t) => ({ ...t, stake: 0 }));
   const placeWaiting = types.includes('place') && pred.placeCount > 0 && !pred.rows.some((r) => r.entry.placeMin > 1);
-  const thin = ranked.some((t) => t.why === 'thin');
+  const thinT = ranked.find((t) => t.why === 'thin');
+  const thin = !!thinT;
+  // オッズが古くて最低額へ上げなかった（新しいオッズなら上げて買える）
+  const thinLater = thinT && !fresh && A.minStakeUp && minStakeFor(thinT.odds, A.minProfit) <= budget * A.minStakeUp;
   const skipReason = tickets.length
     ? null
     : placeWaiting
     ? '複勝の実際のオッズ（発走の2時間ほど前から）が出たら、自信に応じて金額を決めます'
-    : `利益の見込める買い目がないので見送り（当たる確率 ${Math.round(A.minP * 100)}% 以上で期待値が ${A.minEv.toFixed(1)} 以上の買い目も、このレースの条件で見込む回収率（R̂）が ${Math.round(Math.min(...A.adjust.map((L) => L.minR)) * 100)}% 以上の買い目もない）${
-        thin ? `。当たりやすい買い目はありますが、当たっても利益が ${A.minProfit}円に届かないので買いません` : lowOnly ? `。下限 ${LOW_ODDS_LABEL}の複勝は、一緒に来る馬しだいで払戻がぶれるので、当たる確率 ${Math.round(A.lowP * 100)}% 以上のときだけ買います` : ''
+    : `利益の見込める買い目がないので見送り（当たる確率 ${Math.round(A.minP * 100)}% 以上で期待値が ${A.minEv.toFixed(1)} 以上の買い目も、このレースの条件で見込む回収率（R̂）が ${Math.round(Math.min(...A.adjust.map((L) => L.minR)) * 100)}% 以上の買い目${A.join ? `も、当たる確率 ${Math.round(A.join.minP * 100)}% 以上で R̂ ${Math.round(A.join.minR * 100)}% 以上の複勝` : ''}もない）${
+        thinLater
+          ? `。当たりやすい買い目はありますが、いまの金額では当たっても利益が ${A.minProfit}円に届きません（発走の${A.freshMin}分前より後のオッズなら、届く最低額まで上げて買います）`
+          : thin
+          ? `。当たりやすい買い目はありますが、オッズが低く、当たって利益 ${A.minProfit}円にするには予算の ${Math.round((A.minStakeUp || 0) * 100)}% より多く要るので買いません`
+          : lowOnly ? `。下限 ${LOW_ODDS_LABEL}の複勝は、一緒に来る馬しだいで払戻がぶれるので、当たる確率 ${Math.round(A.lowP * 100)}% 以上のときだけ買います` : ''
       }`;
+  // オッズが古い（発走 freshMin 分前より前）ので参加の買い目を出していないレース：直前のオッズで出す見込みを伝える
+  const later = !tickets.length && !fresh ? joinPick(scored, budget, A) : null;
+  const skipNote = later ? `。発走の${A.freshMin}分前より後のオッズで、参加の買い目（複勝 ${later.nums?.[0] ?? ''}・当たる確率 ${Math.round(later.p * 100)}%）を出す見込みです` : '';
   // 的中率・期待回収率・プラス収支の確率は、払戻の見込み（複勝は下限〜上限の幅から）で出す（表の期待値と同じ）
   const stats = evaluateTickets(tickets.map((t) => ({ ...t, odds: t.oddsExp })), pred);
-  return { strategy, budget, tickets, dropped, auto: true, used, keepMinP: null, candidates: cands.length, skipped: !tickets.length, skipReason, stats };
+  return { strategy, budget, tickets, dropped, auto: true, used, keepMinP: null, candidates: cands.length, skipped: !tickets.length, skipReason: skipReason && skipNote ? skipReason + skipNote : skipReason, stats, fresh };
 }
 
 export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto' } = {}) {

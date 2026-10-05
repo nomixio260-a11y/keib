@@ -15,7 +15,7 @@ import path from 'node:path';
 import { readFile, writeFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR } from '../src/collector/store.js';
-import { AUTO_STAKE, MIN_ODDS, expectedPayout, stakeFeatures, pickAuto, expectedReturn } from '../src/engine/bets.js';
+import { AUTO_STAKE, MIN_ODDS, expectedPayout, stakeFeatures, pickAuto, expectedReturn, profitOk, dayRoom } from '../src/engine/bets.js';
 import { fitPoissonGlm } from './lib/glm.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -91,7 +91,8 @@ function scored(cs, date) {
     return { ...t, m, ev, kelly: m > 1 ? (ev - 1) / (m - 1) : 0, r: coef?.[t.type] ? expectedReturn(t, t.n, coef[t.type], REGION) : null };
   });
 }
-const planNew = (A) => (cs, date) => pickAuto(scored(cs.filter((t) => A.types.includes(t.type) && t.odds >= A.minOdds), date), B, A).picked;
+// fresh：オッズが新しいか（発走 freshMin 分前より後。候補のオッズの時点 minutes で決める）。参加の買い目と最低額へ上げる買い目の条件
+const planNew = (A) => (cs, date, fresh = true) => pickAuto(scored(cs.filter((t) => A.types.includes(t.type) && t.odds >= A.minOdds), date), B, A, { fresh }).picked;
 function planOld(cs, date) {
   const main = [];
   const t3 = [];
@@ -114,9 +115,12 @@ function planOld(cs, date) {
   const stake = Math.floor((B * x.want) / unit) * unit;
   return stake >= unit && stake * (x.odds - 1) >= 100 ? [{ ...x, stake }] : [];
 }
+// 前の自動（2026-10-06 まで）：単勝も R̂ 0.92 から、最低額へ上げない、参加の買い目なし
+const PREV = { ...AUTO_STAKE, adjust: [{ types: ['win', 'place'], minP: 0.45, minEv: 1.0, minR: 0.92, share: 0.2, slope: 15 }, AUTO_STAKE.adjust[1]], minStakeUp: 0, join: null };
 const RULES = {
-  new: { label: 'いまの自動（レースごとの調整）', plan: planNew(AUTO_STAKE) },
-  strong: { label: '強い買い目だけ', plan: planNew({ ...AUTO_STAKE, adjust: [] }) },
+  new: { label: 'いまの自動（調整・参加の買い目）', plan: planNew(AUTO_STAKE) },
+  prev: { label: '前の自動（10/6 まで）', plan: planNew(PREV) },
+  strong: { label: '強い買い目だけ', plan: planNew({ ...AUTO_STAKE, adjust: [], minStakeUp: 0, join: null }) },
   old: { label: '以前の自動（2段目・3段目）', plan: planOld },
 };
 const PERIODS = [
@@ -132,8 +136,9 @@ function simulate(st, plan, collect = null) {
     if (r.date < WALK_FROM) continue;
     (byDay.get(r.date) || byDay.set(r.date, []).get(r.date)).push(ri);
   }
-  const per = Object.fromEntries(PERIODS.map((p) => [p.key, { races: 0, hits: 0, stake: 0, pay: 0, days: new Map(), allDays: 0 }]));
+  const per = Object.fromEntries(PERIODS.map((p) => [p.key, { races: 0, allRaces: 0, hits: 0, stake: 0, pay: 0, days: new Map(), allDays: 0 }]));
   const byQ = {};
+  const fresh = !(st.minutes > AUTO_STAKE.freshMin);
   for (const [date, ris] of byDay) {
     const P = PERIODS.find((p) => date >= p.from && date < p.to);
     if (!P) continue;
@@ -148,13 +153,15 @@ function simulate(st, plan, collect = null) {
     for (const ri of ris) {
       let s = 0;
       let g = 0;
-      for (const t of plan(st.byRace.get(ri), date)) {
-        const stake = Math.min(t.stake, Math.floor(left / unit) * unit);
-        if (stake < unit || stake * (t.odds - 1) < 100) continue;
+      a.allRaces++;
+      for (const t of plan(st.byRace.get(ri), date, fresh)) {
+        // 1日の予算は発走順に先着（参加の買い目・最低額へ上げた買い目は、最後の reserve 倍を使わない。planDay と同じ）
+        const stake = Math.min(t.stake, Math.floor(dayRoom(t, left, B) / unit) * unit);
+        if (stake < unit || !profitOk(stake, t.odds)) continue;
         left -= stake;
         s += stake;
         g += (stake / 100) * t.payout;
-        if (collect && P.key !== 'hold') collect.push({ level: t.auto || `tier${t.tier}`, type: t.type, p: t.p, m: t.m, r: t.r, stake, pay: t.payout / 100 });
+        if (collect && P.key !== 'hold') collect.push({ level: t.raised ? 'raised' : t.auto || `tier${t.tier}`, type: t.type, p: t.p, m: t.m, r: t.r, stake, pay: t.payout / 100 });
       }
       if (!s) continue;
       a.races++;
@@ -179,7 +186,7 @@ const results = {};
 const bets = { new: [], old: [] };
 for (const [key, R] of Object.entries(RULES)) results[key] = sets.map((st) => simulate(st, R.plan, bets[key] || null));
 // 負けの原因：学習期間（前進検証）の買い目を種類ごとに、当たる確率と当たったときの払戻の「見込み → 実際」
-const LEVEL_LABEL = { tier1: '1段目（強い買い目）', tier2: '2段目（当たる確率 50% 以上・期待値 1.1 以上を予算の3割）', tier3: '3段目（ワイドを予算の2割）', strong: '強い買い目', adjust: 'レースごとの調整' };
+const LEVEL_LABEL = { tier1: '1段目（強い買い目）', tier2: '2段目（当たる確率 50% 以上・期待値 1.1 以上を予算の3割）', tier3: '3段目（ワイドを予算の2割）', strong: '強い買い目', adjust: 'レースごとの調整', raised: '最低額まで上げた買い目', join: '参加の買い目' };
 const causes = {};
 for (const [key, list] of Object.entries(bets)) {
   const groups = new Map();
@@ -214,6 +221,7 @@ for (const [key, rs] of Object.entries(results)) {
     const pay = avg(xs, (x) => x.pay);
     summary[key][P.key] = {
       races: Math.round(avg(xs, (x) => x.races)),
+      allRaces: Math.round(avg(xs, (x) => x.allRaces)),
       hitRate: +(avg(xs, (x) => x.hits) / Math.max(1, avg(xs, (x) => x.races))).toFixed(4),
       roi: +(pay / Math.max(1, stake)).toFixed(4),
       roiMin: +Math.min(...xs.map((x) => x.roi ?? 0)).toFixed(4),
@@ -224,7 +232,7 @@ for (const [key, rs] of Object.entries(results)) {
     };
   }
 }
-// 買う時刻ごと（いまの規則）：直前（発走前の最後の更新）・5分前・10分前・60分前の候補（あれば）。R̂ は上と同じ（SETS で前進検証）
+// 買う時刻ごと（いまの規則と前の規則）：直前（発走前の最後の更新）・5分前・10分前・60分前の候補（あれば）。R̂ は上と同じ（SETS で前進検証）
 const TIMINGS = (process.env.STAKE_TIMINGS || 'm1:直前（最後の更新）,m5:発走5分前,m10:発走10分前,m60:発走60分前').split(',').map((x) => {
   const [prefix, label] = x.split(':');
   return { prefix, label };
@@ -236,15 +244,13 @@ for (const T of TIMINGS) {
   if (!exists.every(Boolean)) continue;
   const tsets = [];
   for (const n of names) tsets.push(SETS.includes(n) ? sets[SETS.indexOf(n)] : await loadSet(n));
-  const rs = tsets.map((st) => simulate(st, RULES.new.plan));
-  const row = { prefix: T.prefix, label: T.label, summary: {} };
-  for (const P of PERIODS) {
+  const sum = (rs) => Object.fromEntries(PERIODS.map((P) => {
     const xs = rs.map((r) => r.per[P.key]);
     const stake = avg(xs, (x) => x.stake);
     const pay = avg(xs, (x) => x.pay);
-    row.summary[P.key] = { races: Math.round(avg(xs, (x) => x.races)), hitRate: +(avg(xs, (x) => x.hits) / Math.max(1, avg(xs, (x) => x.races))).toFixed(4), roi: +(pay / Math.max(1, stake)).toFixed(4), profit: Math.round(pay - stake), loseDays: +avg(xs, (x) => x.loseDays).toFixed(1), betDays: +avg(xs, (x) => x.betDays).toFixed(1), days: xs[0].allDays };
-  }
-  timing.push(row);
+    return [P.key, { races: Math.round(avg(xs, (x) => x.races)), allRaces: Math.round(avg(xs, (x) => x.allRaces)), hitRate: +(avg(xs, (x) => x.hits) / Math.max(1, avg(xs, (x) => x.races))).toFixed(4), roi: +(pay / Math.max(1, stake)).toFixed(4), profit: Math.round(pay - stake), loseDays: +avg(xs, (x) => x.loseDays).toFixed(1), betDays: +avg(xs, (x) => x.betDays).toFixed(1), days: xs[0].allDays }];
+  }));
+  timing.push({ prefix: T.prefix, label: T.label, summary: sum(tsets.map((st) => simulate(st, RULES.new.plan))), prev: sum(tsets.map((st) => simulate(st, RULES.prev.plan))) });
 }
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
 const yen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('ja-JP')}円`;
@@ -258,7 +264,8 @@ for (const P of PERIODS) {
 }
 if (timing.length) {
   console.log('\n買う時刻ごと（いまの規則・各3通りの平均）');
-  for (const row of timing) console.log(`  ${row.label.padEnd(14, '　')} ${PERIODS.map((P) => { const x = row.summary[P.key]; return `${P.label} ${x.races}R ${pct(x.roi)} ${yen(x.profit)} 負${x.loseDays}/${x.betDays}`; }).join(' | ')}`);
+  for (const row of timing)
+    for (const [name, sm] of [['いま', row.summary], ['前', row.prev]]) console.log(`  ${row.label.padEnd(14, '　')}${name} ${PERIODS.map((P) => { const x = sm[P.key]; return `${P.label} ${x.races}R(${pct(x.races / Math.max(1, x.allRaces))}) 的中${pct(x.hitRate)} ${pct(x.roi)} ${yen(x.profit)} 負${x.loseDays}/${x.betDays}`; }).join(' | ')}`);
 }
 console.log('\n四半期ごとの収支（6通りの平均）');
 const qs = [...new Set(results.new.flatMap((r) => Object.keys(r.byQ)))].sort();

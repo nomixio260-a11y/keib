@@ -31,8 +31,11 @@ function verdictOf(pred, rec) {
       const head =
         x.auto === 'strong'
           ? `当たる確率 ${pc(x.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 以上の強い買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}${r}）`
+          : x.auto === 'join'
+          ? `参加の買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}${r}。強い買い目も調整の買い目もないレースで、当たりやすい複勝を少額で）`
           : `このレースの条件で見込む回収率に合わせた買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}${r}）`;
-      return `${head}に予算の ${Math.round((x.share ?? 1) * 100)}%（${x.stake.toLocaleString('ja-JP')}円）。当たれば少なくとも +${Math.round(x.stake * (x.odds - 1)).toLocaleString('ja-JP')}円`;
+      const amount = x.auto === 'join' || x.raised ? `当たって +${AUTO_STAKE.minProfit}円になる最低額 ${x.stake.toLocaleString('ja-JP')}円（予算の ${Math.round((x.share ?? 1) * 100)}%）` : `予算の ${Math.round((x.share ?? 1) * 100)}%（${x.stake.toLocaleString('ja-JP')}円）`;
+      return `${head}に${amount}。当たれば少なくとも +${Math.round(x.stake * (x.odds - 1)).toLocaleString('ja-JP')}円`;
     };
     const cutNote = rec.day?.over && rec.tickets.some((x) => x.dayCut) ? 'この日は買い目が多く1日の予算を超えるので、このレースは予算の残りの分だけ買います。' : '';
     return { kind: 'buy', title: '買い', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${cutNote}`, tickets: rec.tickets };

@@ -8,7 +8,7 @@ import { parseRegistrationList, parseRegistration, registrationKeyFromCname } fr
 import { registrationToRace, addProvisionalRaces, removeProvisionalRaces } from '../src/collector/registrations.js';
 import { upsertRace } from '../src/collector/bundle.js';
 import { predictRace } from '../src/engine/model.js';
-import { recommendBets, betView, BET_TEMP, priceTicket, MIN_ODDS, AUTO_STAKE, expectedPayout, placeAlpha, autoShare, expectedReturn, KEEP_OPTIONS } from '../src/engine/bets.js';
+import { recommendBets, betView, BET_TEMP, priceTicket, MIN_ODDS, AUTO_STAKE, expectedPayout, placeAlpha, autoShare, expectedReturn, KEEP_OPTIONS, minStakeFor } from '../src/engine/bets.js';
 import { raceStatus } from '../src/engine/raceTime.js';
 import { makeRace } from './fixtures/race.mjs';
 
@@ -302,12 +302,14 @@ test('的中重視の自動（1つだけ）：強い買い目は有利さに応�
       assert.ok(Math.abs(t.oddsExp - expectedPayout(t)) < 1e-9);
       assert.ok(Math.abs(t.ev - t.pHit * t.oddsExp) < 1e-9);
       assert.equal(t.r, expectedReturn(t, pred.rows.length));
-      // 金額は1つの式（強い買い目は有利さ ÷ fullAt、それ以外は R̂ から）
-      const { share, level } = autoShare(t);
+      // 金額は1つの式（強い買い目は有利さ ÷ fullAt、それ以外は R̂ から。利益 100円に届かなければ届く最低額まで上げる）。
+      // 参加の買い目は、当たる確率・R̂ の下限以上の複勝を当たって +100円の最低額で
+      const { share, level } = t.auto === 'join' ? { share: 0, level: 'join' } : autoShare(t);
       assert.equal(t.auto, level);
-      assert.equal(t.stake, Math.floor((3000 * share) / 100) * 100);
+      if (level === 'join') assert.ok(t.type === 'place' && t.pHit >= AUTO_STAKE.join.minP && t.r >= AUTO_STAKE.join.minR && t.stake === minStakeFor(t.odds));
+      else assert.equal(t.stake, t.raised ? minStakeFor(t.odds) : Math.floor((3000 * share) / 100) * 100);
       if (level === 'strong') assert.ok(t.pHit >= (t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP) && t.ev >= AUTO_STAKE.minEv, `${t.pHit} ${t.ev}`);
-      else assert.ok(t.r >= Math.min(...AUTO_STAKE.adjust.map((L) => L.minR)) && t.odds >= MIN_ODDS);
+      else if (level === 'adjust') assert.ok(t.r >= Math.min(...AUTO_STAKE.adjust.map((L) => L.minR)) && t.odds >= MIN_ODDS);
       // 当たっても利益が 100円に届かない買い目は買わない
       assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
       levels.add(level);

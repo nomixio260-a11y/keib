@@ -10,6 +10,8 @@ const [ADJ1, ADJ2] = AUTO_STAKE.adjust;
 const AUTO_KIND = {
   strong: `当たる確率 ${Math.round(AUTO_STAKE.minP * 100)}% 以上（1.1 倍は ${Math.round(AUTO_STAKE.lowP * 100)}% 以上）で期待値が ${AUTO_STAKE.minEv.toFixed(1)} 以上の強い買い目。自信（有利さ）に応じて上限まで`,
   adjust: `このレースの条件（AI と市場の見立て・オッズ・頭数）で見込む回収率 R̂ に応じた金額（R̂ ${Math.round(ADJ1.minR * 100)}% で予算の ${Math.round(ADJ1.share * 100)}%、高いほど多く。上限は予算の全額）`,
+  join: `参加の買い目：強い買い目も調整の買い目もないレースで、当たる確率 ${Math.round(AUTO_STAKE.join.minP * 100)}% 以上・R̂ ${Math.round(AUTO_STAKE.join.minR * 100)}% 以上の複勝を、当たって +${AUTO_STAKE.minProfit}円になる最低額で（発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけ）`,
+  raised: `当たっても利益が ${AUTO_STAKE.minProfit}円に届かない金額だったので、届く最低額まで上げました（予算の ${Math.round(AUTO_STAKE.minStakeUp * 100)}% まで。発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけ）`,
 };
 import { speedFigure } from '../engine/speed.js';
 import { REAL_STATS } from '../engine/realStats.js';
@@ -361,12 +363,12 @@ export function renderBetsPanel(pred, rec, ctx) {
     ? rec.tickets
         .map(
           (t) => `<tr>
-          <td>${esc(BET_LABEL[t.type])}${rec.auto && t.auto === 'adjust' ? `<small class="bt-sub" title="${esc(AUTO_KIND.adjust)}">調整</small>` : ''}</td>
+          <td>${esc(BET_LABEL[t.type])}${rec.auto && t.auto === 'adjust' ? `<small class="bt-sub" title="${esc(AUTO_KIND.adjust)}">調整</small>` : ''}${rec.auto && t.auto === 'join' ? `<small class="bt-sub" title="${esc(AUTO_KIND.join)}">参加</small>` : ''}</td>
           <td class="num bt-combo">${esc(ticketLabel(t))}</td>
           <td class="num">${pct(t.pHit ?? t.pEv ?? t.p)}</td>
           <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : t.type !== 'win' ? '<small class="tx-good" title="JRA の実際のオッズ">実</small>' : ''}</td>
           <td class="num ${evClass(t.ev)}">${t.ev.toFixed(2)}${t.oddsExp && t.oddsExp > t.odds + 0.005 ? `<small class="bt-sub" title="払戻の見込み（下限〜上限の幅から）">見込み${odds(t.oddsExp)}倍</small>` : ''}${rec.auto && t.r != null ? `<small class="bt-sub" title="このレースの条件で見込む回収率（R̂）：学習期間に発走前のオッズで選んだ同じような買い目が、実際にいくら戻ったか">回収見込み${pct(t.r, 0)}</small>` : ''}</td>
-          <td class="num">${t.stake.toLocaleString('ja-JP')}${rec.auto ? `<small class="bt-sub" title="${esc(AUTO_KIND[t.auto] || '')}">予算の${Math.round((t.share ?? t.stake / rec.budget) * 100)}%</small>` : ''}</td>
+          <td class="num">${t.stake.toLocaleString('ja-JP')}${rec.auto ? `<small class="bt-sub" title="${esc((t.raised ? AUTO_KIND.raised : AUTO_KIND[t.auto]) || '')}">${t.raised || t.auto === 'join' ? '最低額・' : ''}予算の${Math.round((t.share ?? t.stake / rec.budget) * 100)}%</small>` : ''}</td>
         </tr>`,
         )
         .join('')
@@ -415,9 +417,10 @@ export function renderBetsPanel(pred, rec, ctx) {
       if (rec.auto) {
         parts.push(`<b>自動（レースごとに調整）</b>：毎レース、単勝・複勝の買い目ごとに、当たる確率と払戻の見込み（複勝はオッズの下限〜上限の幅と当たる確率から）で期待値と有利さを出し、さらに<b>このレースの条件で見込む回収率（R̂）</b>を出して、1つの式で金額を決めます。金額のいちばん大きい1点を買います。予算は上限で、使い切るとは限りません${rec.tickets.length ? `（このレース ${yen(rec.used)}・予算の ${Math.round((rec.used / rec.budget) * 100)}%）` : ''}。`);
         parts.push(`・強い買い目：当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上（1.1 倍は ${pct(AUTO_STAKE.lowP, 0)} 以上）で期待値が ${AUTO_STAKE.minEv.toFixed(1)} 以上 → 自信に応じて上限まで（有利さが ${pct(AUTO_STAKE.fullAt, 0)} 未満なら減らす）。期待値の余裕は、いま見ているオッズが確定までに動く分です`);
-        parts.push(`・レースごとの調整（「調整」）：それ以外は、R̂ が ${pct(ADJ1.minR, 0)} 以上（当たる確率 ${pct(ADJ1.minP, 0)} 以上・期待値 ${ADJ1.minEv.toFixed(1)} 以上の単勝・複勝）か ${pct(ADJ2.minR, 0)} 以上（当たる確率 ${pct(ADJ2.minP, 0)} 以上の複勝）なら、予算の ${pct(ADJ1.share, 0)} から R̂ が高いほど多く（R̂ 1ポイントごとに予算の ${ADJ1.slope}%・${ADJ2.slope}%、上限は全額）`);
+        parts.push(`・レースごとの調整（「調整」）：それ以外は、R̂ が ${pct(ADJ1.minR, 0)} 以上（当たる確率 ${pct(ADJ1.minP, 0)} 以上・期待値 ${ADJ1.minEv.toFixed(1)} 以上の複勝。単勝は ${pct(ADJ1.minRBy?.win ?? ADJ1.minR, 0)} 以上）か ${pct(ADJ2.minR, 0)} 以上（当たる確率 ${pct(ADJ2.minP, 0)} 以上の複勝）なら、予算の ${pct(ADJ1.share, 0)} から R̂ が高いほど多く（R̂ 1ポイントごとに予算の ${ADJ1.slope}%・${ADJ2.slope}%、上限は全額）`);
+        parts.push(`・参加の買い目（「参加」。見送りを減らす）：どちらもないレースでも、当たる確率 ${pct(AUTO_STAKE.join.minP, 0)} 以上・R̂ ${pct(AUTO_STAKE.join.minR, 0)} 以上の複勝があれば、当たる確率のいちばん高い1点を、当たって +${AUTO_STAKE.minProfit}円になる最低額（予算の ${pct(AUTO_STAKE.join.maxShare, 0)} まで）で買います。直前のオッズでは回収率 約97%・的中率 約64% で、ほぼ損をせずに買うレースを増やします。発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけで（10分前のオッズでは回収率 92% と損）、1日の予算の最後の ${AUTO_STAKE.dayBudget.reserve}レース分は使いません（後のレースの強い買い目のため）`);
         parts.push('・R̂ は、AI の期待値・単勝オッズから見た市場の期待値・オッズ・頭数から、学習期間に発走前のオッズで選んだ同じような買い目が実際にいくら戻ったかで出します。負けたレースを分析すると、いま高く見えるオッズは確定までに下がりやすく（選んだ複勝の払戻は見込みの 8〜9割）、AI と市場の見立ての差が大きいほど当たる確率を高く見すぎていたので、レースごとにその分を割り引きます');
-        parts.push(`・当たっても利益が ${AUTO_STAKE.minProfit}円に届かない買い目は買いません。どれもなければ見送り`);
+        parts.push(`・当たっても利益が ${AUTO_STAKE.minProfit}円に届かない金額のときは、届く最低額まで上げます（予算の ${pct(AUTO_STAKE.minStakeUp, 0)} まで。それより多く要るなら買いません）。どれもなければ見送り`);
         if (exotic) parts.push('馬連・ワイド・三連複などの組み合わせの券種は、発走前のオッズで選ぶと長い期間で損だったので、自動では買いません。');
       } else if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.5%（週平均 −2,115円 → +601円）、直近14週 99.3% → 129.2%（−256円 → +1,961円）。的中率・期待値の欄はこの値です。`);
       if (exotic && !rec.auto) parts.push('的中重視は当たる確率 50% 以上の買い目だけを買うので、馬連・馬単・三連複・三連単はほとんど選ばれません（学習期間 385日で馬連 1点）。単勝・複勝だけとほぼ同じ成績です。');
@@ -430,8 +433,8 @@ export function renderBetsPanel(pred, rec, ctx) {
     ${
       rec.dropped?.length && rec.auto
         ? `<details class="bet-dropped"><summary>買わなかった候補 ${rec.dropped.length}点</summary><ul>${rec.dropped
-            .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span>${t.r != null ? `・回収見込み <span class="num">${pct(t.r, 0)}</span>` : ''} <small>${t.why === 'one' ? '（1レースで買う点数・予算の上限のため）' : t.why === 'thin' ? `（当たっても利益が ${AUTO_STAKE.minProfit}円に届かない）` : t.why === 'low' ? `（${LOW_ODDS_LABEL}は当たる確率 ${pct(AUTO_STAKE.lowP, 0)} 以上のときだけ）` : t.why === 'day' ? '（1日の予算に入らない）' : t.why === 'small' ? '（予算が小さく、金額が 100円に届かない）' : '（利益の見込みが足りない）'}</small></li>`)
-            .join('')}</ul><p class="muted">強い買い目（当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 以上）か、このレースの条件で見込む回収率（R̂）が ${pct(ADJ1.minR, 0)} 以上の買い目のうち、金額のいちばん大きい1点を、当たって ${AUTO_STAKE.minProfit}円以上の利益になるときだけ買います（その日の買い目の合計が1日の予算を超えたら、発走の早いレースから順に予算まで）。発走10分前のオッズで選んだ場合の推定は、バックテスト画面にあります。</p></details>`
+            .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span>${t.r != null ? `・回収見込み <span class="num">${pct(t.r, 0)}</span>` : ''} <small>${t.why === 'one' ? '（1レースで買う点数・予算の上限のため）' : t.why === 'thin' ? `（当たっても利益が ${AUTO_STAKE.minProfit}円に届かない金額）` : t.why === 'low' ? `（${LOW_ODDS_LABEL}は当たる確率 ${pct(AUTO_STAKE.lowP, 0)} 以上のときだけ）` : t.why === 'day' ? '（1日の予算に入らない）' : t.why === 'small' ? '（予算が小さく、金額が 100円に届かない）' : '（利益の見込みが足りない）'}</small></li>`)
+            .join('')}</ul><p class="muted">強い買い目（当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 以上）か、このレースの条件で見込む回収率（R̂）が ${pct(ADJ1.minR, 0)} 以上（単勝は ${pct(ADJ1.minRBy?.win ?? ADJ1.minR, 0)} 以上）の買い目のうち、金額のいちばん大きい1点を、当たって ${AUTO_STAKE.minProfit}円以上の利益になる金額で買います。どちらもなければ、当たる確率 ${pct(AUTO_STAKE.join.minP, 0)} 以上・R̂ ${pct(AUTO_STAKE.join.minR, 0)} 以上の複勝を参加の買い目として最低額で（その日の買い目の合計が1日の予算を超えたら、発走の早いレースから順に予算まで）。発走前のオッズで選んだ場合の推定は、バックテスト画面にあります。</p></details>`
         : rec.dropped?.length
         ? `<details class="bet-dropped"><summary>外した買い目 ${rec.dropped.length}点（当たる確率が ${pct(rec.keepMinP, 0)} 未満）</summary><ul>${rec.dropped
             .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span></li>`)

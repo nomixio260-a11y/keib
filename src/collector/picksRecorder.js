@@ -22,7 +22,8 @@ function bundleStats(bundle) {
 export function dayPicks(races, doc, { now = Date.now(), stats = REAL_STATS, budget = PICK_SETTINGS.budget } = {}) {
   const items = [];
   for (const race of races) {
-    if (race.jump || race.surface === '障' || race.provisional || race.status === 'registration' || race.result?.length) continue;
+    // 結果の出たレースも、記録した買い目があれば1日の予算を先に使う（発走済みと同じ。以前は外していて、後のレースに予算が多く残った）
+    if (race.jump || race.surface === '障' || race.provisional || race.status === 'registration') continue;
     const st = startMs(race);
     if (!st) continue;
     const open = now < st - FREEZE_MS;
