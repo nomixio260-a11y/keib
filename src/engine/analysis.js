@@ -26,9 +26,8 @@ function verdictOf(pred, rec) {
   // 的中重視の自動：自信に応じて金額まで決めた買い目
   if (rec?.auto && rec.tickets?.length) {
     const t = rec.tickets[0];
-    if (t.auto === 'floor') return { kind: 'buy', title: '買い（最低額）', text: `自信を持って買える買い目はありませんが、当たりやすい買い目（当たる確率 ${pc(t.pHit)}）を最低額の ${t.stake.toLocaleString('ja-JP')}円で買います。利益はほぼなく、当たる回数を増やすための買い目です。`, tickets: rec.tickets };
     const why = t.auto === 'classic' ? 'これまでの的中重視の条件' : `当たる確率 ${pc(t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv} 以上`;
-    return { kind: 'buy', title: '買い', text: `${why}を満たす、自信のある買い目があります（当たる確率 ${pc(t.pHit)}・期待値 ${t.ev.toFixed(2)}）。自信に応じて予算の ${Math.round((t.share ?? 1) * 100)}%（${t.stake.toLocaleString('ja-JP')}円）を買います。`, tickets: rec.tickets };
+    return { kind: 'buy', title: '買い', text: `${why}を満たす、利益の見込める買い目があります（当たる確率 ${pc(t.pHit)}・期待値 ${t.ev.toFixed(2)}）。自信に応じて予算の ${Math.round((t.share ?? 1) * 100)}%（${t.stake.toLocaleString('ja-JP')}円）を買い、当たれば少なくとも +${Math.round(t.stake * (t.odds - 1)).toLocaleString('ja-JP')}円です。`, tickets: rec.tickets };
   }
   if (rec?.auto && rec.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason, dropped: rec.dropped };
   if (rec?.tickets?.length) {
