@@ -297,7 +297,8 @@ test('的中重視の自動（規則J＋2段目）：当たる確率 55% 以上�
     assert.ok(rec.used <= 3000);
     assert.ok(rec.tickets.length <= AUTO_STAKE.maxTickets);
     for (const t of rec.tickets) {
-      assert.ok(t.auto === 'kelly' || t.auto === 'tier2', t.auto);
+      assert.ok(t.auto === 'kelly' || t.auto === 'tier2' || t.auto === 'tier3', t.auto);
+      if (t.auto === 'tier3') continue;
       assert.ok(t.stake >= 100 && t.stake % 100 === 0 && t.stake <= 3000, String(t.stake));
       assert.ok(!t.estimated && t.type !== 'exacta' && t.type !== 'trifecta');
       assert.ok(Math.abs(t.oddsExp - expectedPayout(t)) < 1e-9);
@@ -336,6 +337,30 @@ test('的中重視の自動（規則J＋2段目）：当たる確率 55% 以上�
   assert.ok(main > 0 && skips > 0, `${main} ${skips}`);
   assert.ok(tier2 > 0, '2段目の少額の買い目を買うレースで確かめている');
   assert.ok(thin >= 0);
+  // 3段目：1段目・2段目がないレースで、当たる確率 30% 以上・期待値が 1 を超えるワイドのうち期待値のいちばん高い1点を予算の2割
+  let tier3 = 0;
+  for (let seed = 1; seed <= 60 && tier3 < 3; seed++) {
+    const race = makeRace({ seed });
+    // 複勝は低めのオッズ（1段目・2段目にならない）、ワイドは上位2頭に実際のオッズを高めに
+    for (const e of race.entries) Object.assign(e, { placeMin: 1.1, placeMax: 1.2 });
+    const pred0 = predictRace(race, { sims: 0 });
+    const [a, b] = pred0.rows.map((r, i) => i).sort((x, y) => pred0.rows[y].pTop3 - pred0.rows[x].pTop3);
+    const key = [pred0.rows[a].entry.number, pred0.rows[b].entry.number].sort((x, y) => x - y).join('-');
+    race.exoticOdds = { wide: { [key]: 3.5 } };
+    const pred = predictRace(race, { sims: 0 });
+    const rec = recommendBets(pred, { budget: 1000 });
+    const t = rec.tickets.find((x) => x.auto === 'tier3');
+    if (!t) continue;
+    assert.equal(t.type, 'wide');
+    assert.equal(rec.tickets.length, 1);
+    assert.ok(t.pHit >= AUTO_STAKE.tier3.minP.wide && t.ev > 1, `${t.pHit} ${t.ev}`);
+    assert.equal(t.stake, Math.floor((1000 * AUTO_STAKE.tier3.share) / 100) * 100);
+    assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit);
+    // 自動・絞る では買わない
+    assert.equal(recommendBets(pred, { budget: 1000, keep: 'strict' }).tickets.length, 0);
+    tier3++;
+  }
+  assert.ok(tier3 > 0, '3段目のワイドを買うレースで確かめている');
   // 自動・絞る：1段目だけ（2段目は買わない）。自動・多め：2段目の期待値の下限が低い
   for (let seed = 1; seed <= 30; seed++) {
     const race = makeRace({ seed });

@@ -5,7 +5,7 @@
 
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
-import { recommendBets, planDay, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DAY_BUDGET_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
+import { recommendBets, planDay, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DAY_BUDGET_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES, OLD_DEFAULT_TYPES } from './engine/bets.js';
 import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { reviewRace } from './engine/review.js';
 import { runBacktest } from './engine/backtest.js';
@@ -58,6 +58,7 @@ const NOISE_VERSION = 2;
 const BLEND_VERSION = 2;
 // 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%、2026-10-05 に的中重視の自動）ので、前に保存した選択は一度「自動」に戻す
 const KEEP_VERSION = 3;
+const TYPES_VERSION = 2;
 const TABS = ['predict', 'settings', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
@@ -93,7 +94,13 @@ const state = {
   sims: [20000, 50000, 100000].includes(saved.sims) ? saved.sims : 50000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
   strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
-  betTypes: sameCal && Array.isArray(saved.betTypes) ? saved.betTypes.filter((t) => BET_TYPES.includes(t)) : [...DEFAULT_TYPES],
+  // 券種：以前の既定（ワイド以外）のまま変えていなければ、新しい既定（ワイドも。的中重視の自動の3段目に使う）に置き換える（typesVersion 2）
+  betTypes:
+    sameCal && Array.isArray(saved.betTypes)
+      ? saved.typesVersion !== TYPES_VERSION && [...saved.betTypes].sort().join(',') === [...OLD_DEFAULT_TYPES].sort().join(',')
+        ? [...DEFAULT_TYPES]
+        : saved.betTypes.filter((t) => BET_TYPES.includes(t))
+      : [...DEFAULT_TYPES],
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
@@ -127,7 +134,7 @@ let current = { pred: null, rec: null };
 
 function persist() {
   const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, dayBudget, edits } = state;
-  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, keepVersion: KEEP_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, dayBudget, edits, imported });
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, keepVersion: KEEP_VERSION, typesVersion: TYPES_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, dayBudget, edits, imported });
 }
 
 const today = () => jstParts().date;

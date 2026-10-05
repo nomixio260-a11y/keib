@@ -10,6 +10,7 @@ const AUTO_KIND = {
   classic: 'これまでの的中重視の条件を満たす買い目。自信（有利さ）に応じて上限まで',
   kelly: '当たる確率 55% 以上（1.1 倍は 80% 以上）で期待値が 1.2 以上の買い目。自信（有利さ）に応じて上限まで',
   tier2: '当たる確率 50% 以上で期待値が 1.1 以上の単勝・複勝（2段目）。参加するレースを増やすための少額の買い目（予算の3割）',
+  tier3: '1段目・2段目がないレースで、当たる確率 30% 以上・期待値が 1 を超えるワイド（3段目）。見送りを減らすための少額の買い目（予算の2割）',
   extra: '当たる確率はやや低いが期待値の高い追加の買い目。自信（有利さ）に応じて上限まで（馬連・三連複は主な買い目より先に、複勝は残りの予算で）',
 };
 import { speedFigure } from '../engine/speed.js';
@@ -344,7 +345,7 @@ export function renderBetsPanel(pred, rec, ctx) {
     ? rec.tickets
         .map(
           (t) => `<tr>
-          <td>${esc(BET_LABEL[t.type])}${rec.auto && t.auto === 'extra' ? `<small class="bt-sub" title="${esc(AUTO_KIND.extra)}">追加</small>` : rec.auto && t.auto === 'tier2' ? `<small class="bt-sub" title="${esc(AUTO_KIND.tier2)}">少額</small>` : ''}</td>
+          <td>${esc(BET_LABEL[t.type])}${rec.auto && t.auto === 'extra' ? `<small class="bt-sub" title="${esc(AUTO_KIND.extra)}">追加</small>` : rec.auto && t.auto === 'tier2' ? `<small class="bt-sub" title="${esc(AUTO_KIND.tier2)}">少額</small>` : rec.auto && t.auto === 'tier3' ? `<small class="bt-sub" title="${esc(AUTO_KIND.tier3)}">少額</small>` : ''}</td>
           <td class="num bt-combo">${esc(ticketLabel(t))}</td>
           <td class="num">${pct(t.pHit ?? t.pEv ?? t.p)}</td>
           <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}${t.estimated ? '<small title="単勝オッズからの推定">推</small>' : t.type !== 'win' ? '<small class="tx-good" title="JRA の実際のオッズ">実</small>' : ''}</td>
@@ -404,6 +405,7 @@ export function renderBetsPanel(pred, rec, ctx) {
         parts.push(`<b>自動</b>：毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの下限〜上限の幅と当たる確率から）で期待値と有利さを出し、買う買い目と金額を決めます。予算は上限で、使い切るとは限りません${rec.tickets.length ? `（このレース ${yen(rec.used)}・予算の ${Math.round((rec.used / rec.budget) * 100)}%）` : ''}。`);
         parts.push(`・1段目：当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上（1.1 倍は ${pct(AUTO_STAKE.lowP, 0)} 以上）で期待値が ${AUTO_STAKE.minEv.toFixed(1)} 以上の買い目を1点 → 自信に応じて上限まで（有利さが ${pct(AUTO_STAKE.fullAt, 0)} 未満なら減らす）。期待値の余裕は、いま見ているオッズが確定までに動く分です（確定オッズで選ぶ検証では余裕が要らないように見えますが、発走10分前のオッズで選ぶと、余裕の小さい買い目は損でした）`);
         if (state.keep !== 'strict') parts.push(`・2段目（参加するレースを増やす）：1段目がないレースで、当たる確率 ${pct(AUTO_STAKE.tier2.minP, 0)} 以上・期待値 ${(state.keep === 'more' ? AUTO_STAKE_MORE : AUTO_STAKE).tier2.minEv.toFixed(2)} 以上の単勝・複勝を、予算の ${Math.round(AUTO_STAKE.tier2.share * 10)}割で1点（「少額」）。発走10分前のオッズの推定で、参加するレースは約2.6倍になり、長い期間の回収率はほぼ変わりません`);
+        if (state.keep !== 'strict') parts.push(`・3段目（見送りを減らす）：1段目・2段目がないレースで、当たる確率 ${pct(AUTO_STAKE.tier3.minP.wide, 0)} 以上・期待値が 1 を超えるワイドのうち期待値のいちばん高い1点を、予算の ${Math.round(AUTO_STAKE.tier3.share * 10)}割で（「少額」。券種でワイドを外すと買いません）`);
         if (state.keep === 'strict') parts.push('・「自動・絞る」：1段目だけ（1日に1〜2レース）');
         parts.push(`・当たっても利益が ${AUTO_STAKE.minProfit}円に届かない買い目は買いません。どれもなければ見送り`);
         if (exotic) parts.push('馬連・三連複などの追加の買い目は、発走前のオッズで選ぶと学習期間のどの年も損だったので買いません。馬単・三連単は推定オッズなので買いません。');
