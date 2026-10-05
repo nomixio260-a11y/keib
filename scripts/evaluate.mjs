@@ -69,25 +69,36 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
   };
 }
 
-// 発走前のオッズで選んだ場合（推定）：上の検証は確定オッズ（発走後に決まる）で買い目を選んでいる。実際に買う時点
-// （発走10分前）のオッズは確定オッズからかなりずれるので、記録したオッズの推移（data/odds）から取った「その時点 → 確定」の
-// ずれを確定オッズに足して予想し直し、乱数を変えて EVAL_DRIFT_SEEDS 回。精算は実際の払戻（払戻は確定オッズで決まる）
+// 発走前のオッズで選んだ場合（推定）：上の検証は確定オッズ（発走後に決まる）で買い目を選んでいる。実際に買う時点のオッズは
+// 確定オッズからずれるので、記録したオッズの推移（data/odds）から取った「その時点 → 確定」のずれを確定オッズに足して予想し直し、
+// 乱数を変えて EVAL_DRIFT_SEEDS 回。精算は実際の払戻（払戻は確定オッズで決まる）。買う時刻ごとに（EVAL_DRIFT_TIMES、分）：
+// 1 = 発走1分前より前の最後の更新（「直前」。画面の買い目と発走前の記録はこの時点）、10 = 発走10分前、60 = 発走60分前（早めに買う場合）
 {
   const { loadDrift } = await import('./lib/drift.mjs');
   const { makePerturber, driftSummary } = await import('../src/engine/oddsDrift.js');
-  const minutes = Number(process.env.EVAL_DRIFT_MIN || 10);
+  const times = (process.env.EVAL_DRIFT_TIMES || process.env.EVAL_DRIFT_MIN || '1,10,60').split(',').map(Number).filter((m) => m > 0);
   const seeds = Number(process.env.EVAL_DRIFT_SEEDS || 3);
-  const drift = await loadDrift(all, index, minutes);
   const key = out.presets.ml ? 'ml' : 'balance';
-  if (drift.near < drift.races * 0.8) console.log(`\n注意：発走${minutes}分前の30分以内の記録があるのは ${drift.near}/${drift.races}レースだけです（data/odds が古い。data ブランチの odds/ を data/odds にコピーするか KEIB_ODDS_DIR で指定）`);
-  if (drift.samples.length >= 100 && drift.near >= drift.races * 0.8 && out.presets[key]) {
+  const label = (m) => (m <= 1 ? '直前（発走前の最後の更新）' : `発走${m}分前`);
+  const sumDaily = (daily) => {
+    const bet = daily.filter((d) => d.races > 0);
+    const t = (k) => bet.reduce((a, d) => a + d[k], 0);
+    return { races: t('races'), hits: t('hits'), stake: t('stake'), pay: t('pay'), days: daily.length, betDays: bet.length, loseDays: bet.filter((d) => d.pay < d.stake).length, worst: bet.length ? Math.min(...bet.map((d) => d.pay - d.stake)) : 0 };
+  };
+  const pack = (r) => ({ ...r, profit: r.pay - r.stake, roi: r.stake ? r.pay / r.stake : null, hitRate: r.races ? r.hits / r.races : null });
+  const line = (name, r) => `  ${name}：買ったレース ${Math.round(r.races)}・的中率 ${pct(r.hitRate)}・回収率 ${pct(r.roi)}・収支 ${Math.round(r.profit).toLocaleString('ja-JP')}円・負けた日 ${r.loseDays.toFixed?.(1) ?? r.loseDays}/${Math.round(r.betDays)}日`;
+  const finalAi = out.presets[key]?.strategies.find((x) => x.key === 'ai');
+  const fin = finalAi ? pack(sumDaily(finalAi.daily || [])) : null;
+  const byTime = [];
+  for (const minutes of times) {
+    const drift = await loadDrift(all, index, minutes);
+    if (drift.near < drift.races * 0.8) console.log(`\n注意：発走${minutes}分前の30分以内の記録があるのは ${drift.near}/${drift.races}レースだけです（data/odds が古い。data ブランチの odds/ を data/odds にコピーするか KEIB_ODDS_DIR で指定）`);
+    if (!(drift.samples.length >= 100 && drift.near >= drift.races * 0.8 && out.presets[key])) {
+      console.log(`\n（${label(minutes)}：オッズの推移の記録が少ないので省略：${drift.samples.length}頭）`);
+      continue;
+    }
     const perturb = makePerturber(drift.samples);
     const preset = PRESETS[key];
-    const sumDaily = (daily) => {
-      const bet = daily.filter((d) => d.races > 0);
-      const t = (k) => bet.reduce((a, d) => a + d[k], 0);
-      return { races: t('races'), hits: t('hits'), stake: t('stake'), pay: t('pay'), days: daily.length, betDays: bet.length, loseDays: bet.filter((d) => d.pay < d.stake).length, worst: bet.length ? Math.min(...bet.map((d) => d.pay - d.stake)) : 0 };
-    };
     const runs = [];
     for (let k = 1; k <= seeds; k++) {
       const cards = test.map((c) => perturb(c, `${c.id}|${k}`));
@@ -96,17 +107,19 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
       runs.push(sumDaily(ai.daily || []));
     }
     const avg = (f) => runs.reduce((a, r) => a + f(r), 0) / runs.length;
-    const pack = (r) => ({ ...r, profit: r.pay - r.stake, roi: r.stake ? r.pay / r.stake : null, hitRate: r.races ? r.hits / r.races : null });
-    const finalAi = out.presets[key].strategies.find((x) => x.key === 'ai');
-    const fin = pack(sumDaily(finalAi.daily || []));
     const est = pack({ races: avg((r) => r.races), hits: avg((r) => r.hits), stake: avg((r) => r.stake), pay: avg((r) => r.pay), days: runs[0].days, betDays: avg((r) => r.betDays), loseDays: avg((r) => r.loseDays), worst: avg((r) => r.worst) });
-    out.realistic = { minutes, seeds, drift: { ...driftSummary(drift.samples), races: drift.races, days: drift.days }, final: fin, estimate: est, runs: runs.map(pack) };
-    const line = (name, r) => `  ${name}：買ったレース ${Math.round(r.races)}・的中率 ${pct(r.hitRate)}・回収率 ${pct(r.roi)}・収支 ${Math.round(r.profit).toLocaleString('ja-JP')}円・負けた日 ${r.loseDays.toFixed?.(1) ?? r.loseDays}/${Math.round(r.betDays)}日`;
-    console.log(`\n■ 発走${minutes}分前のオッズで選んだ場合（推定。オッズの推移 ${drift.races}レース・${drift.days}日・${drift.samples.length}頭のずれ、乱数 ${seeds}通り）`);
-    console.log(line('確定オッズ（上の検証）', fin));
-    for (const [k, r] of runs.entries()) console.log(line(`発走${minutes}分前（乱数${k + 1}）`, pack(r)));
-    console.log(line(`発走${minutes}分前（平均）`, est));
-  } else console.log(`\n（オッズの推移の記録が少ないので、発走前のオッズでの推定は省略：${drift.samples.length}頭）`);
+    byTime.push({ minutes, label: label(minutes), seeds, drift: { ...driftSummary(drift.samples), races: drift.races, days: drift.days }, final: fin, estimate: est, runs: runs.map(pack) });
+    console.log(`\n■ ${label(minutes)}のオッズで選んだ場合（推定。オッズの推移 ${drift.races}レース・${drift.days}日・${drift.samples.length}頭のずれ、乱数 ${seeds}通り）`);
+    if (fin) console.log(line('確定オッズ（上の検証）', fin));
+    for (const [k, r] of runs.entries()) console.log(line(`${label(minutes)}（乱数${k + 1}）`, pack(r)));
+    console.log(line(`${label(minutes)}（平均）`, est));
+  }
+  // 画面の「発走前のオッズで選んだ場合」：直前を先頭に（なければ最初の時刻）
+  if (byTime.length) {
+    const main = byTime.find((x) => x.minutes <= 1) || byTime[0];
+    out.realistic = main;
+    out.realisticByTime = byTime;
+  }
 }
 
 // README 用の表（Markdown）

@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { jstParts, startMs, raceStatus, untilText, visibleDays, RECENT_DAYS } from '../src/engine/raceTime.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, pruneBundle, cardTtl } from '../src/collector/bundle.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, pruneBundle, cardTtl, nextRefreshSec } from '../src/collector/bundle.js';
 import { indexHistory, preRaceCard, computeStats, jockeyRates } from '../src/data/history.js';
 import { speedFigure } from '../src/engine/speed.js';
 import { predictRace } from '../src/engine/model.js';
@@ -73,6 +73,21 @@ function record(id, date, horses, { course = '東京', distance = 1600, surface 
     payouts: { win: { 1: 200 }, place: { 1: 110, 2: 150, 3: 200 } },
   };
 }
+
+test('取り込みの間隔：発走20分前〜発走は2分半ごと（買う直前のオッズを新しく）、90分前〜結果待ちは5分、深夜は1時間', () => {
+  const today = '2026-10-10';
+  const at = (hhmm) => Date.parse(`${today}T${hhmm}:00+09:00`);
+  const race = (startTime, status = 'card') => ({ date: today, startTime, status });
+  const b = { days: [{ date: today, races: [race('10:05'), race('12:00'), race('16:30')] }] };
+  assert.equal(nextRefreshSec(b, { now: at('09:00'), today }), 300);
+  assert.equal(nextRefreshSec(b, { now: at('09:50'), today }), 150);
+  assert.equal(nextRefreshSec(b, { now: at('10:20'), today }), 300);
+  b.days[0].races[0].status = 'result';
+  assert.equal(nextRefreshSec(b, { now: at('10:20'), today }), 1200);
+  assert.equal(nextRefreshSec(b, { now: at('11:45'), today }), 150);
+  assert.equal(nextRefreshSec(b, { now: at('03:00'), today }), 3600);
+  assert.equal(nextRefreshSec({ days: [] }, { now: at('12:00'), today }), 3600);
+});
 
 test('レース前時点の出馬表は、そのレースより前の走だけを使う', () => {
   const horses = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];

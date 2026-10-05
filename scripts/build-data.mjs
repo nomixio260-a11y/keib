@@ -23,7 +23,7 @@ import path from 'node:path';
 import { copyFile, mkdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createJraClient } from '../src/collector/client.js';
-import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs, upsertRace, sortBundle } from '../src/collector/bundle.js';
+import { emptyBundle, addPastDaysFromHistory, mergeBundle, refreshLive, pruneBundle, attachDayVariants, compactBundle, jstParts, startMs, upsertRace, sortBundle, nextRefreshSec } from '../src/collector/bundle.js';
 import { listRegistrations, fetchRegistrations, registrationToRace, addProvisionalRaces, removeProvisionalRaces } from '../src/collector/registrations.js';
 import { listCardMeetings } from '../src/collector/collect.js';
 import { REAL_STATS } from '../src/engine/realStats.js';
@@ -220,21 +220,7 @@ if (opt('history-keep-days', null) && opt('history', null)) {
 const races = bundle.days.reduce((a, d) => a + d.races.length, 0);
 log(`書き出しました：${path.relative(ROOT, out)}（${bundle.days.length}日・${races}レース）`);
 for (const d of bundle.days) log(`  ${d.date} ${d.venues.join('・')} ${d.races.length}R（結果 ${d.races.filter((r) => r.status === 'result').length}${d.races.some((r) => r.provisional) ? `・特別登録の暫定 ${d.races.filter((r) => r.provisional).length}` : ''}）`);
-console.log(`NEXT=${nextInterval(bundle)}`);
-
-/** 次の取り込みまでの目安（秒）。今日の未確定レースの発走 90分前〜結果待ちは 300、それ以外の開催日と前日発売中は 1200、深夜（JST 0〜7時）と開催のない日は 3600 */
-function nextInterval(b, now = Date.now()) {
-  const all = b.days.flatMap((d) => d.races);
-  const jstHour = new Date(now + 9 * 3600 * 1000).getUTCHours();
-  if (jstHour < 7) return 3600;
-  const pendingToday = all.filter((r) => r.date === today && r.status !== 'result');
-  if (pendingToday.length) {
-    const first = Math.min(...pendingToday.map((r) => startMs(r) || Infinity));
-    return !Number.isFinite(first) || first - now < 90 * 60 * 1000 ? 300 : 1200;
-  }
-  const soon = all.some((r) => r.status !== 'result' && startMs(r) && startMs(r) > now && startMs(r) - now < 24 * 3600 * 1000);
-  return soon ? 1200 : 3600;
-}
+console.log(`NEXT=${nextRefreshSec(bundle, { today })}`);
 
 if (flag('copy-dist')) {
   await mkdir(path.join(ROOT, 'dist'), { recursive: true });

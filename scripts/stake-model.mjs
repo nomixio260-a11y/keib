@@ -12,7 +12,7 @@
 // オッズの推定（乱数3通りずつ）の6通りをまとめて当てはめ、6通りそれぞれで精算して平均する。1R 1,000円・1日の予算は発走順に先着。
 
 import path from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR } from '../src/collector/store.js';
 import { AUTO_STAKE, MIN_ODDS, expectedPayout, stakeFeatures, pickAuto, expectedReturn } from '../src/engine/bets.js';
@@ -224,6 +224,28 @@ for (const [key, rs] of Object.entries(results)) {
     };
   }
 }
+// 買う時刻ごと（いまの規則）：直前（発走前の最後の更新）・5分前・10分前・60分前の候補（あれば）。R̂ は上と同じ（SETS で前進検証）
+const TIMINGS = (process.env.STAKE_TIMINGS || 'm1:直前（最後の更新）,m5:発走5分前,m10:発走10分前,m60:発走60分前').split(',').map((x) => {
+  const [prefix, label] = x.split(':');
+  return { prefix, label };
+});
+const timing = [];
+for (const T of TIMINGS) {
+  const names = [1, 2, 3].map((k) => `${T.prefix}s${k}`);
+  const exists = await Promise.all(names.map((n) => access(path.join(CAND_DIR, `${n}.bin`)).then(() => true, () => false)));
+  if (!exists.every(Boolean)) continue;
+  const tsets = [];
+  for (const n of names) tsets.push(SETS.includes(n) ? sets[SETS.indexOf(n)] : await loadSet(n));
+  const rs = tsets.map((st) => simulate(st, RULES.new.plan));
+  const row = { prefix: T.prefix, label: T.label, summary: {} };
+  for (const P of PERIODS) {
+    const xs = rs.map((r) => r.per[P.key]);
+    const stake = avg(xs, (x) => x.stake);
+    const pay = avg(xs, (x) => x.pay);
+    row.summary[P.key] = { races: Math.round(avg(xs, (x) => x.races)), hitRate: +(avg(xs, (x) => x.hits) / Math.max(1, avg(xs, (x) => x.races))).toFixed(4), roi: +(pay / Math.max(1, stake)).toFixed(4), profit: Math.round(pay - stake), loseDays: +avg(xs, (x) => x.loseDays).toFixed(1), betDays: +avg(xs, (x) => x.betDays).toFixed(1), days: xs[0].allDays };
+  }
+  timing.push(row);
+}
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
 const yen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('ja-JP')}円`;
 console.log(`\n発走前のオッズで選んだ場合（6通りの平均・1R ${B.toLocaleString('ja-JP')}円・1日の予算 ${DAY_MULT}倍）。回収率の（）は6通りでいちばん低いもの`);
@@ -233,6 +255,10 @@ for (const P of PERIODS) {
     const s = summary[key][P.key];
     console.log(`  ${R.label.padEnd(18, '　')} ${String(s.races).padStart(5)}レース 的中率 ${pct(s.hitRate)} 回収率 ${pct(s.roi)}（${pct(s.roiMin)}） 収支 ${yen(s.profit)} 負けた日 ${s.loseDays}/${s.betDays}`);
   }
+}
+if (timing.length) {
+  console.log('\n買う時刻ごと（いまの規則・各3通りの平均）');
+  for (const row of timing) console.log(`  ${row.label.padEnd(14, '　')} ${PERIODS.map((P) => { const x = row.summary[P.key]; return `${P.label} ${x.races}R ${pct(x.roi)} ${yen(x.profit)} 負${x.loseDays}/${x.betDays}`; }).join(' | ')}`);
 }
 console.log('\n四半期ごとの収支（6通りの平均）');
 const qs = [...new Set(results.new.flatMap((r) => Object.keys(r.byQ)))].sort();
@@ -259,7 +285,7 @@ if (!process.argv.includes('--dry')) {
     region: REGION,
     lambda: LAMBDA,
     coef: Object.fromEntries(FIT_TYPES.map((ty) => [ty, finalCoef[ty]?.map((v) => +v.toFixed(5)) || null])),
-    check: { budget: B, dayMult: DAY_MULT, periods: PERIODS.map(({ key, label }) => ({ key, label })), labels: Object.fromEntries(Object.entries(RULES).map(([k, R]) => [k, R.label])), summary, causes },
+    check: { budget: B, dayMult: DAY_MULT, periods: PERIODS.map(({ key, label }) => ({ key, label })), labels: Object.fromEntries(Object.entries(RULES).map(([k, R]) => [k, R.label])), summary, causes, timing },
   };
   const header = '// scripts/stake-model.mjs が書き出す（レースごとの期待回収率 R̂ の係数と、発走前のオッズでの確かめ）。手で編集しないでください。\n';
   await writeFile(path.join(root, 'src/engine/stakeModel.js'), `${header}export const STAKE_MODEL = ${JSON.stringify(model)};\n`);

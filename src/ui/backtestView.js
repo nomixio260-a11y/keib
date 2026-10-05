@@ -125,21 +125,39 @@ export function picksSection(picks) {
   </section>`;
 }
 
-/** 発走前のオッズで選んだ場合（推定）：確定オッズで選ぶ検証との比較 */
-export function realisticSection(real) {
+/** 発走前のオッズで選んだ場合（推定）：確定オッズで選ぶ検証との比較。買う時刻（直前・10分前・60分前）ごと */
+export function realisticSection(real, byTime = REAL_BACKTEST?.realisticByTime) {
   if (!real?.estimate || !real.final) return '';
   const r = (label, x, note = '') =>
     `<tr><th scope="row">${esc(label)}${note}</th><td class="num">${Math.round(x.races).toLocaleString('ja-JP')}</td><td class="num">${pct(x.hitRate)}</td><td class="num">${pct(x.roi)}</td><td class="num ${x.profit >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(x.profit)}</td><td class="num">${Number(x.loseDays).toFixed(Number.isInteger(x.loseDays) ? 0 : 1)}<small>/${Math.round(x.betDays)}日</small></td></tr>`;
+  const times = byTime?.length ? byTime : [real];
+  const label = (t) => t.label || `発走${t.minutes}分前`;
+  const rows = times.map((t) => r(`${label(t)}（推定・平均）`, t.estimate)).join('');
   const d = real.drift || {};
-  const runs = (real.runs || []).map((x, i) => r(`発走${real.minutes}分前（乱数${i + 1}）`, x)).join('');
+  const runs = (real.runs || []).map((x, i) => r(`${label(real)}（乱数${i + 1}）`, x)).join('');
+  const favDrift = (t) => (t.drift?.favMedianAbs != null ? `${Math.round((Math.exp(t.drift.favMedianAbs) - 1) * 100)}%` : '—');
   return `<section class="bt-section bt-real">
-      <h2 class="section-title">発走${real.minutes}分前のオッズで選んだ場合（推定） <small>AI推奨（標準の設定・1R 1,000円）</small></h2>
+      <h2 class="section-title">発走前のオッズで選んだ場合（推定） <small>AI推奨（標準の設定・1R 1,000円）</small></h2>
       <div class="table-scroll"><table class="bt-table">
-        <thead><tr><th>オッズの時点</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
-        <tbody>${r('確定オッズ（上の検証）', real.final)}${r(`発走${real.minutes}分前（推定・平均）`, real.estimate)}${runs}</tbody>
+        <thead><tr><th>買う時刻（オッズの時点）</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
+        <tbody>${r('確定オッズ（上の検証）', real.final)}${rows}${runs}</tbody>
       </table></div>
-      <p class="panel-note"><strong>上の検証は、発走後に決まる確定オッズで買い目を選んでいます。</strong>実際に買う時点のオッズは確定オッズからかなりずれます（締切の直前に多くの票が入るため。記録したオッズの推移 ${d.races ?? '—'}レース・${d.days ?? '—'}日では、5倍未満の馬で発走${real.minutes}分前と確定の差の中央値 ${d.favMedianAbs != null ? `${Math.round((Math.exp(d.favMedianAbs) - 1) * 100)}%` : '—'}）。そのずれを確定オッズに足して予想し直し、実際の払戻で精算したのがこの推定です。確定オッズで選んだ成績は、実際には出せません。記録したオッズの推移はまだ少ないので、推定には幅があります（乱数ごとの差を見てください）。本当の成績は、上の「発走前に記録した買い目の成績」で確かめてください。</p>
+      <p class="panel-note"><strong>上の検証は、発走後に決まる確定オッズで買い目を選んでいます。</strong>実際に買う時点のオッズは確定オッズからずれます（締切の直前に多くの票が入るため。記録したオッズの推移 ${d.races ?? '—'}レース・${d.days ?? '—'}日では、5倍未満の馬で確定との差の中央値が ${times.map((t) => `${label(t)} ${favDrift(t)}`).join('・')}）。そのずれを確定オッズに足して予想し直し、実際の払戻で精算したのがこの推定です。<strong>買う時刻が発走に近いほど、確定オッズに近く、収支が良くなります。</strong>画面の買い目と「発走前に記録した買い目」は、発走前の最後の更新（直前）のオッズで選んでいます。直前は締切（即PAT は発走1分前）までの最後の記録のオッズで、10/4 の記録では発走の1〜7分前（中央値4分前）でした。記録したオッズの推移はまだ少ないので、推定には幅があります（乱数ごとの差を見てください）。</p>
     </section>`;
+}
+
+/** 買う時刻ごとの収支（いまの規則・発走前のオッズの推定・前進検証。stakeModel.js の check.timing） */
+function timingTable(ch) {
+  if (!ch?.timing?.length) return '';
+  const rows = ch.timing
+    .map((t) => `<tr><th scope="row">${esc(t.label)}</th>${ch.periods.map((P) => { const x = t.summary[P.key]; return `<td class="num ${x.profit >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(x.profit)}<small>・${pct(x.roi, 0)}・負け ${Math.round((100 * x.loseDays) / Math.max(1, x.betDays))}%</small></td>`; }).join('')}</tr>`)
+    .join('');
+  return `<h3 class="fx-h3">買う時刻と収支（いまの規則）</h3>
+      <div class="table-scroll"><table class="bt-table bt-timing-table">
+        <thead><tr><th>買う時刻</th>${ch.periods.map((P) => `<th>${esc(P.label)}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="panel-note">同じ規則でも、<b>買う時刻で収支が大きく変わります</b>。発走前の最後の更新（直前。締切は発走1分前）で買うと、発走10分前の約2倍、発走60分前（朝などに早めに買う）では長い期間で損でした。いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど、選んだ買い目の払戻が見込みに近くなります。負けた日の割合も、直前がいちばん小さくなりました。</p>`;
 }
 
 /**
@@ -180,6 +198,7 @@ export function adjustSection(model = STAKE_MODEL) {
         <thead><tr><th>期間</th><th>買い方</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
+      ${timingTable(ch)}
       <p class="panel-note">${mult ? `学習に使っていない 2024年4月〜2026年6月の収支は 以前の約${mult.toFixed(1)}倍、` : ''}検証期間の30日は ${signedYen(ch.summary.old.hold.profit)} → ${signedYen(ch.summary.new.hold.profit)}。買うレースは増え、的中率も上がりました。負けた日の数はあまり変わりません（利益の出る買い方でも、買った日の4〜5割は負けます）。オッズの推移の記録（${model.drift ? `${model.drift.races}レース・${model.drift.days}日` : '—'}）がまだ少ないので、推定には幅があります。本当の成績は、上の「発走前に記録した買い目の成績」で確かめてください。</p>
     </section>`;
 }

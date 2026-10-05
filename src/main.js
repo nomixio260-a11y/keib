@@ -63,17 +63,40 @@ const TABS = ['predict', 'settings', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
 // （Pages 自体は code の push でしか更新しない。raw.githubusercontent.com は CORS を許可している）
-const REMOTE_DATA_URL = (() => {
+const REMOTE_REPO = (() => {
   try {
     const host = globalThis.location?.hostname || '';
     if (!host.endsWith('.github.io')) return null;
     const owner = host.split('.')[0];
     const repo = (globalThis.location.pathname || '/').split('/').filter(Boolean)[0];
-    return owner && repo ? `https://raw.githubusercontent.com/${owner}/${repo}/data/data.json` : null;
+    return owner && repo ? { owner, repo } : null;
   } catch {
     return null;
   }
 })();
+const REMOTE_DATA_URL = REMOTE_REPO ? `https://raw.githubusercontent.com/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/data/data.json` : null;
+/**
+ * data ブランチのいちばん新しいコミット（GitHub API）。raw.githubusercontent.com はブランチの URL を5分キャッシュする
+ * （クエリを付けても同じ）ので、コミットを指した URL で読む（変わっていなければ読まない。data.json は数MBある）。
+ * 発走直前のオッズを数分早く画面に出すため：発走前のオッズで選ぶ推定では、買う時刻が発走に近いほど収支が良い（README の開発日記 2026-10-06）。
+ * API は IP ごとに1時間60回までなので、失敗したら15分はブランチの URL に戻す
+ */
+const shaState = { sha: null, backoffUntil: 0 };
+async function latestDataSha() {
+  if (!REMOTE_REPO || Date.now() < shaState.backoffUntil) return null;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/commits/data`, { headers: { Accept: 'application/vnd.github.sha' }, cache: 'no-store' });
+    if (!res.ok) {
+      shaState.backoffUntil = Date.now() + 15 * 60 * 1000;
+      return null;
+    }
+    const sha = (await res.text()).trim();
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    shaState.backoffUntil = Date.now() + 15 * 60 * 1000;
+    return null;
+  }
+}
 
 // 過去の開催日のアーカイブ（data ブランチの days/：開催日ごとのファイルと index.json）。github.io 以外では公開先の days/
 const ARCHIVE_BASE = REMOTE_DATA_URL ? REMOTE_DATA_URL.replace(/data\.json$/, 'days/') : 'days/';
@@ -376,8 +399,15 @@ function unloadArchive() {
 /** data.json を読む。変わっていれば true。読めないときは埋め込みの実データを使う */
 async function fetchBundle() {
   try {
-    // 候補を順に試す：data ブランチ（あれば）→ 公開先の data.json。古いほうは採用しない
-    const urls = REMOTE_DATA_URL ? [`${REMOTE_DATA_URL}?t=${Date.now()}`, DATA_URL] : [DATA_URL];
+    // 候補を順に試す：data ブランチ（あれば。最新のコミットを指した URL、わからなければブランチの URL）→ 公開先の data.json。古いほうは採用しない
+    const sha = REMOTE_DATA_URL ? await latestDataSha() : null;
+    if (sha && sha === shaState.sha && data.bundle) {
+      // data ブランチは前回読んだときのまま
+      data.lastFetch = new Date().toISOString();
+      return false;
+    }
+    const remote = sha ? `https://raw.githubusercontent.com/${REMOTE_REPO.owner}/${REMOTE_REPO.repo}/${sha}/data.json` : REMOTE_DATA_URL ? `${REMOTE_DATA_URL}?t=${Date.now()}` : null;
+    const urls = remote ? [remote, DATA_URL] : [DATA_URL];
     let json = null;
     let lastErr = null;
     for (const url of urls) {
@@ -387,7 +417,10 @@ async function fetchBundle() {
         const j = await res.json();
         if (!j || !Array.isArray(j.days)) throw new Error('data.json の形式が違います');
         if (!json || String(j.generatedAt || '') > String(json.generatedAt || '')) json = j;
-        if (url !== DATA_URL && json) break;
+        if (url !== DATA_URL && json) {
+          if (sha && url === remote) shaState.sha = sha;
+          break;
+        }
       } catch (e) {
         lastErr = e;
       }
@@ -1103,7 +1136,22 @@ async function poll() {
   else if (state.tab === 'data') renderDataView();
   // 発走前の買い目の記録（今日の分は取り込みのたびに増える）
   if (changed) fetchPicks();
-  setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
+  setTimeout(poll, pollDelay());
+}
+
+/**
+ * 次に data.json を確かめるまで（ミリ秒）。リアルタイム版は1分。GitHub Pages は、発走30分前〜発走直後のレースがあれば2分
+ * （買う直前のオッズを早く出す。data ブランチは発走20分前から約3分ごとに更新）、ほかは5分
+ */
+function pollDelay(now = Date.now()) {
+  if (data.live) return 60 * 1000;
+  const soon = (data.bundle?.days || []).some((d) =>
+    d.races.some((r) => {
+      const st = startMs(r);
+      return st && r.status !== 'result' && st - now > -5 * 60 * 1000 && st - now < 30 * 60 * 1000;
+    }),
+  );
+  return soon ? 2 * 60 * 1000 : 5 * 60 * 1000;
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,7 +1585,7 @@ async function start() {
     return fetchPicks();
   });
   setInterval(tickClock, 30 * 1000);
-  setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
+  setTimeout(poll, pollDelay());
 }
 
 start();

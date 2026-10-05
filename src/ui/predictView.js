@@ -23,6 +23,8 @@ import { esc, fixed, frameBadge, entryBadge, markClass, odds, pct, signed, STYLE
 import { horseFactorHtml } from './factorView.js';
 import { gradeChip, statusBadge } from './timeline.js';
 import { renderResultPanel } from './resultView.js';
+import { startMs } from '../engine/raceTime.js';
+import { STAKE_MODEL } from '../engine/stakeModel.js';
 
 const timeOf = (iso) => {
   if (!iso) return '';
@@ -332,6 +334,22 @@ export function renderPacePanel(pred) {
   </section>`;
 }
 
+/**
+ * 買う時刻の案内（的中重視の自動・発走前のレース）：オッズの時点（発走の何分前か）と、買う時刻ごとの収支の推定（stakeModel.js の check.timing。
+ * 学習に使っていない 2024年4月〜検証の前・1R 1,000円）
+ */
+function buyTimeNote(race) {
+  const st = startMs(race);
+  const at = race.oddsAt ? Date.parse(race.oddsAt) : null;
+  if (!st || race.result?.length || Date.now() > st) return '';
+  const before = at ? Math.round((st - at) / 60000) : null;
+  const t = STAKE_MODEL?.check?.timing || [];
+  const long = (row) => (row ? Object.entries(row.summary).filter(([k]) => k !== 'hold').reduce((s, [, x]) => s + x.profit, 0) : null);
+  const signedK = (v) => `${v >= 0 ? '+' : '−'}${(Math.abs(v) / 10000).toFixed(1)}万円`;
+  const parts = t.filter((row) => ['m1', 'm5', 'm10', 'm60'].includes(row.prefix)).map((row) => `${row.prefix === 'm1' ? '直前' : row.label.replace('発走', '')} ${signedK(long(row))}`);
+  return `<p class="panel-note bt-buytime">${before != null ? `オッズは ${esc(timeOf(race.oddsAt))} 時点${before >= 0 ? `（発走の${before}分前）` : ''}。` : ''}<b>買うのは発走直前の最後の更新で</b>（即PAT の締切は発走1分前）：いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど有利です${parts.length ? `（同じ規則で、2024年4月〜2026年6月の収支の推定：${parts.join('・')}、1R 1,000円）` : ''}。</p>`;
+}
+
 export function renderBetsPanel(pred, rec, ctx) {
   const { state } = ctx;
   const total = rec.tickets.reduce((a, t) => a + t.stake, 0);
@@ -372,6 +390,7 @@ export function renderBetsPanel(pred, rec, ctx) {
   return `<section class="panel" id="panel-bets" aria-labelledby="h-bets">
     <header class="panel-head"><h2 id="h-bets">買い目</h2><span class="panel-sub">期待値（確率×推定オッズ）で選定</span></header>
     ${settingsLine(state)}
+    ${rec.auto && !rec.noOdds ? buyTimeNote(pred.race) : ''}
     ${rec.formLabel ? `<p class="panel-note bt-auto">このレース：荒れ度「${esc(pred.confidence?.volatility || '')}」→ <b>${esc(rec.formLabel)}</b></p>` : ''}
     ${
       state.betTypes.some((t) => ESTIMATED_TYPES.includes(t))

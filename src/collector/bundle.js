@@ -103,6 +103,26 @@ export function addPastDaysFromHistory(bundle, records, index, dates) {
   sortBundle(bundle);
 }
 
+/**
+ * 次の取り込みまでの目安（秒。Race day ワークフローの間隔）：深夜（JST 0〜7時）は 3600。今日のまだ確定していないレースが
+ * 発走20分前〜発走のときは 150（買う直前のオッズを新しくする。発走前のオッズで選ぶ推定では、買う時刻が発走に近いほど収支が良く、
+ * 発走10分前に買うと最後の更新の約半分、60分前では損だった。README の開発日記 2026-10-06）、発走90分前〜結果待ちは 300、
+ * それ以外の今日と前日発売中（24時間以内に発走）は 1200、開催のない日は 3600。JRA への取得は間隔に関係なく 1.2 秒に1回まで
+ */
+export function nextRefreshSec(bundle, { now = Date.now(), today = jstParts(now).date } = {}) {
+  const all = bundle.days.flatMap((d) => d.races);
+  const jstHour = new Date(now + 9 * 3600 * 1000).getUTCHours();
+  if (jstHour < 7) return 3600;
+  const pendingToday = all.filter((r) => r.date === today && r.status !== 'result');
+  if (pendingToday.length) {
+    const untils = pendingToday.map((r) => (startMs(r) ? startMs(r) - now : -Infinity));
+    if (untils.some((u) => u > 0 && u <= 20 * MIN)) return 150;
+    return untils.some((u) => u < 90 * MIN) ? 300 : 1200;
+  }
+  const soon = all.some((r) => r.status !== 'result' && startMs(r) && startMs(r) > now && startMs(r) - now < 24 * 3600 * 1000);
+  return soon ? 1200 : 3600;
+}
+
 /** 出馬表（オッズ）を取り直す間隔：発走が近いほど短く */
 export function cardTtl(race, now) {
   const st = race ? startMs(race) : null;

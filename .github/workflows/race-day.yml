@@ -3,10 +3,12 @@
 # 自分で次の実行を予約する（workflow_dispatch）。schedule は止まったときの再開用。
 # 画面（GitHub Pages）は data ブランチの data.json を読むので、Pages を公開し直さなくても更新される。
 #
-#   取り込みの間隔は build-data が状況から決める（NEXT=秒）：
+#   取り込みの間隔は build-data が状況から決める（NEXT=秒。src/collector/bundle.js の nextRefreshSec）：
+#     - 今日の未確定レースの発走 20分前から発走まで … 2分半ごと（買う直前のオッズを新しくする。即PAT の締切は発走1分前）
 #     - 今日の未確定レースの発走 90分前から結果が出るまで … 5分ごと
 #     - それ以外の開催日・前日発売中（24時間以内に発走）… 20分ごと
 #     - 深夜（JST 0〜7時）・開催がなく出馬表にも変化がない … 1時間ごと（開催一覧を1回見るだけ）
+#     （間隔は取り込みが終わってから次を始めるまでの待ち。取り込み自体に 15〜45秒かかる）
 #   手動：Actions → Race day → Run workflow（分と間隔を指定すると固定。relay=1 なら終了後に次を予約して自動運転に戻る）
 #   止めるとき：Actions → Race day → … → Disable workflow（実行中の run も Cancel）
 #   data ブランチには data.json のほか、オッズの推移（odds/）と結果の記録（history/。直近400日）も貯める（1コミットを上書き）。
