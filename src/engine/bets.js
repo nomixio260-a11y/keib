@@ -67,30 +67,88 @@ export const LOW_ODDS_LABEL = '1.1 倍以下';
  *  - 当たる確率 70% 以上の人気馬（hiP）の主な買い目は、期待値 1.00〜1.02 だとどの年も回収率 90〜100%（AI は人気馬の3着以内を
  *    1〜2 ポイント高く見る）。期待値 hiEv 未満なら金額を hiCut 倍に（外すと的中率 57.6% → 56.1%・1回も勝てない日 6 → 9日に
  *    なるので、当たりやすさは残して損を小さくする）
- *  - 1日の損失の上限（dayLoss）：その日の確定した収支が −予算 × mult 以下になったら、残りのレースの金額を cut 倍にする
- *    （半分にすると当たっても利益が minProfit 円に届かない買い目は、届く最小の金額に。元の金額まで）。
- *    最悪の日は複勝の外れが重なった日（10点中 2点的中など）で、損失が膨らんだ日の残りだけ金額を減らす。
- *    学習期間 385日・1R 3,000円（本番と同じ流れ）で最悪の日 −23,550 → −17,350円、悪いほうから5日の平均 −21,250 → −16,950円、
- *    人気馬の金額と合わせて収支 +89.8万 → +90.6万円・1回も勝てない日 6日のまま（scratchpad/ml6/days-eval4、bets5/de3-show）
+ *  - 1日の予算（dayBudget）：朝や前日にまとめて買う使い方でも効くように、結果を見ずに1日分の買い目で決める（利用者の依頼
+ *    2026-10-05「券は早朝や前日に買うので、その日の結果で金額を変える損切りは意味がない」）。その日の全レースの買い目の合計が
+ *    1レースの予算 × mult を超えたら、リスクに対する期待値（シャープ比 =（当たる確率 × 払戻の見込み − 1）÷（払戻の見込み ×
+ *    √(当たる確率 ×（1 − 当たる確率））））の高い順に、1日の予算まで割り振り、入らない買い目は見送る（planDay）。
+ *    1日の負けは最大でも 1日の予算まで。最悪の日は「買い目の多い日に外れが重なる」ことで起き、多い日の弱い買い目ほど
+ *    収支への寄与が小さくばらつきが大きい。学習期間の分割外 385日・1R 3,000円（本番と同じ流れ。scratchpad/ml6/days-eval5、
+ *    bets5/de3-show）で、朝にすべて買う（上限なし）と比べて収支 +91.3万 → +92.7万円・最悪の日 −23,000 → −17,700円・
+ *    悪いほうから5日の平均 −20,750 → −17,000円・負けた日 182 → 169日、買うレース 2,903 → 2,393・的中率 57.1% → 56.6%・
+ *    1回も勝てない日 6日のまま。検証期間 30日は +33.3万 → +33.0万円、直近60日は +24.8万 → +23.9万円（予算に入らなかった
+ *    レースの分）。倍数 5 は収支 −11%（最悪の日 −15,000円）、10 は最悪の日が変わらない（−23,000円）ので 7
  */
 export const AUTO_STAKE = {
   minP: 0.6, minEv: 1.0, lowP: 0.8, fullAt: 0.05, classicKeep: 0.5, minProfit: 100, maxTickets: 1, minOdds: 1.05, placeAlpha: [0.4594, -0.1652, -0.1447],
   hiP: 0.7, hiEv: 1.02, hiCut: 0.5,
   extra: { place: [0.4, 1.05], quinella: [0.12, 1.3], trio: [0.15, 1.4], fullAt: 0.05, cap: 1, k: 1, first: ['quinella', 'trio'] },
-  dayLoss: { mult: 4, cut: 0.5 },
+  dayBudget: { mult: 7 },
 };
-/** 1日の損失の上限の選択肢（予算の何倍の損失で残りのレースの金額を減らすか）。'auto' は AUTO_STAKE.dayLoss.mult、0 はなし */
-export const LOSS_LIMIT_OPTIONS = [
-  { value: 'auto', label: '標準（予算の4倍の損失で、残りのレースは金額を半分）' },
-  { value: 0, label: 'なし' },
-  { value: 3, label: '予算の3倍の損失で半分' },
-  { value: 6, label: '予算の6倍の損失で半分' },
+/** 1日の予算の選択肢（1レースの予算の何倍まで）。'auto' は AUTO_STAKE.dayBudget.mult、0 は上限なし */
+export const DAY_BUDGET_OPTIONS = [
+  { value: 'auto', label: '標準（1レースの予算の7倍まで）' },
+  { value: 0, label: 'なし（1日の上限なし）' },
+  { value: 5, label: '1レースの予算の5倍まで' },
+  { value: 10, label: '1レースの予算の10倍まで' },
 ];
-/** 1日の損失の上限（予算の倍数。0 はなし） */
-export function resolveLossLimit(v) {
-  if (v == null || v === '' || v === 'auto') return AUTO_STAKE.dayLoss.mult;
+/** 1日の予算（1レースの予算の倍数。0 は上限なし） */
+export function resolveDayBudget(v) {
+  if (v == null || v === '' || v === 'auto') return AUTO_STAKE.dayBudget.mult;
   const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : AUTO_STAKE.dayLoss.mult;
+  return Number.isFinite(n) && n >= 0 ? n : AUTO_STAKE.dayBudget.mult;
+}
+/** 買い目1点のリスクに対する期待値（シャープ比）：（当たる確率 × 払戻の見込み − 1）÷ 1点あたりの払戻のばらつき */
+export function ticketSharpe(t) {
+  const p = t.pHit ?? t.p ?? 0;
+  const m = t.oddsExp || t.odds || 0;
+  if (!(p > 0 && p < 1 && m > 0)) return -Infinity;
+  return (p * m - 1) / (m * Math.sqrt(p * (1 - p)));
+}
+/**
+ * 1日の予算（朝にまとめて買う前提）：その日の全レースの推奨買い目（的中重視の自動）の合計が 1レースの予算 × 倍数 を超えたら、
+ * シャープ比の高い順に1日の予算まで割り振り、入らない買い目は見送る（金額は買い目ごとの希望額まで。利益 100円に届かない額にはしない）。
+ * items … [{ pred, rec }]（その日のレース。rec は recommendBets の結果）。返り値は同じ順の rec（day に1日の予算の情報）
+ */
+export function planDay(items, { budget, dayBudget = 'auto' } = {}) {
+  const mult = resolveDayBudget(dayBudget);
+  const limit = mult > 0 ? mult * budget : Infinity;
+  const list = [];
+  items.forEach(({ rec }, i) => {
+    if (rec?.auto) rec.tickets.forEach((t, j) => list.push({ i, j, t, s: ticketSharpe(t) }));
+  });
+  const total = list.reduce((a, it) => a + it.t.stake, 0);
+  const races = new Set(list.map((it) => it.i)).size;
+  const info = { limit: Number.isFinite(limit) ? limit : null, mult, total, races };
+  if (!(total > limit)) return items.map(({ rec }) => (rec?.auto ? { ...rec, day: { ...info, used: total, over: false } } : rec));
+  const order = [...list].sort((a, b) => b.s - a.s);
+  let left = limit;
+  const stakeOf = new Map();
+  for (const it of order) {
+    const st = Math.min(it.t.stake, Math.floor(left / 100) * 100);
+    if (st >= 100 && st * (it.t.odds - 1) >= AUTO_STAKE.minProfit) {
+      stakeOf.set(it, st);
+      left -= st;
+    }
+  }
+  const used = limit - left;
+  return items.map(({ pred, rec }, i) => {
+    if (!rec?.auto) return rec;
+    const mine = list.filter((it) => it.i === i);
+    if (!mine.length) return { ...rec, day: { ...info, used, over: true } };
+    const tickets = [];
+    const out = [];
+    for (const it of mine) {
+      const st = stakeOf.get(it) || 0;
+      if (st) tickets.push({ ...it.t, stake: st, share: st / budget, dayCut: st < it.t.stake });
+      else out.push({ ...it.t, stake: 0, why: 'day' });
+    }
+    const dropped = [...out, ...(rec.dropped || [])].slice(0, 5);
+    const skipReason = tickets.length
+      ? null
+      : `この日は買い目の合計（${races}レース・${total.toLocaleString('ja-JP')}円）が1日の予算（${limit.toLocaleString('ja-JP')}円）を超えるので、リスクに対する期待値の高い買い目から順に予算まで買います。このレースは入らなかったので見送り`;
+    const stats = evaluateTickets(tickets.map((t) => ({ ...t, odds: t.oddsExp || t.odds })), pred);
+    return { ...rec, tickets, dropped, used: tickets.reduce((a, t) => a + t.stake, 0), skipped: !tickets.length, skipReason, stats, day: { ...info, used, over: true, out: out.length } };
+  });
 }
 /** 推定オッズしかない券種（自動では使わない） */
 const ESTIMATED_ONLY = new Set(['exacta', 'trifecta']);
@@ -115,7 +173,7 @@ export const STRATEGIES = {
   // minOdds：上の MIN_ODDS（以前は的中重視だけ 1.05：当たっても元返しの 1.0 倍だけを買わなかった）
   // keepMinP：買い目を決めたあと、当たる確率（平らにしない元の予想）がこれ以上のものだけ残す2段目。学習期間の分割外 186週で
   // 的中率 52% → 76%、最大の落ち込み −23,150円 → −7,600円、回収率 107.5% → 105.4%（検証14週：93%・147.5%）。README の開発日記
-  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で利益を見込み、買う買い目と金額を自動で決めます（予算は上限で、使い切るとは限りません）。当たる確率 60% 以上で利益の見込める買い目と、当たる確率はやや低いが期待値の高い買い目（複勝・馬連・三連複）を、自信に応じて上限まで買います（馬連・三連複は回収率がいちばん高いので先に）。当たっても 100円の利益に届かない買い目は買いません。その日の負けが予算の4倍に達したら、残りのレースは金額を半分にします（1日の損失の上限）。学習に使っていない約1.2万レース（385日・1R 上限 3,000円）で収支 +90.6万円、最悪の日 −17,350円（上限なしは −23,550円）、買わない日 0日・1回も勝てない日 6日でした。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
+  hit: { label: '的中重視', desc: '当たりやすさを優先。毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの幅と当たる確率から）で利益を見込み、買う買い目と金額を自動で決めます（予算は上限で、使い切るとは限りません）。当たる確率 60% 以上で利益の見込める買い目と、当たる確率はやや低いが期待値の高い買い目（複勝・馬連・三連複）を、自信に応じて上限まで買います（馬連・三連複は回収率がいちばん高いので先に）。当たっても 100円の利益に届かない買い目は買いません。朝や前日にまとめて買えるように、その日の買い目の合計が1日の予算（標準は1レースの予算の7倍）を超えたら、リスクに対する期待値の高い買い目から順に予算まで買います（1日の予算）。学習に使っていない約1.2万レース（385日・1R 上限 3,000円）で収支 +92.7万円、最悪の日 −17,700円（1日の予算なしは −23,000円）、買わない日 0日・1回も勝てない日 6日でした。', minEv: 0.9, blend: 0, minOdds: MIN_ODDS, minOddsAi: 1.05, keepMinP: 0.5, maxTickets: 6, alloc: 'equal', autoStake: true },
   // betTemp：買い目の選定で勝率を平らにする倍率（既定 BET_TEMP）。バランス・高配当は学習期間の分割外で良くならなかった（バランス −8.3 ± 11.2pt、高配当は買うレースが少なく判断できない）ので 1
   // keepMinP（バランス 30%・高配当 20%）：絞らないと馬連・三連複・三連単を足したとき1日に約29レース・160点近く買い、学習期間の分割外 385日のうち
   // 169日（高配当 172日）で1万円以上負けた（1R 千円。7/25 は 1R 3,000円で −46,270円）。絞ると回収率 85.3% → 100.8%（高配当 92.1% → 106.2%）、
@@ -416,13 +474,9 @@ export const BLEND_OPTIONS = [
 
 /** 的中重視の自動：AUTO_STAKE の説明を参照。tickets の stake は自信に応じた金額（合計は予算以下）、share は予算に対する割合 */
 const ticketKey = (t) => `${t.type}:${t.idx.join('-')}`;
-function autoStakeBets(pred, { budget, strategy, types, blend, dayPnl = null, lossLimit = 'auto' }) {
+function autoStakeBets(pred, { budget, strategy, types, blend }) {
   const A = AUTO_STAKE;
   const unit = 100;
-  // 1日の損失の上限：その日の確定した収支が −予算 × 倍数 以下なら、このレースの金額を cut 倍に
-  const limitMult = resolveLossLimit(lossLimit);
-  const dayCut = limitMult > 0 && dayPnl != null && dayPnl <= -limitMult * budget;
-  const cutMul = dayCut ? A.dayLoss.cut : 1;
   // オッズの確率を期待値に混ぜる割合（'auto' は混ぜない。選んだときだけ、買い目を選ぶ期待値に混ぜる。当たる確率は AI のまま）
   const mix = blend == null || blend === '' || blend === 'auto' ? 0 : Math.min(1, Math.max(0, Number(blend) || 0));
   // (1) これまでの的中重視の買い目（当たる確率で絞る 50%）
@@ -446,9 +500,7 @@ function autoStakeBets(pred, { budget, strategy, types, blend, dayPnl = null, lo
     // 下限 1.1 倍以下は、当たる確率 lowP 以上のときだけ (2) にする（払戻が一緒に来る馬しだいでぶれる）
     const strong = c.p >= (c.odds >= MIN_ODDS ? A.minP : A.lowP) && ev >= A.minEv;
     if ((isClassic || strong) && f > 0) {
-      let stake = Math.floor((budget * Math.min(1, f / A.fullAt) * cutMul * (favThin ? A.hiCut : 1)) / unit) * unit;
-      // 1日の損失の上限で半分にすると当たっても利益が minProfit 円に届かないときは、届く最小の金額に（元の金額まで）
-      if (dayCut && stake * (c.odds - 1) < A.minProfit) stake = Math.min(Math.floor((budget * Math.min(1, f / A.fullAt) * (favThin ? A.hiCut : 1)) / unit) * unit, Math.ceil(A.minProfit / Math.max(1e-9, c.odds - 1) / unit) * unit);
+      const stake = Math.floor((budget * Math.min(1, f / A.fullAt) * (favThin ? A.hiCut : 1)) / unit) * unit;
       // 当たっても利益が小さすぎる買い目（下限オッズで minProfit 円未満）は買わない
       if (stake >= unit && stake * (c.odds - 1) >= A.minProfit) {
         main.push({ ...t, stake, auto: isClassic ? 'classic' : 'kelly', favThin });
@@ -462,8 +514,7 @@ function autoStakeBets(pred, { budget, strategy, types, blend, dayPnl = null, lo
     // 追加の買い目：当たる確率はやや低いが期待値の高いもの（金額は主な買い目と同じく有利さに応じて）
     const L = X?.[c.type];
     if (L && f > 0 && c.odds >= MIN_ODDS && c.p >= L[0] && ev >= L[1]) {
-      let stake = Math.floor((budget * Math.min(X.cap, f / X.fullAt) * cutMul) / unit) * unit;
-      if (dayCut && stake * (c.odds - 1) < A.minProfit) stake = Math.min(Math.floor((budget * Math.min(X.cap, f / X.fullAt)) / unit) * unit, Math.ceil(A.minProfit / Math.max(1e-9, c.odds - 1) / unit) * unit);
+      const stake = Math.floor((budget * Math.min(X.cap, f / X.fullAt)) / unit) * unit;
       if (stake >= unit && stake * (c.odds - 1) >= A.minProfit) {
         extra.push({ ...t, stake, auto: 'extra' });
         continue;
@@ -506,10 +557,10 @@ function autoStakeBets(pred, { budget, strategy, types, blend, dayPnl = null, lo
       }`;
   // 的中率・期待回収率・プラス収支の確率は、払戻の見込み（複勝は下限〜上限の幅から）で出す（表の期待値と同じ）
   const stats = evaluateTickets(tickets.map((t) => ({ ...t, odds: t.oddsExp })), pred);
-  return { strategy, budget, tickets, dropped, auto: true, used, keepMinP: null, candidates: cands.length, skipped: !tickets.length, skipReason, stats, dayCut, dayPnl, lossLimit: limitMult };
+  return { strategy, budget, tickets, dropped, auto: true, used, keepMinP: null, candidates: cands.length, skipped: !tickets.length, skipReason, stats };
 }
 
-export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto', dayPnl = null, lossLimit = 'auto' } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto' } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   const blend = resolveBlend(blendIn, strategy);
   // オッズの下限（MIN_ODDS）。オッズを使わない予想（AI単独）では、1.1 倍以下を外すと検証期間の的中率が下がり回収率は変わらなかったので以前のまま
@@ -544,11 +595,11 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
       const tickets = raw.map((t) => ({ ...priceTicket(t, pred, blend), stake: each }));
       return { strategy, budget, tickets, candidates: tickets.length, form, formLabel: POLICY_FORMS[form].label, stats: evaluateTickets(tickets, pred) };
     }
-    return recommendBets(pred, { budget, strategy: 'hit', types, blend: blendIn, betTemp, keep, dayPnl, lossLimit });
+    return recommendBets(pred, { budget, strategy: 'hit', types, blend: blendIn, betTemp, keep });
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   // 的中重視の自動（既定）：毎レース、当たる確率と払戻の見込みから自信に応じて金額まで決める。AI単独（オッズを使わない予想）は以前のまま
-  if (st.autoStake && isAutoKeep(keep) && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn, dayPnl, lossLimit });
+  if (st.autoStake && isAutoKeep(keep) && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn });
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
   // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）

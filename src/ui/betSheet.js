@@ -4,7 +4,7 @@
 import { esc, frameBadge, entryBadge, pct, yen, odds, markClass } from './format.js';
 import { raceStatus, startMs, untilText } from '../engine/raceTime.js';
 import { BET_LABEL } from '../engine/constants.js';
-import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveLossLimit } from '../engine/bets.js';
+import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveDayBudget } from '../engine/bets.js';
 import { raceOutcomes, simulateDay } from '../engine/daySim.js';
 import { payoutOf } from '../engine/backtest.js';
 import { dayLabel, gradeChip, surfaceChip } from './timeline.js';
@@ -57,23 +57,28 @@ export function buildSheet(ctx) {
     const marks = MARKS.map((m, k) => pred.order[k]).filter(Boolean);
     return { race, st, pred, rec, marks, settle: settleTickets(race, pred, rec.tickets) };
   });
-  // その日の収支の見込み（シミュレーション）：的中重視の自動のとき（1日の損失の上限つき）
+  // その日の収支の見込み（シミュレーション）：的中重視の自動のとき。1日の予算で割り振った買い目と、割り振る前の買い目
   let sim = null;
-  if (ctx.recCutFor && ctx.recNoLimitFor && rows.some((r) => r.rec?.auto)) {
+  if (ctx.recNoLimitFor && rows.some((r) => r.rec?.auto)) {
     const items = [];
+    const raw = [];
     for (const r of rows) {
       if (!r.rec || r.rec.noOdds) continue;
-      if (r.settle || r.race.result?.length) {
-        const noLim = ctx.recNoLimitFor(r.pred);
+      const noLim = ctx.recNoLimitFor(r.pred);
+      if (r.race.result?.length) {
         const s2 = settleTickets(r.race, r.pred, noLim.tickets);
-        items.push({ settled: true, pnl: r.settle ? r.settle.pay - r.settle.stake : 0, pnlNoLimit: s2 ? s2.pay - s2.stake : 0 });
+        items.push({ settled: true, pnl: r.settle ? r.settle.pay - r.settle.stake : 0 });
+        raw.push({ settled: true, pnl: s2 ? s2.pay - s2.stake : 0 });
         continue;
       }
-      const full = ctx.recNoLimitFor(r.pred).tickets;
-      if (!full.length) continue;
-      items.push({ settled: false, out: raceOutcomes(r.pred, full, ctx.recCutFor(r.pred).tickets) });
+      // 買い目のないレースも入れて、割り振る前の買い目と同じ結果の引き方で比べる
+      items.push({ settled: false, out: raceOutcomes(r.pred, r.rec.tickets) });
+      raw.push({ settled: false, out: raceOutcomes(r.pred, noLim.tickets) });
     }
-    if (items.some((x) => !x.settled)) sim = simulateDay(items, { sims: state.sims || 20000, seed: `${state.day}|${state.budget}`, limit: resolveLossLimit(state.lossLimit) * state.budget });
+    const opt = { sims: state.sims || 20000, seed: `${state.day}|${state.budget}` };
+    const plan = simulateDay(items, opt);
+    const before = simulateDay(raw, opt);
+    if (plan.races || before.races) sim = { plan, raw: before, day: rows.find((r) => r.rec?.day)?.rec.day || null };
   }
   const withBets = rows.filter((r) => r.rec?.tickets.length);
   const settled = rows.filter((r) => r.settle);
@@ -85,8 +90,21 @@ export function buildSheet(ctx) {
     settledStake: settled.reduce((a, r) => a + r.settle.stake, 0),
     settledPay: settled.reduce((a, r) => a + r.settle.pay, 0),
     hitRaces: settled.filter((r) => r.settle.hits > 0).length,
+    // 1日の予算（的中重視の自動）：その日の買い目の合計と、予算の範囲に割り振った結果
+    day: rows.find((r) => r.rec?.day)?.rec.day || null,
+    dayOut: rows.filter((r) => r.rec?.day?.over && !r.rec.tickets.length && r.rec.dropped?.some((t) => t.why === 'day')).length,
   };
   return { rows, sum, sim };
+}
+
+/** 1日の予算の説明（買い目表・コピー用） */
+function dayBudgetText(sum) {
+  const d = sum.day;
+  if (!d) return '';
+  if (d.limit == null) return `1日の予算はなし（買い目の合計 ${yen(d.total)}・${d.races}レース）`;
+  return d.over
+    ? `1日の予算 ${yen(d.limit)}（1レースの予算の${d.mult}倍）：買い目の合計 ${yen(d.total)}（${d.races}レース）が予算を超えるので、リスクに対する期待値の高い買い目から順に ${yen(d.used)} まで買います${sum.dayOut ? `（入らなかった ${sum.dayOut}レースは見送り）` : ''}`
+    : `1日の予算 ${yen(d.limit)}（1レースの予算の${d.mult}倍）：買い目の合計 ${yen(d.total)}（${d.races}レース）は予算の範囲内`;
 }
 
 function nameOf(race, number) {
@@ -166,6 +184,7 @@ export function renderBetSheet(ctx) {
       <div><dt>合計金額</dt><dd class="num">${yen(sum.total)}</dd></div>
       ${settledNote}
     </dl>
+    ${sum.day ? `<p class="panel-note sheet-day">${esc(dayBudgetText(sum))}。${sum.day.limit != null ? '朝や前日にまとめて買っても、1日の負けは最大でも1日の予算までです' : 'その日の買い目をすべて買います'}（設定はレースごとの画面の買い目の欄）。</p>` : ''}
     ${sim ? renderDaySim(sim, state) : ''}
     <div class="panel-actions">
       <button type="button" class="btn" data-action="copy-sheet">表をコピー</button>
@@ -186,11 +205,12 @@ const signedYen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLoc
 
 /** その日の収支の見込み（シミュレーション）の表示 */
 function renderDaySim(sim, state) {
-  const w = sim.withLimit;
-  const n = sim.noLimit;
-  const limit = resolveLossLimit(state.lossLimit);
+  const w = sim.plan;
+  const n = sim.raw;
+  const mult = resolveDayBudget(state.dayBudget);
+  const d = sim.day;
   return `<div class="panel day-sim">
-      <h2 class="d-h">この日の収支の見込み <small>まだのレース ${sim.races}R を AI の着順の確率で ${sim.sims.toLocaleString('ja-JP')}回シミュレーション（確定したレースは実際の収支）</small></h2>
+      <h2 class="d-h">この日の収支の見込み <small>まだのレース ${w.races}R を AI の着順の確率で ${w.sims.toLocaleString('ja-JP')}回シミュレーション（確定したレースは実際の収支）</small></h2>
       <dl class="ds-grid">
         <div><dt>平均</dt><dd class="num ${w.mean >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(w.mean)}</dd></div>
         <div><dt>プラスになる確率</dt><dd class="num">${pct(w.plusRate, 0)}</dd></div>
@@ -198,9 +218,11 @@ function renderDaySim(sim, state) {
         <div><dt>悪いほうから5%</dt><dd class="num">${signedYen(w.q05)}</dd></div>
       </dl>
       <p class="panel-note">${
-        limit > 0
-          ? `1日の損失の上限（予算の${limit}倍＝${yen(limit * state.budget)}で残りを半分）込み。上限に達する確率 ${pct(w.reachRate, 0)}。上限なしなら悪いほうから5%は ${signedYen(n.q05)}、最悪 ${signedYen(n.worst)}（上限ありは ${signedYen(w.worst)}）。`
-          : `1日の損失の上限はなし。最悪 ${signedYen(n.worst)}。`
+        mult > 0 && d?.over
+          ? `1日の予算（${yen(d.limit)}）の範囲に割り振った買い目（合計 ${yen(d.used)}）での見込みです。割り振る前の買い目（合計 ${yen(d.total)}）なら、平均 ${signedYen(n.mean)}・悪いほうから5% ${signedYen(n.q05)}・最悪 ${signedYen(n.worst)}（予算の範囲なら最悪 ${signedYen(w.worst)}）。`
+          : mult > 0
+          ? `この日の買い目の合計（${yen(d?.total || 0)}）は1日の予算（${yen(mult * state.budget)}）の範囲内です。最悪 ${signedYen(w.worst)}。`
+          : `1日の予算はなし。最悪 ${signedYen(w.worst)}。`
       }払戻は買い目表と同じ見込み（複勝は下限〜上限の幅から）。オッズが動くと変わります。回数は「予想のモデル」のシミュレーション回数で変えられます（多いほど見込みが安定）。</p>
     </div>`;
 }
@@ -227,5 +249,6 @@ export function sheetText(ctx) {
     lines.push(`${head} [${row.pred.confidence.grade}] ${marks} ｜ ${bets}${res}`);
   }
   lines.push(`合計 ${yen(sum.total)}（${sum.bets}レース）${sum.settledRaces ? `・確定分の収支 ${Math.round(sum.settledPay - sum.settledStake)}円` : ''}`);
+  if (sum.day) lines.push(dayBudgetText(sum));
   return lines.join('\n');
 }

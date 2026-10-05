@@ -5,7 +5,7 @@
 
 import { BET_TYPES, classLevel } from './engine/constants.js';
 import { predictRace, DEFAULT_WEIGHTS, DEFAULT_NOISE, DEFAULT_PRESET, PRESETS, FACTORS, CALIBRATION_ID } from './engine/model.js';
-import { recommendBets, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, LOSS_LIMIT_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
+import { recommendBets, planDay, ticketsToText, STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DAY_BUDGET_OPTIONS, DEFAULT_STRATEGY, DEFAULT_TYPES } from './engine/bets.js';
 import { renderBetSheet, sheetText, settleTickets } from './ui/betSheet.js';
 import { reviewRace } from './engine/review.js';
 import { runBacktest } from './engine/backtest.js';
@@ -93,8 +93,8 @@ const state = {
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
   // 2段目の絞り込み（当たる確率の下限）。既定は自動（的中重視は毎レース買い目と金額まで自動、控えめは 50% 以上）
   keep: saved.keepVersion === KEEP_VERSION && KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
-  // 1日の損失の上限（的中重視の自動）：その日の確定した収支が −予算×倍数 以下になったら、残りのレースの金額を半分に
-  lossLimit: LOSS_LIMIT_OPTIONS.some((o) => o.value === saved.lossLimit) ? saved.lossLimit : 'auto',
+  // 1日の予算（的中重視の自動）：朝にまとめて買う前提で、その日の買い目の合計を 1レースの予算×倍数 までに（リスクに対する期待値の高い順）
+  dayBudget: DAY_BUDGET_OPTIONS.some((o) => o.value === saved.dayBudget) ? saved.dayBudget : 'auto',
   expanded: {},
   edits: saved.edits && typeof saved.edits === 'object' ? saved.edits : {},
 };
@@ -120,8 +120,8 @@ const dataView = {
 let current = { pred: null, rec: null };
 
 function persist() {
-  const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, lossLimit, edits } = state;
-  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, keepVersion: KEEP_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, lossLimit, edits, imported });
+  const { day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, dayBudget, edits } = state;
+  saveState({ calId: CALIBRATION_ID, noiseVersion: NOISE_VERSION, blendVersion: BLEND_VERSION, keepVersion: KEEP_VERSION, day, venue, raceId, weights, preset, noise, sims, budget, strategy, betTypes, sort, blend, keep, dayBudget, edits, imported });
 }
 
 const today = () => jstParts().date;
@@ -387,6 +387,13 @@ function currentStats() {
 
 /** 予想のキャッシュに使う、レースの中身の目印 */
 const raceSig = (race) => `${race.id}|${race.oddsAt || ''}|${race.status || ''}|${race.going || ''}|${race.result?.length || 0}`;
+// 一覧の◎と成績のキャッシュ用：1日の予算はその日の全レースの買い目で決まるので、同じ日のどれかのレースが変われば計算し直す
+const daySig = (date) => (date && date !== 'import' ? racesOf(date, null).map(raceSig).join(',') : '');
+const pickSig = (race, memo = null) => {
+  if (!memo) return `${raceSig(race)}#${daySig(race.date)}`;
+  if (!memo.has(race.date)) memo.set(race.date, daySig(race.date));
+  return `${raceSig(race)}#${memo.get(race.date)}`;
+};
 
 // ---------------------------------------------------------------------------
 // 予想（キャッシュつき）
@@ -412,44 +419,47 @@ let quickTimer = null;
 // 予想画面の表示：'race'（レースごと）か 'sheet'（その日の買い目表）
 let view = 'race';
 
-const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend, keep: state.keep, lossLimit: state.lossLimit });
+const betOpts = () => ({ budget: state.budget, strategy: state.strategy, types: state.betTypes, blend: state.blend, keep: state.keep });
 
 /**
- * 1日の損失の上限のため、その日のレースを発走順に精算し、各レースの「それより前に確定したレースの収支」を出す（今の買い方で）。
- * 結果がまだ出ていないレースは数えない（発走後に結果が取り込まれてから効く）。日付・設定・データが変わるまでキャッシュ
+ * 1日の予算：朝にまとめて買う前提で、その日の全レースの推奨買い目を出し、合計が 1レースの予算×倍数 を超えたら
+ * リスクに対する期待値の高い順に予算まで割り振る（planDay）。結果は見ない（確定したレースも、その日の買い目として同じに扱う）。
+ * 日付・設定・データが変わるまでキャッシュ
  */
-const dayPnlCache = new Map();
+const dayPlanCache = new Map();
 const raceOrder = (a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')) || (a.raceNo ?? 0) - (b.raceNo ?? 0) || String(a.course).localeCompare(String(b.course));
-function dayPnls(date) {
+function dayPlans(date) {
   if (!date || date === 'import') return null;
   const races = racesOf(date, null).slice().sort(raceOrder);
-  const key = `${settingsKey()}|${JSON.stringify(betOpts())}|${JSON.stringify(state.edits)}|${races.map(raceSig).join(',')}`;
-  const hit = dayPnlCache.get(date);
+  const key = `${settingsKey()}|${JSON.stringify(betOpts())}|${state.dayBudget}|${JSON.stringify(state.edits)}|${races.map(raceSig).join(',')}`;
+  const hit = dayPlanCache.get(date);
   if (hit?.key === key) return hit.map;
-  const map = new Map();
-  let acc = 0;
+  const items = [];
   for (const base of races) {
-    map.set(base.id, acc);
-    if (!base.result?.length || base.jump || base.surface === '障') continue;
+    if (base.jump || base.surface === '障') continue;
     const race = effectiveRace(base);
     const pred = getPrediction(race, true);
     if (pred.empty) continue;
-    const rec = recommendBets(pred, { ...betOpts(), dayPnl: acc });
-    const s = settleTickets(race, pred, rec.tickets);
-    if (s) acc += s.pay - s.stake;
+    items.push({ id: base.id, pred, rec: recommendBets(pred, betOpts()) });
   }
-  dayPnlCache.set(date, { key, map });
+  const planned = planDay(items, { budget: state.budget, dayBudget: state.dayBudget });
+  const map = new Map(items.map((it, k) => [it.id, planned[k]]));
+  dayPlanCache.set(date, { key, map });
   return map;
 }
-/** 今の買い方での推奨買い目（1日の損失の上限つき） */
+/** 今の買い方での推奨買い目（その日の買い目の合計が1日の予算を超えるときは、予算の範囲に割り振ったもの） */
 function recOf(pred) {
   const race = pred.race;
-  const dayPnl = race?.date ? dayPnls(race.date)?.get(race.id) ?? null : null;
-  return recommendBets(pred, { ...betOpts(), dayPnl });
+  const planned = race?.date ? dayPlans(race.date)?.get(race.id) : null;
+  if (planned && planned.strategy === state.strategy && planned.budget === state.budget) {
+    // 予想（pred）は同じ設定のものなので、そのまま使える（重みを動かしている最中などで食い違うときは、その場で計算）
+    return planned;
+  }
+  return recommendBets(pred, betOpts());
 }
 
 function pickOf(pred, race) {
-  if (pred.empty) return { jump: !!pred.jump, sig: raceSig(race) };
+  if (pred.empty) return { jump: !!pred.jump, sig: pickSig(race) };
   const h = pred.order[0];
   // 確定したレースは、今の買い方（戦略・予算・券種）の AI推奨を実際の払戻で精算（合計の収支のため）
   // 外れ方の分析（src/engine/review.js）：◎と勝ち馬、AI推奨のどれかが当たる見込み（expHit）
@@ -461,12 +471,12 @@ function pickOf(pred, race) {
     settle.expHit = rec.tickets.length ? rec.stats?.hitRate ?? null : null;
     review = reviewRace(pred, race);
   }
-  return { number: h.entry.number, frame: h.entry.frame, prov: !!h.entry.provisionalNumber, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, review, sig: raceSig(race) };
+  return { number: h.entry.number, frame: h.entry.frame, prov: !!h.entry.provisionalNumber, name: h.entry.name, grade: pred.confidence.grade, conf: pred.confidence.winProb ?? null, vol: pred.confidence.volatility, settle, review, sig: pickSig(race) };
 }
 
 /** 一覧の◎（とその日の成績）を裏で少しずつ計算 */
 function scheduleQuickPicks() {
-  const key = `${settingsKey()}|${JSON.stringify(betOpts())}|${JSON.stringify(state.edits)}`;
+  const key = `${settingsKey()}|${JSON.stringify(betOpts())}|${state.dayBudget}|${JSON.stringify(state.edits)}`;
   if (key !== quickKey) {
     quickPicks.clear();
     quickKey = key;
@@ -474,11 +484,12 @@ function scheduleQuickPicks() {
   clearTimeout(quickTimer);
   const venueFirst = (r) => (state.day === 'import' || r.course === state.venue ? 0 : 1);
   // 選んだ日を先に、そのあと読み込んである他の日（新しい日から）。他の日は期間の合計の収支に使う
+  const memo = new Map();
   const others = days()
     .filter((d) => d.date !== state.day)
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .flatMap((d) => d.races);
-  const queue = [...racesOf(state.day, null).slice().sort((a, b) => venueFirst(a) - venueFirst(b)), ...(state.day === 'import' ? [] : others)].filter((r) => quickPicks.get(r.id)?.sig !== raceSig(r));
+  const queue = [...racesOf(state.day, null).slice().sort((a, b) => venueFirst(a) - venueFirst(b)), ...(state.day === 'import' ? [] : others)].filter((r) => quickPicks.get(r.id)?.sig !== pickSig(r, memo));
   const step = () => {
     const t0 = performance.now();
     while (queue.length && performance.now() - t0 < 24) {
@@ -596,9 +607,8 @@ const sheetCtx = () => ({
   ...ctx(),
   predFor: (race) => getPrediction(effectiveRace(race), true),
   recFor: (pred) => recOf(pred),
-  // その日の収支の見込み（シミュレーション）用：損失の上限に達したとき・上限なしのときの買い目
-  recCutFor: (pred) => recommendBets(pred, { ...betOpts(), dayPnl: -1e12 }),
-  recNoLimitFor: (pred) => recommendBets(pred, { ...betOpts(), lossLimit: 0 }),
+  // その日の収支の見込み（シミュレーション）用：1日の予算で割り振る前の買い目
+  recNoLimitFor: (pred) => recommendBets(pred, betOpts()),
 });
 
 function renderPredict() {
@@ -1175,8 +1185,8 @@ function onChange(e) {
     persist();
     return refreshBets();
   }
-  if (t.matches('[data-loss]')) {
-    state.lossLimit = t.value === 'auto' ? 'auto' : Number(t.value);
+  if (t.matches('[data-daybudget]')) {
+    state.dayBudget = t.value === 'auto' ? 'auto' : Number(t.value);
     persist();
     return refreshBets();
   }

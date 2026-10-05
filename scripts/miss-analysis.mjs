@@ -18,7 +18,7 @@ import { DEFAULT_PARAMS, groupRaces, flatten, makeThresholds, binize, trainBoost
 import { GBDT_MODEL } from '../src/engine/gbdtModel.js';
 import { predictRace, PRESETS } from '../src/engine/model.js';
 import { reviewRace } from '../src/engine/review.js';
-import { recommendBets } from '../src/engine/bets.js';
+import { recommendBets, planDay } from '../src/engine/bets.js';
 import { payoutOf } from '../src/engine/backtest.js';
 import { addDays } from '../src/engine/util.js';
 import { indexHistory, preRaceCard, attachCareer } from '../src/data/history.js';
@@ -80,8 +80,9 @@ const lastDate = holdCards.filter((c) => c.result?.length).reduce((m, c) => (c.d
 const R60_FROM = addDays(lastDate, -59);
 const SETS = { oof: { label: '学習期間の分割外', cards: oofCards }, hold: { label: '検証期間', cards: holdCards }, r60: { label: '直近60日', cards: holdCards.filter((c) => c.date >= R60_FROM) } };
 const recs = { oof: [], hold: [], r60: [] };
-// 直近60日の AI推奨（的中重視の自動・既定の券種・1R 上限 3,000円）
+// 直近60日の AI推奨（的中重視の自動・既定の券種・1R 上限 3,000円・1日の予算つき：朝にその日の全レースの買い目で割り振る）
 const bets60 = { races: 0, hits: 0, stake: 0, ret: 0 };
+const days60 = new Map();
 for (const [set, { cards }] of Object.entries(SETS)) {
   for (const card of cards) {
     if (!card.result?.length) continue;
@@ -94,20 +95,26 @@ for (const [set, { cards }] of Object.entries(SETS)) {
     const horses = pred.rows.map((r) => ({ num: r.entry.number, p: r.pWin, q: r.marketProb ?? 0, pop: r.entry.popularity || 0, frame: r.entry.frame || 0, win: card.result[0] === r.entry.number, top: r === pred.order[0], x: X.get(`${card.id}|${r.entry.number}`) }));
     recs[set].push({ card, review, fav: { num: fav.entry.number, p: fav.pWin, q: fav.marketProb ?? 0 }, horses });
     if (set === 'r60') {
-      const rec = recommendBets(pred, { budget: 3000, strategy: 'hit' });
-      if (rec.tickets.length) {
-        bets60.races++;
-        let g = 0;
-        for (const t of rec.tickets) {
-          bets60.stake += t.stake;
-          g += (t.stake / 100) * (payoutOf(card, t.type, t.nums) || 0);
-        }
-        bets60.ret += g;
-        if (g > 0) bets60.hits++;
-      }
+      const day = days60.get(card.date) || days60.set(card.date, []).get(card.date);
+      day.push({ card, pred, rec: recommendBets(pred, { budget: 3000, strategy: 'hit' }) });
     }
   }
   log(`${SETS[set].label}：${recs[set].length}レース`);
+}
+for (const items of days60.values()) {
+  const planned = planDay(items, { budget: 3000 });
+  items.forEach(({ card }, k) => {
+    const { tickets } = planned[k];
+    if (!tickets.length) return;
+    bets60.races++;
+    let g = 0;
+    for (const t of tickets) {
+      bets60.stake += t.stake;
+      g += (t.stake / 100) * (payoutOf(card, t.type, t.nums) || 0);
+    }
+    bets60.ret += g;
+    if (g > 0) bets60.hits++;
+  });
 }
 
 // ---------- 2) 外れ方の型・◎と1番人気 ----------
@@ -223,7 +230,7 @@ for (const [who, keep] of [
 out.calibration = { dims: Object.keys(SEGS).length, cells, zCut: Z_CUT, flagged, recent };
 out.bets60 = { ...bets60, hitRate: bets60.races ? bets60.hits / bets60.races : 0, roi: bets60.stake ? bets60.ret / bets60.stake : 0 };
 console.log(`[直近60日] 大きくずれ・長い期間でも同じ向き：${recent.length ? recent.join('、') : 'なし'}`);
-console.log(`[直近60日] AI推奨（的中重視の自動・1R 上限 3,000円）${bets60.races}レース・的中 ${bets60.hits}・回収率 ${pct(out.bets60.roi)}`);
+console.log(`[直近60日] AI推奨（的中重視の自動・1R 上限 3,000円・1日の予算つき）${bets60.races}レース・的中 ${bets60.hits}・回収率 ${pct(out.bets60.roi)}`);
 console.log(`\n[校正] ${Object.keys(SEGS).length}項目・${cells}区分（◎だけと全馬）で、分割外 |z| ≥ ${Z_CUT} かつ検証も同じ向き：${flagged.length ? flagged.join('、') : 'なし'}`);
 
 const file = path.join(ROOT, 'src/engine/missStats.js');

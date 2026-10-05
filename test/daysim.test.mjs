@@ -1,10 +1,10 @@
-// 1日の損失の上限（的中重視の自動）と、その日の収支の見込み（シミュレーション）
+// 1日の予算（的中重視の自動・朝にまとめて買う前提）と、その日の収支の見込み（シミュレーション）
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { predictRace } from '../src/engine/model.js';
-import { recommendBets, AUTO_STAKE, resolveLossLimit, LOSS_LIMIT_OPTIONS } from '../src/engine/bets.js';
+import { recommendBets, planDay, ticketSharpe, AUTO_STAKE, resolveDayBudget, DAY_BUDGET_OPTIONS } from '../src/engine/bets.js';
 import { raceOutcomes, simulateDay } from '../src/engine/daySim.js';
 import { makeRace } from './fixtures/race.mjs';
 
@@ -13,40 +13,72 @@ const withPlace = (race) => {
   return race;
 };
 
-test('1日の損失の上限：その日の確定した収支が −予算×倍数 以下なら、残りのレースは金額を半分に（なしを選べば変えない）', () => {
-  assert.equal(resolveLossLimit('auto'), AUTO_STAKE.dayLoss.mult);
-  assert.equal(resolveLossLimit(0), 0);
-  assert.equal(resolveLossLimit(6), 6);
-  assert.ok(LOSS_LIMIT_OPTIONS.some((o) => o.value === 'auto') && LOSS_LIMIT_OPTIONS.some((o) => o.value === 0));
-  let checked = 0;
+/** 買い目のあるレースを集めた「1日」（1R 3,000円） */
+function dayItems(budget = 3000) {
+  const items = [];
   for (let seed = 1; seed <= 40; seed++) {
     const race = withPlace(makeRace({ seed }));
     const fav = race.entries.find((e) => e.popularity === 1);
     if (seed % 2) for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
     const pred = predictRace(race, { sims: 0 });
-    const base = recommendBets(pred, { budget: 3000 });
-    if (!base.tickets.length) continue;
-    assert.equal(base.dayCut, false);
-    // 上限の手前（−11,900円）では変えない
-    const near = recommendBets(pred, { budget: 3000, dayPnl: -AUTO_STAKE.dayLoss.mult * 3000 + 100 });
-    assert.deepEqual(near.tickets.map((t) => t.stake), base.tickets.map((t) => t.stake));
-    // 上限（−12,000円）に達したら金額は半分（100円単位・利益 100円未満になる買い目は買わない）
-    const cut = recommendBets(pred, { budget: 3000, dayPnl: -AUTO_STAKE.dayLoss.mult * 3000 });
-    assert.equal(cut.dayCut, true);
-    // 半分にすると利益が 100円に届かない買い目は、届く最小の金額（元の金額まで）
-    for (const t of cut.tickets) {
-      const orig = base.tickets.find((x) => x.type === t.type && x.idx.join() === t.idx.join());
-      if (orig) assert.ok(t.stake <= orig.stake && (t.stake <= Math.floor(orig.stake / 2 / 100) * 100 + 100 || t.stake === Math.ceil(AUTO_STAKE.minProfit / (t.odds - 1) / 100) * 100), `${t.stake} ${orig.stake} ${t.odds}`);
-    }
-    assert.ok(cut.used <= base.used, `${cut.used} ${base.used}`);
-    for (const t of cut.tickets) assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
-    // なし（0）なら変えない
-    const off = recommendBets(pred, { budget: 3000, dayPnl: -1e9, lossLimit: 0 });
-    assert.equal(off.dayCut, false);
-    assert.deepEqual(off.tickets.map((t) => t.stake), base.tickets.map((t) => t.stake));
-    checked++;
+    items.push({ pred, rec: recommendBets(pred, { budget }) });
   }
-  assert.ok(checked > 0, '買い目のあるレースで確かめている');
+  return items;
+}
+const key = (t) => `${t.type}:${t.idx.join('-')}`;
+
+test('1日の予算：合計が予算の範囲内なら買い目を変えない。超えたらリスクに対する期待値の高い順に予算まで（結果は見ない）', () => {
+  assert.equal(resolveDayBudget('auto'), AUTO_STAKE.dayBudget.mult);
+  assert.equal(resolveDayBudget(0), 0);
+  assert.equal(resolveDayBudget(10), 10);
+  assert.ok(DAY_BUDGET_OPTIONS.some((o) => o.value === 'auto') && DAY_BUDGET_OPTIONS.some((o) => o.value === 0));
+  const items = dayItems();
+  const all = items.flatMap((it) => it.rec.tickets);
+  const total = all.reduce((a, t) => a + t.stake, 0);
+  const races = items.filter((it) => it.rec.tickets.length).length;
+  assert.ok(races >= 3 && total > 2 * 3000, `買い目のあるレースが十分ある（${races}R・${total}円）`);
+
+  // 予算の範囲内（倍数を大きく）・なし（0）なら同じ買い目
+  for (const dayBudget of [1000, 0]) {
+    const same = planDay(items, { budget: 3000, dayBudget });
+    same.forEach((rec, i) => {
+      assert.deepEqual(rec.tickets.map((t) => [key(t), t.stake]), items[i].rec.tickets.map((t) => [key(t), t.stake]));
+      assert.equal(rec.day.over, false);
+      assert.equal(rec.day.total, total);
+      assert.equal(rec.day.races, races);
+    });
+  }
+
+  // 1日の予算 = 1R の2倍（6,000円）：合計は予算まで、金額は元の金額まで、利益 100円に届かない額にはしない
+  const limit = 2 * 3000;
+  const plan = planDay(items, { budget: 3000, dayBudget: 2 });
+  const kept = plan.flatMap((rec) => rec.tickets);
+  const used = kept.reduce((a, t) => a + t.stake, 0);
+  assert.ok(used <= limit && used > 0, `${used}`);
+  assert.equal(plan[0].day.used, used);
+  assert.equal(plan[0].day.limit, limit);
+  assert.equal(plan[0].day.over, true);
+  for (const t of kept) {
+    const orig = all.find((x) => key(x) === key(t) && x.pHit === t.pHit);
+    assert.ok(orig && t.stake <= orig.stake && t.stake >= 100);
+    assert.equal(t.dayCut, t.stake < orig.stake);
+    assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
+  }
+  // いちばんリスクに対する期待値の高い買い目は、元の金額のまま入る
+  const best = [...all].sort((a, b) => ticketSharpe(b) - ticketSharpe(a))[0];
+  assert.ok(kept.some((t) => key(t) === key(best) && t.pHit === best.pHit && t.stake === best.stake));
+  // 入らなかった買い目は「1日の予算」の理由つきで、買い目が全部入らなかったレースは見送り
+  const out = plan.flatMap((rec) => (rec.dropped || []).filter((t) => t.why === 'day'));
+  assert.ok(out.length > 0);
+  const skipped = plan.filter((rec, i) => items[i].rec.tickets.length && !rec.tickets.length);
+  assert.ok(skipped.length > 0);
+  for (const rec of skipped) {
+    assert.equal(rec.skipped, true);
+    assert.match(rec.skipReason, /1日の予算/);
+    assert.equal(rec.used, 0);
+  }
+  // 1日の予算は結果を見ない：同じ買い目なら何度でも同じ
+  assert.deepEqual(planDay(items, { budget: 3000, dayBudget: 2 }).map((r) => r.tickets.map((t) => t.stake)), plan.map((r) => r.tickets.map((t) => t.stake)));
 });
 
 test('人気馬（当たる確率 70% 以上）の主な買い目は、期待値 1.02 に届かないと金額が半分', () => {
@@ -74,24 +106,25 @@ test('人気馬（当たる確率 70% 以上）の主な買い目は、期待値
   assert.ok(thin > 0, '人気馬で期待値に余裕のない主な買い目があるレースで確かめている');
 });
 
-test('その日の収支の見込み：確定したレースは実際の収支、まだのレースは着順の確率から。上限で金額を半分にすると最悪が小さくなる', () => {
-  // 単勝 3倍・1,000円が 50% で当たる（+2,000円）か外れる（−1,000円）レースを、まだ 6レース
+test('その日の収支の見込み：確定したレースは実際の収支、まだのレースは着順の確率から。買うレースを減らすと最悪が小さくなる', () => {
+  // 単勝 3倍・1,000円が 50% で当たる（+2,000円）か外れる（−1,000円）レースが、まだ 6レース
   const pred = { placeCount: 3, exact: { probs: Float64Array.from([0.5, 0.5]), triples: Int16Array.from([0, 1, 2, 1, 0, 2]) } };
   const full = [{ type: 'win', idx: [0], stake: 1000, odds: 3 }];
-  const cut = [{ type: 'win', idx: [0], stake: 500, odds: 3 }];
-  const out = raceOutcomes(pred, full, cut);
-  assert.deepEqual(Array.from(out.full.ret), [3000, 0]);
-  assert.deepEqual(Array.from(out.cut.ret), [1500, 0]);
-  const items = [{ settled: true, pnl: -3000, pnlNoLimit: -3000 }, ...Array.from({ length: 6 }, () => ({ settled: false, out }))];
-  const a = simulateDay(items, { sims: 20000, seed: 'x', limit: 4000 });
-  const b = simulateDay(items, { sims: 20000, seed: 'x', limit: 4000 });
+  const out = raceOutcomes(pred, full);
+  assert.deepEqual(Array.from(out.ret), [3000, 0]);
+  assert.equal(out.stake, 1000);
+  const items = [{ settled: true, pnl: -3000 }, ...Array.from({ length: 6 }, () => ({ settled: false, out }))];
+  const a = simulateDay(items, { sims: 20000, seed: 'x' });
+  const b = simulateDay(items, { sims: 20000, seed: 'x' });
   assert.deepEqual(a, b, '同じ入力なら同じ結果');
   assert.equal(a.races, 6);
-  // 上限なし：平均 −3,000 + 6 × 500 = 0
-  assert.ok(Math.abs(a.noLimit.mean) < 150, String(a.noLimit.mean));
-  assert.ok(Math.abs(a.noLimit.worst - -9000) < 1e-9);
-  // 上限あり：−4,000 に達したら半分なので最悪は −3,000 −1,000 −500×5 = −6,500
-  assert.ok(Math.abs(a.withLimit.worst - -6500) < 1e-9, String(a.withLimit.worst));
-  assert.ok(a.withLimit.reachRate > 0.4 && a.withLimit.reachRate < 0.6);
-  assert.ok(a.withLimit.q05 >= a.noLimit.q05);
+  // 平均 −3,000 + 6 × 500 = 0、最悪 −3,000 − 6,000
+  assert.ok(Math.abs(a.mean) < 150, String(a.mean));
+  assert.ok(Math.abs(a.worst - -9000) < 1e-9);
+  // 後ろの 3レースを買わない（1日の予算で入らなかった）とき：同じ seed なら同じ結果の引き方で、最悪は −6,000
+  const none = raceOutcomes(pred, []);
+  const plan = simulateDay([items[0], ...items.slice(1, 4), ...Array.from({ length: 3 }, () => ({ settled: false, out: none }))], { sims: 20000, seed: 'x' });
+  assert.equal(plan.races, 3);
+  assert.ok(Math.abs(plan.worst - -6000) < 1e-9, String(plan.worst));
+  assert.ok(plan.q05 >= a.q05);
 });
