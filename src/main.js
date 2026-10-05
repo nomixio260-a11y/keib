@@ -17,11 +17,12 @@ import {
   renderCardTable,
   renderPacePanel,
   renderBetsPanel,
-  renderWeightsPanel,
   renderEmptyRace,
   renderJumpRace,
 } from './ui/predictView.js';
 import { renderRail, dayLabel, statusBadge } from './ui/timeline.js';
+import { renderSettingsView, renderEffectPanel, renderSettingsCard, settingsLabel, settingsChipsHtml, isStandardSettings } from './ui/settingsView.js';
+import { summarizeDays } from './engine/effect.js';
 import { renderBacktest, currentBacktest } from './ui/backtestView.js';
 import { renderData } from './ui/dataView.js';
 import { renderLogic } from './ui/logicView.js';
@@ -55,7 +56,7 @@ const NOISE_VERSION = 2;
 const BLEND_VERSION = 2;
 // 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%、2026-10-05 に的中重視の自動）ので、前に保存した選択は一度「自動」に戻す
 const KEEP_VERSION = 3;
-const TABS = ['predict', 'backtest', 'data', 'logic'];
+const TABS = ['predict', 'settings', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
 // GitHub Pages で公開しているときは、開催日に数分ごとに更新される data ブランチの data.json を先に読む
 // （Pages 自体は code の push でしか更新しない。raw.githubusercontent.com は CORS を許可している）
@@ -305,6 +306,7 @@ async function loadAllArchive() {
   archive.allLoading = false;
   scheduleQuickPicks();
   renderRailOnly();
+  if (state.tab === 'settings') renderSettingsTab();
 }
 
 /** 読み込んだ過去の開催日（アーカイブ）を外して、data.json の直近の開催日だけに戻す */
@@ -497,9 +499,149 @@ function scheduleQuickPicks() {
       quickPicks.set(race.id, pickOf(getPrediction(race, true), race));
     }
     if (state.tab === 'predict') renderRailOnly();
+    renderEffectSoon();
     if (queue.length) quickTimer = setTimeout(step, 16);
   };
   if (queue.length) quickTimer = setTimeout(step, 30);
+  scheduleStandard();
+}
+
+// ---------------------------------------------------------------------------
+// 設定の効果：表示中の期間（読み込んである開催日）の実際のレースを、いまの設定・標準の設定で精算して比べる
+// いまの設定は一覧の◎の計算（quickPicks）の精算をそのまま使い、標準は別に裏で少しずつ計算する（その日の全レースの予想 → 1日の予算 → 精算）
+
+/** 標準の設定（予想のモデルと買い方。1レースの予算はいまの値） */
+const standardBase = () => ({ weights: DEFAULT_WEIGHTS, noise: DEFAULT_NOISE });
+const isStandard = () => isStandardSettings(state, standardBase());
+/** 結果の出た平地のレースがある開催日 */
+const settledDays = () => days().filter((d) => d.races.some((r) => r.result?.length && !r.jump && r.surface !== '障'));
+
+const stdDays = new Map();
+let stdJob = null;
+let stdTimer = null;
+const stdKeyOf = () => `${state.budget}|${JSON.stringify(state.edits)}|${currentStats() ? 1 : 0}`;
+function scheduleStandard() {
+  clearTimeout(stdTimer);
+  if (isStandard() || !data.bundle) return;
+  const key = stdKeyOf();
+  const queue = settledDays()
+    .map((d) => d.date)
+    .sort((a, b) => (a < b ? 1 : -1))
+    .filter((date) => stdDays.get(date)?.sig !== `${daySig(date)}|${key}`);
+  if (!queue.length) return;
+  stdJob = { key, queue, cur: null };
+  stdTimer = setTimeout(stdStep, 60);
+}
+function stdStep() {
+  const job = stdJob;
+  if (!job) return;
+  const t0 = performance.now();
+  const S = standardBase();
+  while (performance.now() - t0 < 20) {
+    if (!job.cur) {
+      const date = job.queue.shift();
+      if (!date) break;
+      const races = racesOf(date, null).filter((r) => !r.jump && r.surface !== '障');
+      job.cur = { date, races, i: 0, items: [], sig: `${daySig(date)}|${job.key}` };
+      continue;
+    }
+    const c = job.cur;
+    if (c.i < c.races.length) {
+      const race = effectiveRace(c.races[c.i++]);
+      const pred = predictRace(race, { weights: S.weights, noise: S.noise, sims: 0, stats: currentStats(), ml: !!PRESETS[DEFAULT_PRESET]?.ml, mlAi: !!PRESETS[DEFAULT_PRESET]?.mlAi });
+      if (!pred.empty) c.items.push({ race, pred, rec: recommendBets(pred, { budget: state.budget, strategy: DEFAULT_STRATEGY, types: DEFAULT_TYPES, blend: 'auto', keep: 'auto' }) });
+      continue;
+    }
+    const planned = planDay(c.items, { budget: state.budget, dayBudget: 'auto' });
+    const rows = [];
+    c.items.forEach((it, k) => {
+      if (!it.race.result?.length) return;
+      const st = settleTickets(it.race, it.pred, planned[k].tickets) || { stake: 0, pay: 0, hits: 0 };
+      rows.push({ date: c.date, stake: st.stake, pay: st.pay, hit: st.hits > 0 });
+    });
+    stdDays.set(c.date, { sig: c.sig, rows });
+    job.cur = null;
+  }
+  renderEffectSoon();
+  if (job.cur || job.queue.length) stdTimer = setTimeout(stdStep, 16);
+  else stdJob = null;
+}
+
+/** 表示中の期間の、いまの設定と標準の集計 */
+function effectData() {
+  const sd = settledDays();
+  const memo = new Map();
+  const curRows = [];
+  const curTypes = {};
+  let curPending = 0;
+  for (const d of sd) {
+    for (const race of d.races) {
+      if (!race.result?.length || race.jump || race.surface === '障') continue;
+      const p = quickPicks.get(race.id);
+      if (!p || p.sig !== pickSig(race, memo)) {
+        curPending++;
+        continue;
+      }
+      if (p.jump || !p.settle) continue;
+      curRows.push({ date: d.date, stake: p.settle.stake, pay: p.settle.pay, hit: p.settle.hits > 0 });
+      for (const t of p.settle.detail || []) {
+        const a = (curTypes[t.type] ||= { n: 0, hits: 0, stake: 0, pay: 0 });
+        a.n++;
+        a.stake += t.stake;
+        a.pay += t.pay;
+        if (t.pay > 0) a.hits++;
+      }
+    }
+  }
+  const same = isStandard();
+  let std = null;
+  let stdPending = 0;
+  if (!same) {
+    const key = stdKeyOf();
+    const rows = [];
+    for (const d of sd) {
+      const hit = stdDays.get(d.date);
+      if (hit && hit.sig === `${daySig(d.date)}|${key}`) rows.push(...hit.rows);
+      else stdPending += d.races.filter((r) => r.result?.length && !r.jump && r.surface !== '障').length;
+    }
+    std = rows.length ? summarizeDays(rows) : null;
+  }
+  const archived = days().some((x) => x.archived);
+  const period = sd.length ? (archived ? `表示中の ${sd.length}日` : `直近の開催 ${sd.length}日`) : '表示中の期間';
+  const archiveAll = !archive.index?.length || archive.index.every((x) => days().some((d) => d.date === x.date));
+  return { cur: curRows.length ? summarizeDays(curRows) : null, curTypes, curPending, std, stdPending, same, prev: effectPrev, period, archiveAll };
+}
+
+// 変更前：設定を変える直前の、計算の終わっている成績
+let effectPrev = null;
+function markBeforeChange() {
+  const e = effectData();
+  if (e.cur && !e.curPending) effectPrev = { label: settingsLabel(state), sum: e.cur };
+}
+
+let effectTimer = null;
+function renderEffectSoon() {
+  if (effectTimer) return;
+  effectTimer = setTimeout(() => {
+    effectTimer = null;
+    if (state.tab === 'settings') setHTML($('#slot-effect'), renderEffectPanel({ ...ctx(), effect: effectData() }));
+    else if (state.tab === 'predict' && $('#panel-settings-card')) setHTML($('#slot-weights'), renderSettingsCard({ ...ctx(), effect: effectData() }));
+  }, 250);
+}
+
+/** 設定画面 */
+function renderSettingsTab() {
+  setHTML($('#view-settings'), renderSettingsView({ ...ctx(), effect: effectData() }));
+  scheduleQuickPicks();
+}
+
+/** 設定を変えたあと：設定画面なら作り直し、予想画面なら予想・買い目を更新 */
+function afterSettingsChange(kind = 'bets') {
+  persist();
+  if (state.tab === 'settings') return renderSettingsTab();
+  if (kind === 'model') return renderPredict();
+  if (kind === 'pred') return refreshPrediction();
+  return refreshBets();
 }
 
 // ---------------------------------------------------------------------------
@@ -620,7 +762,7 @@ function renderPredict() {
     setHTML(main, renderBetSheet(sheetCtx()));
     setHTML($('#slot-pace'), '');
     setHTML($('#slot-bets'), '');
-    setHTML($('#slot-weights'), data.loadState === 'ok' ? renderWeightsPanel(ctx()) : '');
+    setHTML($('#slot-weights'), data.loadState === 'ok' ? renderSettingsCard({ ...ctx(), effect: effectData() }) : '');
     scheduleQuickPicks();
     return;
   }
@@ -628,7 +770,7 @@ function renderPredict() {
     setHTML(main, renderJumpRace(current.jump, ctx()));
     setHTML($('#slot-pace'), '');
     setHTML($('#slot-bets'), '');
-    setHTML($('#slot-weights'), renderWeightsPanel(ctx()));
+    setHTML($('#slot-weights'), renderSettingsCard({ ...ctx(), effect: effectData() }));
     scheduleQuickPicks();
     return;
   }
@@ -636,14 +778,14 @@ function renderPredict() {
     setHTML(main, renderEmptyRace(ctx()));
     setHTML($('#slot-pace'), '');
     setHTML($('#slot-bets'), '');
-    setHTML($('#slot-weights'), data.loadState === 'ok' || imported.length ? renderWeightsPanel(ctx()) : '');
+    setHTML($('#slot-weights'), data.loadState === 'ok' || imported.length ? renderSettingsCard({ ...ctx(), effect: effectData() }) : '');
     scheduleQuickPicks();
     return;
   }
   setHTML(main, renderRaceMain(current.pred, current.rec, ctx()));
   setHTML($('#slot-pace'), renderPacePanel(current.pred));
   setHTML($('#slot-bets'), renderBetsPanel(current.pred, current.rec, ctx()));
-  setHTML($('#slot-weights'), renderWeightsPanel(ctx()));
+  setHTML($('#slot-weights'), renderSettingsCard({ ...ctx(), effect: effectData() }));
   scheduleQuickPicks();
 }
 
@@ -786,6 +928,7 @@ function showTab(tab, { updateHash = true } = {}) {
   });
   for (const t of TABS) $(`#view-${t}`).hidden = t !== state.tab;
   if (state.tab === 'predict') renderPredict();
+  else if (state.tab === 'settings') renderSettingsTab();
   else if (state.tab === 'backtest') renderBacktestView();
   else if (state.tab === 'data') renderDataView();
   else renderLogicView();
@@ -844,11 +987,17 @@ function matchPreset(weights) {
 }
 
 let recomputeTimer = null;
+let sliderMarked = false;
 function scheduleRecompute() {
   clearTimeout(recomputeTimer);
   recomputeTimer = setTimeout(() => {
     persist();
-    refreshPrediction();
+    if (state.tab !== 'settings') return refreshPrediction();
+    // 設定画面：スライダーは作り直さずに、要約と効果だけ更新
+    const chips = $('#view-settings .setting-chips');
+    if (chips) chips.outerHTML = settingsChipsHtml(state);
+    scheduleQuickPicks();
+    renderEffectSoon();
   }, 160);
 }
 
@@ -877,7 +1026,12 @@ function applyDataUpdate() {
       scheduleQuickPicks();
     }
   } else if (state.tab === 'data') renderDataView();
-  else renderTopStatus();
+  else if (state.tab === 'settings') {
+    // 設定画面：入力欄は作り直さずに、効果だけ計算し直す
+    renderTopStatus();
+    scheduleQuickPicks();
+    renderEffectSoon();
+  } else renderTopStatus();
 }
 
 async function poll() {
@@ -1015,11 +1169,16 @@ function onClick(e) {
     return;
   }
   if (act === 'reset-weights') {
+    markBeforeChange();
     state.weights = { ...DEFAULT_WEIGHTS };
     state.preset = DEFAULT_PRESET;
     state.noise = DEFAULT_NOISE;
-    persist();
-    return renderPredict();
+    return afterSettingsChange('model');
+  }
+  if (act === 'reset-all') {
+    markBeforeChange();
+    Object.assign(state, { weights: { ...DEFAULT_WEIGHTS }, preset: DEFAULT_PRESET, noise: DEFAULT_NOISE, strategy: DEFAULT_STRATEGY, betTypes: [...DEFAULT_TYPES], blend: 'auto', keep: 'auto', dayBudget: 'auto' });
+    return afterSettingsChange('model');
   }
   if (act === 'run-recent') return runRecentBacktest();
   if (act === 'load-all-archive') return void loadAllArchive();
@@ -1063,23 +1222,23 @@ function onClick(e) {
   }
   const strat = t.closest('[data-strategy]');
   if (strat) {
+    markBeforeChange();
     state.strategy = strat.dataset.strategy;
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   const budgetBtn = t.closest('[data-budget]');
   if (budgetBtn) {
+    markBeforeChange();
     state.budget = Number(budgetBtn.dataset.budget);
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   const preset = t.closest('[data-preset]');
   if (preset) {
+    markBeforeChange();
     state.preset = preset.dataset.preset;
     state.weights = { ...PRESETS[state.preset].weights };
     state.noise = PRESETS[state.preset].noise ?? 1;
-    persist();
-    return renderPredict();
+    return afterSettingsChange('model');
   }
   const btPreset = t.closest('[data-bt-preset]');
   if (btPreset) {
@@ -1129,6 +1288,10 @@ function onClick(e) {
 function onInput(e) {
   const t = e.target;
   if (t.matches('[data-weight]')) {
+    if (!sliderMarked) {
+      markBeforeChange();
+      sliderMarked = true;
+    }
     state.weights[t.dataset.weight] = Number(t.value);
     const out = $(`#wo-${t.dataset.weight}`);
     if (out) out.textContent = t.value;
@@ -1142,6 +1305,10 @@ function onInput(e) {
     return scheduleRecompute();
   }
   if (t.matches('[data-noise]')) {
+    if (!sliderMarked) {
+      markBeforeChange();
+      sliderMarked = true;
+    }
     state.noise = Number(t.value);
     const out = $('#noise-out');
     if (out) out.textContent = Number(t.value).toFixed(1);
@@ -1161,39 +1328,42 @@ function onChange(e) {
     loadArchiveDay(date).then((ok) => (ok ? selectDay(date) : renderRailOnly()));
     return;
   }
+  if (t.matches('[data-weight], [data-noise]')) {
+    // スライダーを離したら、次に動かすときに「変更前」を取り直す
+    sliderMarked = false;
+    return;
+  }
   if (t.matches('[data-budget-input]')) {
-    const v = Math.max(100, Math.round(Number(t.value) / 100) * 100 || 100);
-    state.budget = v;
-    persist();
-    return refreshBets();
+    markBeforeChange();
+    state.budget = Math.max(100, Math.round(Number(t.value) / 100) * 100 || 100);
+    return afterSettingsChange('bets');
   }
   if (t.matches('[data-bettype]')) {
+    markBeforeChange();
     const set = new Set(state.betTypes);
     if (t.checked) set.add(t.dataset.bettype);
     else set.delete(t.dataset.bettype);
     state.betTypes = BET_TYPES.filter((x) => set.has(x));
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   if (t.matches('[data-keep]')) {
+    markBeforeChange();
     state.keep = t.value === 'auto' ? 'auto' : Number(t.value);
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   if (t.matches('[data-blend]')) {
+    markBeforeChange();
     state.blend = t.value === 'auto' ? 'auto' : Number(t.value);
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   if (t.matches('[data-daybudget]')) {
+    markBeforeChange();
     state.dayBudget = t.value === 'auto' ? 'auto' : Number(t.value);
-    persist();
-    return refreshBets();
+    return afterSettingsChange('bets');
   }
   if (t.matches('[data-sims]')) {
     state.sims = Number(t.value);
-    persist();
-    return refreshPrediction();
+    return afterSettingsChange('pred');
   }
   if (t.matches('[data-odds]')) {
     const num = Number(t.dataset.odds);

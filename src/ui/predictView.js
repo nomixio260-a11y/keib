@@ -1,15 +1,10 @@
 // 予想画面：レース見出し・出馬表・展開・買い目・重み付け
 
-import { BET_LABEL, BET_TYPES, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
-import { FACTORS, PRESETS } from '../engine/model.js';
-import { BLEND_OPTIONS, KEEP_OPTIONS, DAY_BUDGET_OPTIONS, STRATEGIES, ESTIMATED_TYPES, BET_TEMP, LOW_ODDS_LABEL, AUTO_STAKE, resolveDayBudget, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { BET_LABEL, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
+import { FACTORS } from '../engine/model.js';
+import { STRATEGIES, ESTIMATED_TYPES, BET_TEMP, LOW_ODDS_LABEL, AUTO_STAKE, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { settingsLine } from './settingsView.js';
 import { horseComment, paceComment } from '../engine/comments.js';
-/** 1日の予算の倍数ごとの検証（学習に使っていない 385日・1R 3,000円、すべて買う場合との比較。scratchpad/ml6/days-eval5） */
-const DAY_BUDGET_NOTE = {
-  7: '学習に使っていない 385日（1R 3,000円）で、すべて買う場合より最悪の日 −23,000 → −17,700円・悪いほうから5日の平均 −20,750 → −17,000円・負けた日 182 → 169日に減り、収支は +91.3万 → +92.7万円でした（買うレース 2,903 → 2,393）。検証期間の30日は +33.3万 → +33.0万円・直近60日は +24.8万 → +23.9万円と少し減ります（予算に入らなかったレースの分）。以前の「1日の損失の上限」（その日の負けで残りのレースの金額を半分）は、朝や前日に買うと使えないのでやめました。',
-  5: '学習に使っていない 385日（1R 3,000円）で、すべて買う場合より最悪の日 −23,000 → −15,000円に減りますが、収支は +91.3万 → +81.3万円・1回も勝てない日 6 → 10日になります。',
-  10: '学習に使っていない 385日（1R 3,000円）で、すべて買う場合と最悪の日は同じ（−23,000円）で、悪いほうから5日の平均 −20,750 → −19,170円・収支 +91.3万 → +93.0万円でした。',
-};
 /** 的中重視の自動：金額の決め方の種類（金額の欄の説明） */
 const AUTO_KIND = {
   classic: 'これまでの的中重視の条件を満たす買い目。自信（有利さ）に応じて上限まで',
@@ -334,14 +329,6 @@ export function renderPacePanel(pred) {
 
 export function renderBetsPanel(pred, rec, ctx) {
   const { state } = ctx;
-  const budgets = [1000, 3000, 5000, 10000];
-  const strategies = Object.entries(STRATEGIES)
-    .map(([k, s]) => `<button type="button" class="seg-btn${state.strategy === k ? ' is-on' : ''}" data-strategy="${k}" aria-pressed="${state.strategy === k}">${esc(s.label)}</button>`)
-    .join('');
-  const types = BET_TYPES.map(
-    (t) =>
-      `<label class="toggle-chip"><input type="checkbox" data-bettype="${t}" ${state.betTypes.includes(t) ? 'checked' : ''}><span>${esc(BET_LABEL[t])}</span></label>`,
-  ).join('');
   const total = rec.tickets.reduce((a, t) => a + t.stake, 0);
   const body = rec.noOdds && pred.race.provisional
     ? '<tr><td colspan="6" class="muted bt-empty">特別登録の段階です。出馬表（枠順・騎手）と単勝オッズが出てから、期待値で買い目を選びます。</td></tr>'
@@ -379,53 +366,27 @@ export function renderBetsPanel(pred, rec, ctx) {
     .join('');
   return `<section class="panel" id="panel-bets" aria-labelledby="h-bets">
     <header class="panel-head"><h2 id="h-bets">買い目</h2><span class="panel-sub">期待値（確率×推定オッズ）で選定</span></header>
-    <div class="field-row">
-      <label class="field" for="budget">予算（円）</label>
-      <input id="budget" type="number" inputmode="numeric" min="100" step="100" value="${esc(state.budget)}" data-budget-input>
-      <div class="quick">${budgets.map((b) => `<button type="button" class="mini-btn${state.budget === b ? ' is-on' : ''}" data-budget="${b}">${b.toLocaleString('ja-JP')}</button>`).join('')}</div>
-    </div>
-    <div class="seg strat-seg" role="group" aria-label="買い方">${strategies}</div>
-    <p class="panel-note">${esc(STRATEGIES[state.strategy].desc)}</p>
+    ${settingsLine(state)}
     ${rec.formLabel ? `<p class="panel-note bt-auto">このレース：荒れ度「${esc(pred.confidence?.volatility || '')}」→ <b>${esc(rec.formLabel)}</b></p>` : ''}
-    <div class="chips-row" role="group" aria-label="券種">${types}</div>
     ${
       state.betTypes.some((t) => ESTIMATED_TYPES.includes(t))
         ? pred.race.exoticOdds
           ? '<p class="panel-note">馬連・ワイド・三連複は JRA の実際のオッズ（「実」）で計算しています。馬単・三連単は単勝オッズからの推定（「推」）です。</p>'
-          : '<p class="panel-note bet-caution">馬連・ワイド・馬単・三連複・三連単のオッズは単勝オッズからの推定です（発走2時間前から馬連・ワイド・三連複は実際のオッズを取り込みます）。推定オッズを期待値で選ぶと、実際の払戻は見込みを大きく下回りました。参考程度にしてください。</p>'
+          : '<p class="panel-note bet-caution">馬連・ワイド・馬単・三連複・三連単のオッズは単勝オッズからの推定です（発走2時間前から馬連・ワイド・三連複は実際のオッズを取り込みます）。</p>'
         : ''
     }
-    <div class="field-row">
-      <label class="field" for="keep">当たる確率で絞る</label>
-      <select id="keep" data-keep>
-        ${KEEP_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.keep ?? 'auto') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select>
-    </div>
     ${
       String(state.keep) === '0' && ['balance', 'value'].includes(state.strategy) && state.betTypes.some((t) => ['quinella', 'wide', 'exacta', 'trio', 'trifecta'].includes(t))
-        ? '<p class="panel-note bet-caution">絞らないと、バランス・高配当に馬連・三連複・三連単を足したとき1日に約30レース・百数十点を買い、学習期間の 385日のうち約170日で1万円以上負けました（1R 千円。7/25 は 1R 3,000円で −46,270円）。「自動」に戻すと、当たる確率で絞ります（的中重視は買い目と金額まで自動）。</p>'
+        ? '<p class="panel-note bet-caution">絞らないと、バランス・高配当に馬連・三連複・三連単を足したとき1日に約30レース・百数十点を買い、学習期間の 385日のうち約170日で1万円以上負けました。</p>'
         : ''
     }
-    <div class="field-row">
-      <label class="field" for="blend">期待値にオッズを混ぜる</label>
-      <select id="blend" data-blend>
-        ${BLEND_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.blend) === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select>
-    </div>
     ${
-      rec.auto
-        ? `<p class="panel-note">的中重視（自動）は、標準ではオッズを混ぜません。割合を選ぶと、買い目を選ぶ期待値にオッズの確率を混ぜます（当たる確率は AI のまま）。学習に使っていない約1.2万レース（385日）では、混ぜるほど買うレースと収支が減り、的中率は上がりませんでした（30% で収支 73%・50% で 55%・70% で 41%、的中率 56% 前後のまま）。${String(state.blend) !== 'auto' ? `<span class="bet-caution">いまは ${Math.round(Number(state.blend) * 100)}% 混ぜています。</span>` : ''}</p>
-    <div class="field-row">
-      <label class="field" for="daybudget">1日の予算</label>
-      <select id="daybudget" data-daybudget>
-        ${DAY_BUDGET_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.dayBudget ?? 'auto') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select>
-    </div>
-    <p class="panel-note">${
-      resolveDayBudget(state.dayBudget) > 0
-        ? `朝や前日にまとめて買っても効くように、レースの結果を見ずに1日分の買い目で決めます。その日の買い目の合計が1日の予算（${yen(resolveDayBudget(state.dayBudget) * rec.budget)}＝1レースの予算の${resolveDayBudget(state.dayBudget)}倍）を超えたら、リスクに対する期待値の高い買い目から順に予算まで買い、入らない買い目は見送ります。1日の負けは最大でも1日の予算までです。${DAY_BUDGET_NOTE[resolveDayBudget(state.dayBudget)] || ''}${rec.day ? `この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}${rec.day.over ? ` → 予算の範囲で ${yen(rec.day.used)}` : '（予算の範囲内）'}。` : ''}`
-        : `1日の予算はなし（その日の買い目をすべて買います）。学習に使っていない 385日（1R 3,000円）で最悪の日 −23,000円、悪いほうから5日の平均 −20,750円。${rec.day ? `この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}。` : ''}`
-    }${rec.day?.over && rec.tickets?.some((t) => t.dayCut) ? '<br><span class="bet-caution">このレースは1日の予算の残りの分だけ買います（金額を減らしています）。</span>' : ''}${rec.day?.over && !rec.tickets?.length && rec.dropped?.some((t) => t.why === 'day') ? '<br><span class="bet-caution">このレースの買い目は1日の予算に入らなかったので見送りです。</span>' : ''}</p>`
+      rec.auto && rec.day
+        ? `<p class="panel-note">${
+            rec.day.limit != null
+              ? `1日の予算 ${yen(rec.day.limit)}：この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}${rec.day.over ? ` → 予算の範囲で ${yen(rec.day.used)}（リスクに対する期待値の高い買い目から順に）` : '（予算の範囲内）'}。`
+              : `1日の予算はなし：この日は${rec.day.races}レース・合計 ${yen(rec.day.total)}。`
+          }${rec.day.over && rec.tickets?.some((t) => t.dayCut) ? '<br><span class="bet-caution">このレースは1日の予算の残りの分だけ買います（金額を減らしています）。</span>' : ''}${rec.day.over && !rec.tickets?.length && rec.dropped?.some((t) => t.why === 'day') ? '<br><span class="bet-caution">このレースの買い目は1日の予算に入らなかったので見送りです。</span>' : ''}</p>`
         : ''
     }
     ${(() => {
@@ -441,8 +402,8 @@ export function renderBetsPanel(pred, rec, ctx) {
         if (exotic) parts.push('馬連・三連複は、期待値の高いもの（JRA の実際のオッズ）を追加の買い目として買います。馬単・三連単は推定オッズなので買いません。');
       } else if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.5%（週平均 −2,115円 → +601円）、直近14週 99.3% → 129.2%（−256円 → +1,961円）。的中率・期待値の欄はこの値です。`);
       if (exotic && !rec.auto) parts.push('的中重視は当たる確率 50% 以上の買い目だけを買うので、馬連・馬単・三連複・三連単はほとんど選ばれません（学習期間 385日で馬連 1点）。単勝・複勝だけとほぼ同じ成績です。');
-      if (wide) parts.push(rec.auto ? '的中重視（自動）にワイドを入れても、学習期間の成績はほとんど変わりません（1日の予算つきで回収率 113.8% のまま・+927,020 → +927,320円。ワイドは当たる確率 60% 以上のときなどに限られるため）。' : '<span class="bet-caution">的中重視にワイドを入れると、的中率と回収率が少し下がります（学習期間 回収率 111.3% → 110.2%、検証期間の的中率 100% → 96.2%）。</span>');
-      return parts.length ? `<p class="panel-note">${parts.join('<br>')}</p>` : '';
+      if (wide) parts.push(rec.auto ? '的中重視（自動）にワイドを入れても、学習期間の成績はほとんど変わりません（回収率 114.0% → 113.9%・+979,040 → +975,830円。ワイドは当たる確率 60% 以上のときなどに限られるため）。' : '<span class="bet-caution">的中重視にワイドを入れると、的中率と回収率が少し下がります（学習期間 回収率 111.3% → 110.2%、検証期間の的中率 100% → 96.2%）。</span>');
+      return parts.length ? `<details class="bet-how"><summary>この買い方のしくみ</summary><p class="panel-note">${parts.join('<br>')}</p></details>` : '';
     })()}
     <div class="table-scroll"><table class="bets">
       <thead><tr><th>券種</th><th>買い目</th><th title="AI の予想（平らにしない元の確率）で当たる確率">的中率</th><th>オッズ</th><th title="${rec.auto ? 'AI の当たる確率 × 払戻の見込み（複勝は下限〜上限の幅から）' : '少し平らにした AI の確率（とオッズの確率を混ぜた値）× オッズ'}">期待値</th><th>金額</th></tr></thead>
@@ -452,7 +413,7 @@ export function renderBetsPanel(pred, rec, ctx) {
       rec.dropped?.length && rec.auto
         ? `<details class="bet-dropped"><summary>買わなかった候補 ${rec.dropped.length}点</summary><ul>${rec.dropped
             .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span> <small>${t.why === 'one' ? '（1レースで買う点数・予算の上限のため）' : t.why === 'thin' ? `（当たっても利益が ${AUTO_STAKE.minProfit}円に届かない）` : t.why === 'low' ? `（${LOW_ODDS_LABEL}は当たる確率 ${pct(AUTO_STAKE.lowP, 0)} 以上のときだけ）` : t.why === 'day' ? '（1日の予算に入らない）' : '（利益の見込みが足りない）'}</small></li>`)
-            .join('')}</ul><p class="muted">これまでの的中重視の条件か、当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上で期待値が ${AUTO_STAKE.minEv.toFixed(1)} を超える買い目を1点、期待値の高い追加の買い目を1点まで、当たって ${AUTO_STAKE.minProfit}円以上の利益になるときだけ買います（その日の買い目の合計が1日の予算を超えたら、リスクに対する期待値の高い順に予算まで）。学習に使っていない約1.2万レース（385日・1R 上限 3,000円）で 2,393レースを買い、収支 +92.7万円、買わない日 0日・1回も勝てない日 6日、最悪の日 −17,700円でした。</p></details>`
+            .join('')}</ul><p class="muted">これまでの的中重視の条件か、当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上で期待値が ${AUTO_STAKE.minEv.toFixed(1)} を超える買い目を1点、期待値の高い追加の買い目を1点まで、当たって ${AUTO_STAKE.minProfit}円以上の利益になるときだけ買います（その日の買い目の合計が1日の予算を超えたら、リスクに対する期待値の高い順に予算まで）。学習に使っていない約1.2万レース（385日・1R 上限 3,000円）で 2,492レースを買い、収支 +97.9万円、買わない日 0日・1回も勝てない日 5日、最悪の日 −17,700円でした。</p></details>`
         : rec.dropped?.length
         ? `<details class="bet-dropped"><summary>外した買い目 ${rec.dropped.length}点（当たる確率が ${pct(rec.keepMinP, 0)} 未満）</summary><ul>${rec.dropped
             .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span></li>`)
@@ -477,39 +438,6 @@ export function renderBetsPanel(pred, rec, ctx) {
       <tbody>${formRows}</tbody>
     </table></div>
     <p class="panel-note">オッズの「推」は単勝オッズから推定した値で、発売中の実際のオッズとは異なります。複勝は JRA のオッズ（下限〜上限）が取れているときは下限で計算しています。</p>
-  </section>`;
-}
-
-export function renderWeightsPanel(ctx) {
-  const { state } = ctx;
-  const presets = Object.entries(PRESETS)
-    .map(([k, p]) => `<button type="button" class="seg-btn${state.preset === k ? ' is-on' : ''}" data-preset="${k}" aria-pressed="${state.preset === k}">${esc(p.label)}</button>`)
-    .join('');
-  const sliders = FACTORS.map(
-    (f) => `<div class="slider">
-      <label for="w-${f.key}"><span>${esc(f.label)}</span><output class="num" id="wo-${f.key}">${esc(state.weights[f.key])}</output></label>
-      <input type="range" id="w-${f.key}" min="0" max="100" step="1" value="${esc(state.weights[f.key])}" data-weight="${f.key}" aria-describedby="wd-${f.key}">
-      <p class="slider-desc" id="wd-${f.key}">${esc(f.desc)}</p>
-    </div>`,
-  ).join('');
-  const ml = !!(PRESETS[state.preset]?.ml || PRESETS[state.preset]?.mlAi);
-  return `<section class="panel" id="panel-weights" aria-labelledby="h-weights">
-    <header class="panel-head"><h2 id="h-weights">予想のモデル</h2><span class="pill" id="custom-pill" ${state.preset === 'custom' ? '' : 'hidden'}>カスタム</span></header>
-    <div class="seg preset-seg" role="group" aria-label="プリセット">${presets}</div>
-    ${PRESETS[state.preset]?.desc ? `<p class="panel-note preset-desc">${esc(PRESETS[state.preset].desc)}</p>` : ''}
-    ${ml ? '' : `<div class="sliders">${sliders}</div>`}
-    <div class="slider">
-      <label for="noise"><span>荒れ度</span><output class="num" id="noise-out">${Number(state.noise).toFixed(1)}</output></label>
-      <input type="range" id="noise" min="0.6" max="1.6" step="0.1" value="${esc(state.noise)}" data-noise>
-      <p class="slider-desc">小さいほど能力どおりの堅い決着、大きいほど波乱を多めに見込みます。</p>
-    </div>
-    <div class="field-row">
-      <label class="field" for="sims" title="勝率・複勝率・各買い目の確率は厳密に計算するので、回数で予想は変わりません。回数は、4着以下の着順の分布と、買い目表の「この日の収支の見込み」（まだのレースの結果を AI の確率で引いて、1日の予算で割り振る前の買い目とも比べる）の精度に効きます">シミュレーション回数 <small>（4着以下の分布・その日の収支の見込み）</small></label>
-      <select id="sims" data-sims>
-        ${[20000, 50000, 100000].map((n) => `<option value="${n}" ${state.sims === n ? 'selected' : ''}>${n.toLocaleString('ja-JP')}回</option>`).join('')}
-      </select>
-    </div>
-    <div class="panel-actions"><button type="button" class="ghost-btn" data-action="reset-weights">既定に戻す</button></div>
   </section>`;
 }
 

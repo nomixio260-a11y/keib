@@ -229,3 +229,43 @@ export function calibrationChart(cal) {
     <text x="12" y="${(pad.t + H - pad.b) / 2}" class="ch-axis" transform="rotate(-90 12 ${(pad.t + H - pad.b) / 2})">実際の勝率</text>
   </svg>`;
 }
+
+const signedYen = (v) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('ja-JP')}円`);
+
+/**
+ * 日ごとの収支の棒グラフ。days … [{ date, profit, bets, hits }]、stdDays … 比べる収支（日付 → { profit }。横線で重ねる）
+ */
+export function dayBars(days, stdDays = null, { label = '日ごとの収支' } = {}) {
+  const list = days.filter((d) => d.bets > 0 || stdDays?.get(d.date)?.bets > 0);
+  if (!list.length) return '';
+  const vals = list.flatMap((d) => [d.profit, stdDays?.get(d.date)?.profit ?? 0]);
+  // 1日だけ大きい日（三連複の高配当など）で他の日が見えなくならないよう、目盛りは大きいほうから1割の値の2倍まで。超えた棒は端で切って▲▼で示す
+  const abs = vals.map((v) => Math.abs(v)).sort((a, b) => a - b);
+  const q90 = abs[Math.floor(0.9 * (abs.length - 1))] || 0;
+  const maxAbs = Math.max(1000, Math.min(abs[abs.length - 1] || 0, q90 * 2));
+  const bw = 30;
+  const pad = { t: 10, b: 22, l: 8, r: 8 };
+  const W = Math.max(300, pad.l + pad.r + list.length * bw);
+  const H = 132;
+  const mid = pad.t + (H - pad.t - pad.b) / 2;
+  const half = (H - pad.t - pad.b) / 2;
+  const y = (v) => mid - (v / maxAbs) * half;
+  const bars = list
+    .map((d, i) => {
+      const x = pad.l + i * bw;
+      const v = d.profit;
+      const vc = Math.max(-maxAbs, Math.min(maxAbs, v));
+      const top = Math.min(y(vc), mid);
+      const h = Math.max(1, Math.abs(y(vc) - mid));
+      const clip = Math.abs(v) > maxAbs ? `<text class="eb-clip" x="${(x + bw / 2).toFixed(1)}" y="${(v > 0 ? pad.t + 8 : H - pad.b - 2).toFixed(1)}">${v > 0 ? '▲' : '▼'}</text>` : '';
+      const s = stdDays?.get(d.date);
+      const sy = s ? y(Math.max(-maxAbs, Math.min(maxAbs, s.profit))) : 0;
+      const tick = s ? `<line class="eb-std" x1="${(x + bw * 0.12).toFixed(1)}" x2="${(x + bw * 0.88).toFixed(1)}" y1="${sy.toFixed(1)}" y2="${sy.toFixed(1)}"></line>` : '';
+      const label = list.length <= 14 || i === 0 || i === list.length - 1 || i % Math.ceil(list.length / 8) === 0 ? `<text class="eb-x" x="${(x + bw / 2).toFixed(1)}" y="${H - 6}">${esc(Number(d.date.slice(5, 7)))}/${esc(Number(d.date.slice(8, 10)))}</text>` : '';
+      return `<g><title>${esc(d.date)}：${signedYen(v)}（${d.bets}R・的中 ${d.hits}R）${s ? `／比較 ${signedYen(s.profit)}` : ''}</title><rect class="${v >= 0 ? 'eb-pos' : 'eb-neg'}" x="${(x + bw * 0.18).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * 0.64).toFixed(1)}" height="${h.toFixed(1)}" rx="2"></rect>${tick}${clip}${label}</g>`;
+    })
+    .join('');
+  return `<div class="effect-bars-wrap"><svg class="effect-bars" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(label)}">
+    <line class="eb-zero" x1="${pad.l}" x2="${W - pad.r}" y1="${mid}" y2="${mid}"></line>${bars}
+  </svg></div>`;
+}

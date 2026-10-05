@@ -5,6 +5,7 @@ import { esc, frameBadge, entryBadge, pct, yen, odds, markClass } from './format
 import { raceStatus, startMs, untilText } from '../engine/raceTime.js';
 import { BET_LABEL } from '../engine/constants.js';
 import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveDayBudget } from '../engine/bets.js';
+import { settingsLine } from './settingsView.js';
 import { raceOutcomes, simulateDay } from '../engine/daySim.js';
 import { payoutOf } from '../engine/backtest.js';
 import { dayLabel, gradeChip, surfaceChip } from './timeline.js';
@@ -145,11 +146,6 @@ function marksCell(row) {
 export function renderBetSheet(ctx) {
   const { state, now, venuesOf } = ctx;
   const { rows, sum, sim } = buildSheet(ctx);
-  const strat = STRATEGIES[state.strategy] || STRATEGIES.hit;
-  const budgets = [1000, 3000, 5000, 10000];
-  const stratBtns = Object.entries(STRATEGIES)
-    .map(([k, s]) => `<button type="button" class="seg-btn${state.strategy === k ? ' is-on' : ''}" data-strategy="${k}" aria-pressed="${state.strategy === k}">${esc(s.label)}</button>`)
-    .join('');
   const body = rows
     .map((row) => {
       const { race, st } = row;
@@ -174,9 +170,7 @@ export function renderBetSheet(ctx) {
       <p>この日の全レースの印（◎○▲＝機械学習の勝率順）と、今の買い方で選んだ買い目です。買い目は発売中の単勝オッズと複勝オッズで計算し、オッズが動けば変わります（画面は1分ごと、データは開催日に数分ごとに更新）。確定したレースは実際の払戻で精算しています。</p>
     </div>
     <div class="sheet-controls">
-      <div class="seg strat-seg" role="group" aria-label="買い方">${stratBtns}</div>
-      <div class="quick"><span class="seg-label">1レースの予算</span>${budgets.map((b) => `<button type="button" class="mini-btn${state.budget === b ? ' is-on' : ''}" data-budget="${b}">${b.toLocaleString('ja-JP')}円</button>`).join('')}</div>
-      <p class="panel-note">${esc(strat.desc)}</p>
+      ${settingsLine(state)}
     </div>
     <dl class="ds-grid sheet-sum">
       <div><dt>レース</dt><dd class="num">${sum.races}</dd></div>

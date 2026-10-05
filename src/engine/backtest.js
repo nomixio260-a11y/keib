@@ -191,6 +191,7 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const ordered = [...races].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime || '').localeCompare(String(b.startTime || '')) || (a.raceNo ?? 0) - (b.raceNo ?? 0) || String(a.id).localeCompare(String(b.id)));
   const preds = new Map();
   const aiPlan = new Map();
+  const aiDaily = new Map();
   const planDate = async (date, from) => {
     const items = [];
     for (let j = from; j < ordered.length && ordered[j].date === date; j++) {
@@ -284,6 +285,15 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
         }
       }
       if (tickets.length) a.races++;
+      // AI推奨は日ごとの収支も残す（検証期間の負けた日・最悪の日の表示）
+      if (s.key === 'ai' && tickets.length) {
+        const d = aiDaily.get(race.date) || { date: race.date, races: 0, hits: 0, stake: 0, pay: 0 };
+        d.races++;
+        d.stake += stake;
+        d.pay += ret;
+        if (ret > 0) d.hits++;
+        aiDaily.set(race.date, d);
+      }
       a.bets += tickets.length;
       a.stake += stake;
       a.ret += ret;
@@ -302,7 +312,9 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
 
   const strategies = BT_STRATEGIES.map((s) => {
     const a = acc[s.key];
-    return { ...a, hitRate: a.bets ? a.hits / a.bets : 0, roi: a.stake ? a.ret / a.stake : 0, profit: a.ret - a.stake };
+    const out = { ...a, hitRate: a.bets ? a.hits / a.bets : 0, roi: a.stake ? a.ret / a.stake : 0, profit: a.ret - a.stake };
+    if (s.key === 'ai') out.daily = [...aiDaily.values()].map((d) => ({ ...d, bets: d.races, profit: d.pay - d.stake }));
+    return out;
   });
   const rate = (o) => ({ ...o, winRate: o.n ? o.win / o.n : 0, top2Rate: o.n ? o.top2 / o.n : 0, top3Rate: o.n ? o.top3 / o.n : 0, logLoss: o.n ? o.logLoss / o.n : 0 });
   const grades = Object.fromEntries(

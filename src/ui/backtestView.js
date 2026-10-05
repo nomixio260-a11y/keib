@@ -2,7 +2,7 @@
 
 import { PRESETS } from '../engine/model.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
-import { calibrationChart, lineChart } from './charts.js';
+import { calibrationChart, lineChart, dayBars } from './charts.js';
 import { esc, pct, yen } from './format.js';
 import { renderReviewSection } from './reviewView.js';
 
@@ -68,6 +68,30 @@ function sourceSwitch(ctx) {
   </div>`;
 }
 
+/** AI推奨の日ごとの収支（負けた日・最悪の日・1回も勝てない日） */
+function aiDailySection(res) {
+  const ai = res.strategies.find((s) => s.key === 'ai');
+  if (!ai?.daily?.length) return '';
+  const days = ai.daily.map((d) => ({ date: d.date, profit: d.pay - d.stake, bets: d.races, hits: d.hits }));
+  const total = days.reduce((a, d) => a + d.profit, 0);
+  const lose = days.filter((d) => d.profit < 0).length;
+  const noWin = days.filter((d) => d.hits === 0).length;
+  const worst = Math.min(...days.map((d) => d.profit));
+  const signedYen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('ja-JP')}円`;
+  return `<section class="bt-section">
+      <h2 class="section-title">AI推奨の日ごとの収支 <small>${esc(ai.label)}・${days.length}日</small></h2>
+      <dl class="ds-grid bt-daily">
+        <div><dt>勝った日</dt><dd class="num">${days.length - lose}<small>/${days.length}日</small></dd></div>
+        <div><dt>負けた日</dt><dd class="num">${lose}<small>/${days.length}日</small></dd></div>
+        <div><dt>1回も勝てない日</dt><dd class="num">${noWin}<small>日</small></dd></div>
+        <div><dt>最悪の日</dt><dd class="num">${signedYen(worst)}</dd></div>
+        <div><dt>合計</dt><dd class="num ${total >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(total)}</dd></div>
+      </dl>
+      ${dayBars(days, null, { label: 'AI推奨の日ごとの収支' })}
+      <p class="panel-note">負けた日は、買ったレースの払戻の合計が金額を下回った日です。どの買い方でも負ける日はなくなりません（学習に使っていない 385日・1R 3,000円でも、負けた日は約4割）。1日の予算で、負けた日の大きさを抑えています。</p>
+    </section>`;
+}
+
 export function renderBacktest(ctx) {
   const { bt, state } = ctx;
   const saved = REAL_BACKTEST;
@@ -100,6 +124,7 @@ export function renderBacktest(ctx) {
       ${strategyTable(res, focus.key)}
       <p class="panel-note">三連複などは1回の高配当で回収率が大きく動きます。「最高払戻」が収支の大半を占めているときは、運の要素が大きいと考えてください。</p>
     </section>
+    ${aiDailySection(res)}
     <div class="bt-charts">
       <section class="panel">
         <header class="panel-head"><h2>累積収支の推移</h2></header>
