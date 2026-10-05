@@ -2,7 +2,7 @@
 
 import { BET_LABEL, COURSES, GOINGS, gradeLabel } from '../engine/constants.js';
 import { FACTORS } from '../engine/model.js';
-import { STRATEGIES, ESTIMATED_TYPES, BET_TEMP, LOW_ODDS_LABEL, AUTO_STAKE, ticketLabel, evaluateFormations } from '../engine/bets.js';
+import { STRATEGIES, ESTIMATED_TYPES, BET_TEMP, LOW_ODDS_LABEL, AUTO_STAKE, AUTO_STAKE_MORE, ticketLabel, evaluateFormations } from '../engine/bets.js';
 import { settingsLine } from './settingsView.js';
 import { horseComment, paceComment } from '../engine/comments.js';
 /** 的中重視の自動：金額の決め方の種類（金額の欄の説明） */
@@ -20,6 +20,7 @@ import { VOLATILITY_MODEL } from '../engine/volatilityModel.js';
 import { formatDateJa, formatShortDate, formatTime } from '../engine/util.js';
 import { contribBars, paceMap, positionStrip } from './charts.js';
 import { esc, fixed, frameBadge, entryBadge, markClass, odds, pct, signed, STYLE_CLASS, surfaceName, yen } from './format.js';
+import { horseFactorHtml } from './factorView.js';
 import { gradeChip, statusBadge } from './timeline.js';
 import { renderResultPanel } from './resultView.js';
 
@@ -205,7 +206,10 @@ function detailPanel(entry, row, pred, ctx) {
   const factors = FACTORS.filter((f) => pred.coefs[f.key] > 0);
   const maxAbs = Math.max(0.01, ...pred.rows.flatMap((r) => factors.map((f) => Math.abs(r.contrib[f.key]))));
   const scratched = !!entry.scratched;
-  const jockeys = race.jockeys && Object.keys(race.jockeys).length ? race.jockeys : REAL_STATS.jockeyRates;
+  // 過去の日は、その日より前のデータだけで作った騎手・厩舎の成績（ctx.statsFor）。これからの日は全期間
+  const st = ctx.statsFor?.(race.date) || REAL_STATS;
+  const jockeys = race.jockeys && Object.keys(race.jockeys).length ? race.jockeys : st.jockeyRates;
+  const trainerRate = st.trainerRates?.[entry.trainer];
   const comment = row ? horseComment(row, pred, jockeys) : null;
   const j = jockeys?.[entry.jockey];
   const bw = entry.bodyWeight ? `${entry.bodyWeight}kg${entry.bodyWeightDiff != null ? `（${signed(entry.bodyWeightDiff)}）` : ''}` : '—';
@@ -240,12 +244,13 @@ function detailPanel(entry, row, pred, ctx) {
         <div><dt>父</dt><dd>${esc(entry.sire || '—')}</dd></div>
         ${entry.damSire ? `<div><dt>母の父</dt><dd>${esc(entry.damSire)}</dd></div>` : ''}
         <div><dt>厩舎</dt><dd>${esc(entry.trainer || '—')}${entry.trainerArea ? `（${esc(entry.trainerArea)}）` : ''}</dd></div>
-        ${REAL_STATS.trainerRates?.[entry.trainer] ? `<div><dt>厩舎成績</dt><dd class="num">勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].winRate)}・複勝率 ${pct(REAL_STATS.trainerRates[entry.trainer].top3Rate)}</dd></div>` : ''}
+        ${trainerRate ? `<div><dt>厩舎成績</dt><dd class="num">勝率 ${pct(trainerRate.winRate)}・複勝率 ${pct(trainerRate.top3Rate)}</dd></div>` : ''}
         <div><dt>馬体重</dt><dd class="num">${esc(bw)}</dd></div>
         ${entry.placeMin > 1 ? `<div><dt>複勝オッズ</dt><dd class="num">${odds(entry.placeMin)}〜${odds(entry.placeMax)}</dd></div>` : ''}
         <div><dt>騎手成績</dt><dd class="num">${j ? `勝率 ${pct(j.winRate)}・複勝率 ${pct(j.top3Rate)}${j.starts ? `（${j.starts}騎乗）` : ''}` : '—'}</dd></div>
         ${row ? `<div><dt>AI指数</dt><dd class="num">${fixed(row.index)}（${row.aiRank}位・勝率は${row.rank}位）</dd></div><div><dt>脚質</dt><dd>${esc(row.style.style)}</dd></div><div><dt>スピード指数</dt><dd class="num">最高 ${row.stats.bestSi != null ? row.stats.bestSi.toFixed(0) : '—'}・前走 ${row.stats.lastSi != null ? row.stats.lastSi.toFixed(0) : '—'}</dd></div>` : ''}
       </dl>
+      ${horseFactorHtml(race, entry)}
     </div>
   </div>`;
 }
@@ -396,13 +401,13 @@ export function renderBetsPanel(pred, rec, ctx) {
       const parts = [];
       if (rec.auto) {
         parts.push(`<b>自動</b>：毎レース、買い目ごとに当たる確率と払戻の見込み（複勝はオッズの下限〜上限の幅と当たる確率から）で期待値と有利さを出し、買う買い目と金額を決めます。予算は上限で、使い切るとは限りません${rec.tickets.length ? `（このレース ${yen(rec.used)}・予算の ${Math.round((rec.used / rec.budget) * 100)}%）` : ''}。`);
-        parts.push(`・これまでの的中重視の条件（当たる確率 ${pct(AUTO_STAKE.classicKeep, 0)} 以上ほか）か、当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上（1.1 倍は ${pct(AUTO_STAKE.lowP, 0)} 以上）で期待値が ${AUTO_STAKE.minEv.toFixed(1)} を超える買い目 → 自信に応じて上限まで（有利さが ${pct(AUTO_STAKE.fullAt, 0)} 未満なら減らす）。当たる確率 ${pct(AUTO_STAKE.hiP, 0)} 以上の人気馬で期待値が ${AUTO_STAKE.hiEv} に届かないときは金額を半分に（AI は人気馬の3着以内を少し高く見るため。期待値 1.00〜1.02 はどの年も回収率 90〜100%）`);
-        parts.push(`・追加：当たる確率はやや低いが期待値の高い買い目（複勝 ${pct(AUTO_STAKE.extra.place[0], 0)} 以上・期待値 ${AUTO_STAKE.extra.place[1]} 以上、馬連 ${pct(AUTO_STAKE.extra.quinella[0], 0)} 以上・${AUTO_STAKE.extra.quinella[1]} 以上、三連複 ${pct(AUTO_STAKE.extra.trio[0], 0)} 以上・${AUTO_STAKE.extra.trio[1]} 以上。実際のオッズ）→ 自信に応じて上限まで ${AUTO_STAKE.extra.k}点。馬連・三連複は学習期間で回収率がいちばん高いので主な買い目より先に予算を入れ、複勝は主な買い目の残りの予算で`);
+        parts.push(`・当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上（1.1 倍は ${pct(AUTO_STAKE.lowP, 0)} 以上）で期待値が ${AUTO_STAKE.minEv.toFixed(1)} 以上の買い目を1点 → 自信に応じて上限まで（有利さが ${pct(AUTO_STAKE.fullAt, 0)} 未満なら減らす）。期待値の余裕は、いま見ているオッズが確定までに動く分です（確定オッズで選ぶ検証では余裕が要らないように見えますが、発走10分前のオッズで選ぶと、余裕の小さい買い目は損でした）`);
+        if (state.keep === 'more') parts.push(`・「自動・多め」：当たる確率 ${pct(AUTO_STAKE_MORE.minP, 0)} 以上・期待値 ${AUTO_STAKE_MORE.minEv.toFixed(2)} 以上まで広げて、買うレースを増やします（発走前のオッズの推定では、長い期間でわずかに損の見込み）`);
         parts.push(`・当たっても利益が ${AUTO_STAKE.minProfit}円に届かない買い目は買いません。どれもなければ見送り`);
-        if (exotic) parts.push('馬連・三連複は、期待値の高いもの（JRA の実際のオッズ）を追加の買い目として買います。馬単・三連単は推定オッズなので買いません。');
+        if (exotic) parts.push('馬連・三連複などの追加の買い目は、発走前のオッズで選ぶと学習期間のどの年も損だったので買いません。馬単・三連単は推定オッズなので買いません。');
       } else if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.5%（週平均 −2,115円 → +601円）、直近14週 99.3% → 129.2%（−256円 → +1,961円）。的中率・期待値の欄はこの値です。`);
       if (exotic && !rec.auto) parts.push('的中重視は当たる確率 50% 以上の買い目だけを買うので、馬連・馬単・三連複・三連単はほとんど選ばれません（学習期間 385日で馬連 1点）。単勝・複勝だけとほぼ同じ成績です。');
-      if (wide) parts.push(rec.auto ? '的中重視（自動）にワイドを入れても、学習期間の成績はほとんど変わりません（回収率 114.0% → 113.9%・+979,040 → +975,830円。ワイドは当たる確率 60% 以上のときなどに限られるため）。' : '<span class="bet-caution">的中重視にワイドを入れると、的中率と回収率が少し下がります（学習期間 回収率 111.3% → 110.2%、検証期間の的中率 100% → 96.2%）。</span>');
+      if (wide) parts.push(rec.auto ? '的中重視（自動）にワイドを入れても、買い目はほとんど変わりません（ワイドは当たる確率 55% 以上・期待値 1.2 以上になることがまれなため）。' : '<span class="bet-caution">的中重視にワイドを入れると、的中率と回収率が少し下がります（確定オッズで選んだ以前の検証）。</span>');
       return parts.length ? `<details class="bet-how"><summary>この買い方のしくみ</summary><p class="panel-note">${parts.join('<br>')}</p></details>` : '';
     })()}
     <div class="table-scroll"><table class="bets">
@@ -413,7 +418,7 @@ export function renderBetsPanel(pred, rec, ctx) {
       rec.dropped?.length && rec.auto
         ? `<details class="bet-dropped"><summary>買わなかった候補 ${rec.dropped.length}点</summary><ul>${rec.dropped
             .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span> <small>${t.why === 'one' ? '（1レースで買う点数・予算の上限のため）' : t.why === 'thin' ? `（当たっても利益が ${AUTO_STAKE.minProfit}円に届かない）` : t.why === 'low' ? `（${LOW_ODDS_LABEL}は当たる確率 ${pct(AUTO_STAKE.lowP, 0)} 以上のときだけ）` : t.why === 'day' ? '（1日の予算に入らない）' : '（利益の見込みが足りない）'}</small></li>`)
-            .join('')}</ul><p class="muted">これまでの的中重視の条件か、当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上で期待値が ${AUTO_STAKE.minEv.toFixed(1)} を超える買い目を1点、期待値の高い追加の買い目を1点まで、当たって ${AUTO_STAKE.minProfit}円以上の利益になるときだけ買います（その日の買い目の合計が1日の予算を超えたら、リスクに対する期待値の高い順に予算まで）。学習に使っていない約1.2万レース（385日・1R 上限 3,000円）で 2,492レースを買い、収支 +97.9万円、買わない日 0日・1回も勝てない日 5日、最悪の日 −17,700円でした。</p></details>`
+            .join('')}</ul><p class="muted">当たる確率 ${pct(AUTO_STAKE.minP, 0)} 以上で期待値が ${AUTO_STAKE.minEv.toFixed(1)} 以上の買い目を1点、当たって ${AUTO_STAKE.minProfit}円以上の利益になるときだけ買います（その日の買い目の合計が1日の予算を超えたら、発走の早いレースから順に予算まで）。発走10分前のオッズで選んだ場合の推定は、学習に使っていない 2024年〜2026年6月で回収率 99〜106%・的中率 約63%、検証期間の30日で約45レース・回収率 約111%（バックテスト画面）。</p></details>`
         : rec.dropped?.length
         ? `<details class="bet-dropped"><summary>外した買い目 ${rec.dropped.length}点（当たる確率が ${pct(rec.keepMinP, 0)} 未満）</summary><ul>${rec.dropped
             .map((t) => `<li>${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b> 当たる確率 <span class="num">${pct(t.pHit)}</span>・オッズ <span class="num">${odds(t.odds)}</span>・期待値 <span class="num">${t.ev.toFixed(2)}</span></li>`)

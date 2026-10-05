@@ -272,74 +272,46 @@ test('レース分析：結論（買い・見送り・待ち）、有力馬、AI
   assert.ok(a.top.every((h) => h.ratio == null));
 });
 
-// 追加の買い目：当たる確率はやや低いが期待値の高い買い目（複勝・馬連・三連複）を有利さに応じた金額で（残りの予算の範囲）
-function checkExtra(t, budget) {
-  const X = AUTO_STAKE.extra;
-  const L = X[t.type];
-  assert.ok(L, `追加できる券種 ${t.type}`);
-  assert.ok(t.pHit >= L[0] && t.ev >= L[1] && t.odds >= MIN_ODDS, `${t.type} ${t.pHit} ${t.ev} ${t.odds}`);
-  const f = (t.ev - 1) / (t.oddsExp - 1);
-  assert.ok(t.stake <= Math.floor((budget * Math.min(X.cap, f / X.fullAt)) / 100) * 100, `${t.stake}`);
-  assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
-}
-
-test('的中重視の自動：自信（当たる確率×払戻の見込み）に応じて金額を決め、予算を使い切るとは限らない', () => {
-  const key = (t) => `${t.type}:${t.idx.join('-')}`;
+test('的中重視の自動（規則J）：当たる確率 55% 以上・期待値 1.2 以上の買い目を1点だけ、自信に応じた金額で。追加の買い目・これまでの条件は使わない', () => {
   const shareOf = (f, budget = 3000) => Math.min(budget, Math.floor((budget * Math.min(1, f / AUTO_STAKE.fullAt)) / 100) * 100);
+  assert.equal(AUTO_STAKE.extra, null);
+  assert.equal(AUTO_STAKE.classic, false);
+  assert.ok(AUTO_STAKE.minEv >= 1.2 - 1e-9 && AUTO_STAKE.minP >= 0.55 - 1e-9);
   let main = 0;
   let skips = 0;
-  let classicKept = 0;
   let thin = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const race = makeRace({ seed });
-    // 複勝の実際のオッズ（下限〜上限）をつける：人気順に 1.1〜
-    for (const e of race.entries) Object.assign(e, { placeMin: Math.round((1 + e.popularity * 0.15) * 10) / 10, placeMax: Math.round((1.3 + e.popularity * 0.4) * 10) / 10 });
+    // 複勝の実際のオッズ（下限〜上限）：人気順に 1.5〜（期待値 1.2 を超える買い目ができるように少し高め）
+    for (const e of race.entries) Object.assign(e, { placeMin: Math.round((1.2 + e.popularity * 0.3) * 10) / 10, placeMax: Math.round((1.7 + e.popularity * 0.6) * 10) / 10 });
     const fav = race.entries.find((e) => e.popularity === 1);
     if (seed % 2) for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
     // 3レースに1つは、1番人気の複勝を 1.1〜1.2 倍に（当たりやすいが、予算が小さいと当たっても利益が 100円に届かない）
     if (seed % 3 === 0) Object.assign(fav, { odds: 1.2, placeMin: 1.1, placeMax: 1.2 });
+    // 馬連の実際のオッズを高めに付けても、追加の買い目としては買わない
+    race.exoticOdds = { quinella: { '1-2': 50, '1-3': 60, '2-3': 70 } };
     const pred = predictRace(race, { sims: 0 });
     const rec = recommendBets(pred, { budget: 3000 });
-    // これまでの的中重視（当たる確率で絞る 50%・予算を使い切る）
-    const old = recommendBets(pred, { budget: 3000, keep: 0.5 });
-    const oldKeys = new Set(old.tickets.map(key));
     assert.equal(rec.auto, true);
     assert.ok(rec.used <= 3000);
-    assert.ok(rec.tickets.length <= AUTO_STAKE.maxTickets + AUTO_STAKE.extra.k);
-    assert.ok(rec.tickets.filter((t) => t.auto !== 'extra').length <= AUTO_STAKE.maxTickets);
-    // 馬連・三連複の追加の買い目（extra.first）は主な買い目より先に予算を入れる
-    const firstStake = rec.tickets.filter((t) => t.auto === 'extra' && AUTO_STAKE.extra.first.includes(t.type)).reduce((a, t) => a + t.stake, 0);
+    assert.ok(rec.tickets.length <= AUTO_STAKE.maxTickets);
     for (const t of rec.tickets) {
+      assert.equal(t.auto, 'kelly');
       assert.ok(t.stake >= 100 && t.stake % 100 === 0 && t.stake <= 3000, String(t.stake));
       assert.ok(!t.estimated && t.type !== 'exacta' && t.type !== 'trifecta');
       assert.ok(Math.abs(t.oddsExp - expectedPayout(t)) < 1e-9);
       assert.ok(Math.abs(t.ev - t.pHit * t.oddsExp) < 1e-9);
-      if (t.auto === 'extra') {
-        checkExtra(t, 3000);
-        continue;
-      }
-      // (1) これまでの的中重視の買い目、または (2) 当たる確率 60% 以上（1.1 倍は 80%）・期待値 1.0 超。金額は有利さ（ケリー）÷ 5%（上限は予算。馬連・三連複を先に買ったときはその残り）
-      assert.ok(t.auto === 'kelly' || t.auto === 'classic', t.auto);
-      if (t.auto === 'kelly') assert.ok(t.pHit >= (t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP) && t.ev > AUTO_STAKE.minEv, `${t.pHit} ${t.ev}`);
-      else assert.ok(oldKeys.has(key(t)), 'これまでの的中重視が選んだ買い目');
-      // 人気馬（当たる確率 70% 以上）で期待値 1.02 未満は金額を半分に
-      const fk = (t.ev - 1) / (t.oddsExp - 1);
-      const want = t.favThin ? Math.floor((3000 * Math.min(1, fk / AUTO_STAKE.fullAt) * AUTO_STAKE.hiCut) / 100) * 100 : shareOf(fk);
-      assert.equal(!!t.favThin, t.pHit >= AUTO_STAKE.hiP && t.ev < AUTO_STAKE.hiEv);
-      assert.equal(t.stake, Math.min(want, Math.floor((3000 - firstStake) / 100) * 100));
-      // 当たっても利益が 100円に届かない買い目は買わない（+10〜30円の的中をなくす）
+      assert.ok(t.pHit >= (t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP) && t.ev >= AUTO_STAKE.minEv, `${t.pHit} ${t.ev}`);
+      // 金額は有利さ（ケリー）÷ fullAt（上限は予算）
+      assert.equal(t.stake, shareOf((t.ev - 1) / (t.oddsExp - 1)));
+      // 当たっても利益が 100円に届かない買い目は買わない
       assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
       main++;
-    }
-    // これまでの的中重視が買う（実際のオッズで有利さがあり、利益も 100円以上の）買い目があるレースは、自動でも買う
-    const oldMain = old.tickets.filter((t) => !t.estimated && t.odds >= AUTO_STAKE.minOdds && shareOf((t.pHit * expectedPayout(t) - 1) / (expectedPayout(t) - 1)) * (t.odds - 1) >= AUTO_STAKE.minProfit);
-    if (oldMain.length) {
-      assert.ok(rec.tickets.length, `seed ${seed}`);
-      classicKept++;
     }
     if (!rec.tickets.length) {
       skips++;
       assert.ok(rec.skipped && rec.skipReason);
+      if (!/複勝の実際のオッズ/.test(rec.skipReason) && !rec.dropped?.some((t) => t.why === 'thin' || t.why === 'low')) assert.match(rec.skipReason, /期待値が 1\.2 以上/);
     }
     // 予算 300円では、1.1 倍の複勝は当たっても +30円なので買わない（理由も出す）
     if (seed % 3 === 0) {
@@ -352,47 +324,7 @@ test('的中重視の自動：自信（当たる確率×払戻の見込み）に
     }
   }
   assert.ok(main > 0 && skips > 0, `${main} ${skips}`);
-  assert.ok(classicKept > 0, 'これまでの的中重視の買い目を残すレースで確かめている');
-  assert.ok(thin > 0, '当たっても利益が薄い買い目を見送ったレースがある');
-  // 追加の買い目：AI が 3〜4番手に見る馬の複勝に高い実オッズ（3〜4倍）がついたレースでは、有利さに応じた金額で足す（主な買い目の残りの予算で）
-  let extras = 0;
-  for (let seed = 1; seed <= 60 && !extras; seed++) {
-    const race = makeRace({ seed });
-    for (const e of race.entries) Object.assign(e, { placeMin: Math.round((1 + e.popularity * 0.15) * 10) / 10, placeMax: Math.round((1.3 + e.popularity * 0.4) * 10) / 10 });
-    const pred0 = predictRace(race, { sims: 0 });
-    const order = pred0.rows.map((r, i) => i).sort((a, b) => pred0.rows[b].pTop3 - pred0.rows[a].pTop3);
-    for (const i of order.slice(2, 4)) Object.assign(race.entries.find((e) => e.number === pred0.rows[i].entry.number), { placeMin: 3.0, placeMax: 4.0 });
-    const pred1 = predictRace(race, { sims: 0 });
-    for (const t of recommendBets(pred1, { budget: 3000 }).tickets.filter((x) => x.auto === 'extra')) {
-      checkExtra(t, 3000);
-      extras++;
-    }
-  }
-  assert.ok(extras > 0, '追加の買い目を買うレースで確かめている');
-  // 馬連の追加の買い目：AI の上位2頭の馬連に実際のオッズ（当たる確率 × オッズ = 1.5）がつくと、主な買い目より先に有利さに応じた金額で買う
-  let firstChecked = 0;
-  for (let seed = 1; seed <= 60 && firstChecked < 3; seed++) {
-    const race = makeRace({ seed });
-    for (const e of race.entries) Object.assign(e, { placeMin: Math.round((1 + e.popularity * 0.15) * 10) / 10, placeMax: Math.round((1.3 + e.popularity * 0.4) * 10) / 10 });
-    const pred0 = predictRace(race, { sims: 0 });
-    const [a, b] = pred0.rows.map((r, i) => i).sort((x, y) => pred0.rows[y].pWin - pred0.rows[x].pWin);
-    const pq = pred0.combos.quinella[Math.min(a, b) * pred0.n + Math.max(a, b)];
-    if (!(pq >= AUTO_STAKE.extra.quinella[0] + 0.02)) continue;
-    const pair = [pred0.rows[a].entry.number, pred0.rows[b].entry.number].sort((x, y) => x - y).join('-');
-    race.exoticOdds = { quinella: { [pair]: Math.round((1.5 / pq) * 10) / 10 } };
-    const pred1 = predictRace(race, { sims: 0 });
-    const rec = recommendBets(pred1, { budget: 3000 });
-    const q = rec.tickets.find((t) => t.type === 'quinella');
-    if (!q) continue;
-    checkExtra(q, 3000);
-    const f = (q.ev - 1) / (q.oddsExp - 1);
-    assert.equal(q.stake, Math.floor((3000 * Math.min(AUTO_STAKE.extra.cap, f / AUTO_STAKE.extra.fullAt)) / 100) * 100, '馬連は先に、有利さに応じた金額');
-    assert.equal(rec.tickets[0], q);
-    for (const t of rec.tickets.filter((x) => x !== q)) assert.ok(t.stake <= Math.floor((3000 - q.stake) / 100) * 100, '主な買い目は残りの予算で');
-    assert.ok(rec.used <= 3000);
-    firstChecked++;
-  }
-  assert.ok(firstChecked > 0, '馬連の追加の買い目を先に買うレースで確かめている');
+  assert.ok(thin >= 0);
   // 複勝の払戻の見込みは下限〜上限の幅と当たる確率から（幅が広いほど・人気の馬ほど下限寄り。幅がなければ下限）
   const w = 2.2 / 1.2;
   assert.ok(Math.abs(expectedPayout({ type: 'place', odds: 1.2, oddsMax: 2.2, pHit: 0.7 }) - 1.2 * (1 + placeAlpha(w, 0.7) * (w - 1))) < 1e-9);

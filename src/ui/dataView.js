@@ -5,6 +5,7 @@ import { REAL_STATS } from '../engine/realStats.js';
 import { CALIBRATION } from '../engine/calibration.js';
 import { esc } from './format.js';
 import { dayLabel } from './timeline.js';
+import { factorSection } from './factorView.js';
 
 const stamp = (iso) => {
   if (!iso) return '—';
@@ -112,6 +113,7 @@ export function renderData(ctx) {
       <p>予想に使う実データの状況です。JRAの出馬表・オッズ・結果を使います。自分で用意した実際の出馬表と過去走（馬柱）を CSV / JSON で取り込んで予想することもできます（取り込んだデータはこのブラウザの中だけで処理され、外部には送信されません）。</p>
     </div>
     ${sourcePanel(ctx)}
+    ${factorSection()}
     <div class="data-grid">
       <form class="panel import-form" id="import-form" novalidate>
         <header class="panel-head"><h2>CSVで取り込む</h2></header>

@@ -10,6 +10,7 @@
 #   手動：Actions → Race day → Run workflow（分と間隔を指定すると固定。relay=1 なら終了後に次を予約して自動運転に戻る）
 #   止めるとき：Actions → Race day → … → Disable workflow（実行中の run も Cancel）
 #   data ブランチには data.json のほか、オッズの推移（odds/）と結果の記録（history/。直近400日）も貯める（1コミットを上書き）。
+#   発走前の買い目の記録（picks/。標準の設定で、発走1分前を過ぎたレースは書き換えない）も貯める。画面の「検証」が実際の払戻で精算する。
 #   特別登録（日曜の夕方〜）から来週の特別レースの暫定の予想も入れる（--registrations。出馬表が出たら置き換わる）。
 #   特別登録の馬の前4走は history/ の結果の記録で詳しくする（タイム・通過順・上がり。ないときは馬柱の着順と距離だけ）。
 #   過去の開催日は、直近14日を data.json に入れ、それより前は days/（開催日ごとのアーカイブ。結果の出そろった日を自動で書き足す）から画面が読み込む
@@ -87,7 +88,7 @@ jobs:
             echo "== $n 回目 $(date -u +%FT%TZ)"
             # ほかから data ブランチに push されたもの（過去の結果の記録など）を取り込む
             if git -C out fetch -q origin data 2>/dev/null; then git -C out reset -q --hard FETCH_HEAD; fi
-            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --history-keep-days 400 --exotic out/odds-final --days-dir out/days --registrations --skip-if-idle"
+            args="--out out/data.json --snapshots out/odds --records out/history --history out/history --history-keep-days 400 --exotic out/odds-final --days-dir out/days --picks out/picks --registrations --skip-if-idle"
             [ -s out/data.json ] && args="$args --previous out/data.json"
             if node scripts/build-data.mjs $args > build.log 2>&1; then
               tail -12 build.log

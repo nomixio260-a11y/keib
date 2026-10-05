@@ -4057,3 +4057,111 @@ table.bt-table {
 .rv-table tr.rv-group th { padding-top: 10px; font-size: 12px; color: var(--ink-2); background: var(--surface-2); }
 .rv-table tr.is-flag td { background: color-mix(in srgb, var(--bad) 7%, transparent); }
 .rv-study td.num { white-space: normal; }
+
+/* 検証：確定オッズの注意・発走前に記録した買い目・発走前のオッズでの推定 */
+.bt-warn {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--amber);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.bt-picks .bt-table + .table-scroll,
+.bt-real .table-scroll + .panel-note {
+  margin-top: 10px;
+}
+.bt-picks th[scope='row'],
+.bt-real th[scope='row'] {
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 要素ごとの実績 */
+.fx-section .fx-h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+.fx-notable {
+  margin: 0 0 12px;
+  padding-left: 1.2em;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.fx-block {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.fx-block > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+.fx-block > summary small {
+  font-weight: 400;
+  color: var(--muted);
+}
+.fx-block .table-scroll {
+  padding: 0 8px 8px;
+}
+.fx-table th[scope='row'] {
+  text-align: left;
+  font-weight: 500;
+}
+.fx-years {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fx-y {
+  display: inline-block;
+  min-width: 2.6em;
+  font-size: 12px;
+}
+.fx-horse {
+  margin-top: 12px;
+}
+.fx-horse h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.fx-horse h4 small {
+  font-weight: 400;
+  color: var(--muted);
+}
+.fx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.fx-list li {
+  display: grid;
+  grid-template-columns: minmax(5.5em, auto) 1fr auto;
+  gap: 8px;
+  font-size: 12px;
+  align-items: baseline;
+}
+.fx-k {
+  color: var(--muted);
+}
+.fx-v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fx-ae {
+  font-weight: 600;
+}
+.fx-table td,
+.fx-table th {
+  white-space: nowrap;
+}
+.bt-picks td,
+.bt-real td {
+  white-space: nowrap;
+}

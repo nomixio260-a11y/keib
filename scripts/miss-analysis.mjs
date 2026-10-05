@@ -1,20 +1,18 @@
 #!/usr/bin/env node
-// 外れたレースの分析：学習に使っていない予測（学習期間の分割外と検証期間）で、外れ方の型と、AI の見込みからの系統的なずれを調べる。
-//   1) 学習期間の分割外のスコア（日付で5分割、配信中のモデルと同じ設定。data/oof-scores.json にキャッシュ）と、検証期間の配信中の
-//      モデルで、本番と同じ流れ（predictRace）で予想し、src/engine/review.js で外れ方の型（惜しい外れ・波乱・AI の見落とし）を数える
+// 外れたレースの分析：学習に使っていない予測（学習期間の前進検証と検証期間）で、外れ方の型と、AI の見込みからの系統的なずれを調べる。
+//   1) 学習期間の前進検証の予測（data/oof-walk.json：2024年から四半期ごとに、その前のレースだけで学習したモデル）と、検証期間の
+//      配信中のモデルで、本番と同じ流れ（predictRace）で予想し、src/engine/review.js で外れ方の型（惜しい外れ・波乱・AI の見落とし）を数える
 //   2) ◎が1番人気と違うときの勝率（AI の判断がオッズより当たっているか）
 //   3) 条件と馬の型（休み明け・キャリア・昇級・距離変化・前走着順・馬体重・脚質・枠など）ごとに、勝ち数と AI の見込み（勝率の合計）を
 //      比べ、学習期間で |z| ≥ 2、検証期間でも同じ向きの区分を探す（◎だけと全馬の両方）
 //   4) 直近60日（検証期間の最後の60日）も同じように数え、AI推奨（的中重視）の的中と、直近60日で大きくずれ・長い期間でも同じ向きの区分を出す
 //   5) src/engine/missStats.js に書く（バックテスト画面の「外れたレースの分析」の長期の分析）
 //
-//   node scripts/miss-analysis.mjs        （npm run miss-analysis。モデルを作り直したら OOF=refresh で分割外を作り直す）
+//   node scripts/miss-analysis.mjs        （npm run miss-analysis。モデルを作り直したら node scripts/oof-walk.mjs で前進検証を作り直す）
 
 import path from 'node:path';
-import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { readJson, writeJson, loadHistory, attachFinalExoticOdds, DATA_DIR, ROOT } from '../src/collector/store.js';
-import { DEFAULT_PARAMS, groupRaces, flatten, makeThresholds, binize, trainBoost, evalTrees, dateFolds } from './lib/boost.mjs';
 import { GBDT_MODEL } from '../src/engine/gbdtModel.js';
 import { predictRace, PRESETS } from '../src/engine/model.js';
 import { reviewRace } from '../src/engine/review.js';
@@ -26,41 +24,17 @@ import { usable, statsForEngine } from './calibrate.mjs';
 
 const TEST_START = process.env.TEST_START || '2026-07-01';
 const Z_CUT = 2;
-const OOF_FILE = path.join(DATA_DIR, 'oof-scores.json');
 const log = (s) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${s}`);
 
-// ---------- 1) 学習期間の分割外のスコア ----------
-const P = GBDT_MODEL.params;
-const sig = JSON.stringify({ only: P.only, depth: P.depth, lr: P.lr, lambda: P.lambda, colsample: P.colsample, subsample: P.subsample, rounds: P.rounds, trainedOn: GBDT_MODEL.trainedOn });
+// ---------- 1) 学習期間の前進検証の予測 ----------
+// 前進検証（scripts/oof-walk.mjs）：2024年から四半期ごとに、その前のレースだけで学習したモデルの予測。
+// 以前は日付で5分割して「ほかの4つ」で学習していたので、古いレースを未来のレースで学習したモデルで予測していた（未来の情報が混ざる）
 const ds = await readJson(path.join(DATA_DIR, 'dataset.json'));
 if (!ds) throw new Error('data/dataset.json がありません（node scripts/dataset.mjs）');
-let cache = process.env.OOF !== 'refresh' && existsSync(OOF_FILE) ? await readJson(OOF_FILE) : null;
-if (cache && cache.sig !== sig) {
-  log('分割外のスコアは前のモデルのものなので作り直します');
-  cache = null;
-}
-if (!cache) {
-  const Fn = ds.names.length;
-  const iLogq = ds.names.indexOf('logq');
-  const races = groupRaces(ds.rows).filter((rs) => rs.length >= 2 && rs.some((r) => r.y) && rs[0].date < TEST_START);
-  const feats = (P.only?.length ? P.only : ds.names).map((k) => ds.names.indexOf(k)).filter((i) => i >= 0);
-  const params = { ...DEFAULT_PARAMS, depth: P.depth, lr: P.lr, lambda: P.lambda, colsample: P.colsample, subsample: P.subsample, rounds: Math.round((P.rounds || 1000) / 1.2), patience: 0 };
-  const folds = dateFolds(races, 5);
-  const scores = {};
-  for (let k = 0; k < 5; k++) {
-    const t0 = Date.now();
-    const fit = flatten(folds.filter((_, j) => j !== k).flat(), Fn, { baseIndex: iLogq });
-    const thresholds = makeThresholds(fit);
-    binize(fit, thresholds);
-    const valid = binize(flatten(folds[k], Fn, { baseIndex: iLogq }), thresholds);
-    const r = trainBoost({ fit, valids: [], thresholds, feats, params, seed: 1000 + k });
-    const m = evalTrees(r.trees, valid).m;
-    for (let ri = 0; ri < valid.races.length; ri++) scores[valid.races[ri][0].raceId] = valid.races[ri].map((row, i) => [row.number, m[valid.start[ri] + i]]);
-    log(`分割外 ${k + 1}/5：${folds[k].length}レース（${((Date.now() - t0) / 1000).toFixed(0)}秒）`);
-  }
-  cache = { sig, scores };
-  await writeJson(OOF_FILE, cache);
-}
+const walk = await readJson(path.join(DATA_DIR, 'oof-walk.json'));
+if (!walk?.scores) throw new Error('data/oof-walk.json がありません（node scripts/oof-walk.mjs）');
+const cache = { scores: walk.scores };
+log(`前進検証の予測：${Object.keys(walk.scores).length}レース（${walk.from}〜${walk.to} の前日）`);
 const FI = Object.fromEntries(ds.names.map((n, i) => [n, i]));
 const X = new Map();
 for (const r of ds.rows) X.set(`${r.raceId}|${r.number}`, r.x);
@@ -78,7 +52,7 @@ await attachFinalExoticOdds(holdCards);
 attachCareer(holdCards, index, { stats });
 const lastDate = holdCards.filter((c) => c.result?.length).reduce((m, c) => (c.date > m ? c.date : m), '');
 const R60_FROM = addDays(lastDate, -59);
-const SETS = { oof: { label: '学習期間の分割外', cards: oofCards }, hold: { label: '検証期間', cards: holdCards }, r60: { label: '直近60日', cards: holdCards.filter((c) => c.date >= R60_FROM) } };
+const SETS = { oof: { label: '学習期間（前進検証）', cards: oofCards }, hold: { label: '検証期間', cards: holdCards }, r60: { label: '直近60日', cards: holdCards.filter((c) => c.date >= R60_FROM) } };
 const recs = { oof: [], hold: [], r60: [] };
 // 直近60日の AI推奨（的中重視の自動・既定の券種・1R 上限 3,000円・1日の予算つき：朝にその日の全レースの買い目で割り振る）
 const bets60 = { races: 0, hits: 0, stake: 0, ret: 0 };
@@ -217,12 +191,12 @@ for (const [who, keep] of [
       if (!a1 || a0.n < 100) continue;
       const z0 = (a0.w - a0.p) / Math.sqrt(a0.v);
       const z1 = (a1.w - a1.p) / Math.sqrt(a1.v);
-      if (Math.abs(z0) >= Z_CUT && Math.sign(z0) === Math.sign(z1)) flagged.push(`${who}・${name}=${k}（分割外 ${(a0.w / a0.p).toFixed(2)}倍 z ${z0.toFixed(1)}・検証 ${(a1.w / a1.p).toFixed(2)}倍 z ${z1.toFixed(1)}）`);
-      // 直近60日で大きくずれ（|z| ≥ 2）、検証期間・学習期間の分割外でも同じ向きの区分
+      if (Math.abs(z0) >= Z_CUT && Math.sign(z0) === Math.sign(z1)) flagged.push(`${who}・${name}=${k}（前進検証 ${(a0.w / a0.p).toFixed(2)}倍 z ${z0.toFixed(1)}・検証 ${(a1.w / a1.p).toFixed(2)}倍 z ${z1.toFixed(1)}）`);
+      // 直近60日で大きくずれ（|z| ≥ 2）、検証期間・学習期間の前進検証でも同じ向きの区分
       const a2 = acc.r60.get(k);
       if (a2 && a2.n >= 20) {
         const z2 = (a2.w - a2.p) / Math.sqrt(a2.v);
-        if (Math.abs(z2) >= Z_CUT && Math.sign(z2) === Math.sign(z1) && Math.sign(z2) === Math.sign(z0)) recent.push(`${who}・${name}=${k}（直近60日 ${(a2.w / a2.p).toFixed(2)}倍・検証 ${(a1.w / a1.p).toFixed(2)}倍・分割外 ${(a0.w / a0.p).toFixed(2)}倍）`);
+        if (Math.abs(z2) >= Z_CUT && Math.sign(z2) === Math.sign(z1) && Math.sign(z2) === Math.sign(z0)) recent.push(`${who}・${name}=${k}（直近60日 ${(a2.w / a2.p).toFixed(2)}倍・検証 ${(a1.w / a1.p).toFixed(2)}倍・前進検証 ${(a0.w / a0.p).toFixed(2)}倍）`);
       }
     }
   }
@@ -231,7 +205,7 @@ out.calibration = { dims: Object.keys(SEGS).length, cells, zCut: Z_CUT, flagged,
 out.bets60 = { ...bets60, hitRate: bets60.races ? bets60.hits / bets60.races : 0, roi: bets60.stake ? bets60.ret / bets60.stake : 0 };
 console.log(`[直近60日] 大きくずれ・長い期間でも同じ向き：${recent.length ? recent.join('、') : 'なし'}`);
 console.log(`[直近60日] AI推奨（的中重視の自動・1R 上限 3,000円・1日の予算つき）${bets60.races}レース・的中 ${bets60.hits}・回収率 ${pct(out.bets60.roi)}`);
-console.log(`\n[校正] ${Object.keys(SEGS).length}項目・${cells}区分（◎だけと全馬）で、分割外 |z| ≥ ${Z_CUT} かつ検証も同じ向き：${flagged.length ? flagged.join('、') : 'なし'}`);
+console.log(`\n[校正] ${Object.keys(SEGS).length}項目・${cells}区分（◎だけと全馬）で、前進検証 |z| ≥ ${Z_CUT} かつ検証も同じ向き：${flagged.length ? flagged.join('、') : 'なし'}`);
 
 const file = path.join(ROOT, 'src/engine/missStats.js');
 await writeFile(file, `// scripts/miss-analysis.mjs が学習に使っていない予測から作る。手で編集しないでください。\nexport const MISS_STATS = ${JSON.stringify(out)};\n`);

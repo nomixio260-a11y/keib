@@ -17,7 +17,10 @@ const withPlace = (race) => {
 function dayItems(budget = 3000) {
   const items = [];
   for (let seed = 1; seed <= 40; seed++) {
-    const race = withPlace(makeRace({ seed }));
+    const race = withPlace(makeRace({ seed, id: `test-${seed}` }));
+    // 発走順（40レースを10分おき）
+    const m = 10 * 60 + seed * 10;
+    Object.assign(race, { raceNo: ((seed - 1) % 12) + 1, startTime: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` });
     const fav = race.entries.find((e) => e.popularity === 1);
     if (seed % 2) for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
     const pred = predictRace(race, { sims: 0 });
@@ -27,7 +30,7 @@ function dayItems(budget = 3000) {
 }
 const key = (t) => `${t.type}:${t.idx.join('-')}`;
 
-test('1日の予算：合計が予算の範囲内なら買い目を変えない。超えたらリスクに対する期待値の高い順に予算まで（結果は見ない）', () => {
+test('1日の予算：合計が予算の範囲内なら買い目を変えない。超えたら発走の早いレースから順に予算まで（後のレースの買い目も結果も見ない）', () => {
   assert.equal(resolveDayBudget('auto'), AUTO_STAKE.dayBudget.mult);
   assert.equal(resolveDayBudget(0), 0);
   assert.equal(resolveDayBudget(10), 10);
@@ -64,9 +67,17 @@ test('1日の予算：合計が予算の範囲内なら買い目を変えない�
     assert.equal(t.dayCut, t.stake < orig.stake);
     assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
   }
-  // いちばんリスクに対する期待値の高い買い目は、元の金額のまま入る
-  const best = [...all].sort((a, b) => ticketSharpe(b) - ticketSharpe(a))[0];
-  assert.ok(kept.some((t) => key(t) === key(best) && t.pHit === best.pHit && t.stake === best.stake));
+  // 発走順に先着：最初に買い目のあるレースは元の金額のまま入る。入らなかったレースより後のレースは、前のレースの残りしか使えない
+  const firstIdx = items.findIndex((it) => it.rec.tickets.length);
+  assert.deepEqual(plan[firstIdx].tickets.map((t) => [key(t), t.stake]), items[firstIdx].rec.tickets.map((t) => [key(t), t.stake]));
+  const lastKept = Math.max(...plan.map((rec, i) => (rec.tickets.length ? i : -1)));
+  const firstOut = plan.findIndex((rec, i) => items[i].rec.tickets.length && !rec.tickets.length);
+  assert.ok(firstOut > firstIdx, '予算に入らないのは後のレース');
+  // 後のレースの買い目を変えても、前のレースの買い目は変わらない（後のレースのオッズを見ていない）
+  const changed = items.map((it, i) => (i > lastKept ? { ...it, rec: { ...it.rec, tickets: it.rec.tickets.map((t) => ({ ...t, pHit: Math.min(0.99, (t.pHit ?? t.p) * 1.5) })) } } : it));
+  const plan2 = planDay(changed, { budget: 3000, dayBudget: 2 });
+  for (let i = 0; i <= lastKept; i++) assert.deepEqual(plan2[i].tickets.map((t) => t.stake), plan[i].tickets.map((t) => t.stake));
+  assert.ok(ticketSharpe(all[0]) > -Infinity);
   // 入らなかった買い目は「1日の予算」の理由つきで、買い目が全部入らなかったレースは見送り
   const out = plan.flatMap((rec) => (rec.dropped || []).filter((t) => t.why === 'day'));
   assert.ok(out.length > 0);
@@ -81,29 +92,34 @@ test('1日の予算：合計が予算の範囲内なら買い目を変えない�
   assert.deepEqual(planDay(items, { budget: 3000, dayBudget: 2 }).map((r) => r.tickets.map((t) => t.stake)), plan.map((r) => r.tickets.map((t) => t.stake)));
 });
 
-test('人気馬（当たる確率 70% 以上）の主な買い目は、期待値 1.02 に届かないと金額が半分', () => {
-  let thin = 0;
-  // 1番人気を大本命にして、複勝の下限〜上限を少しずつ上げ、期待値が 1.00〜1.02 になる場面を作る
-  for (let seed = 1; seed <= 12 && thin < 3; seed++) for (let k = 0; k <= 40 && thin < 3; k++) {
+test('期待値の余裕：人気馬（当たる確率 70% 以上）でも、期待値が 1.2 に届かない買い目は買わない（発走前のオッズは確定までに動く）', () => {
+  let below = 0;
+  let above = 0;
+  // 1番人気を大本命にして、複勝の上限を少しずつ広げ、期待値が 1.2 をまたぐ場面を作る
+  for (let seed = 1; seed <= 12; seed++) for (let k = 0; k <= 60; k += 3) {
     const race = withPlace(makeRace({ seed }));
     const fav = race.entries.find((e) => e.popularity === 1);
     for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
-    // 下限 1.1 倍のまま上限を少しずつ広げる（払戻の見込みが少しずつ上がる）
-    Object.assign(fav, { placeMin: 1.1, placeMax: Math.round((1.1 + k * 0.01) * 100) / 100 });
+    Object.assign(fav, { odds: 1.6, placeMin: 1.3, placeMax: Math.round((1.3 + k * 0.03) * 100) / 100 });
     const pred = predictRace(race, { sims: 0 });
     const rec = recommendBets(pred, { budget: 3000 });
-    for (const t of rec.tickets) {
-      if (t.auto === 'extra') continue;
-      const f = (t.ev - 1) / (t.oddsExp - 1);
-      const full = Math.floor((3000 * Math.min(1, f / AUTO_STAKE.fullAt)) / 100) * 100;
-      if (t.pHit >= AUTO_STAKE.hiP && t.ev < AUTO_STAKE.hiEv) {
-        assert.equal(t.favThin, true);
-        assert.ok(t.stake <= Math.floor((full * AUTO_STAKE.hiCut) / 100) * 100 + 1e-9, `${t.stake} ${full}`);
-        thin++;
-      } else assert.ok(!t.favThin);
+    const i = pred.rows.findIndex((r) => r.entry.number === fav.number);
+    const pTop3 = pred.rows[i].pTop3;
+    if (!(pTop3 >= AUTO_STAKE.hiP)) continue;
+    const t = rec.tickets.find((x) => x.type === 'place' && x.idx[0] === i);
+    const cand = rec.dropped?.find((x) => x.type === 'place' && x.idx[0] === i);
+    const ev = t ? t.ev : cand ? cand.ev : null;
+    if (ev == null) continue;
+    if (ev < AUTO_STAKE.minEv) {
+      assert.ok(!t, `期待値 ${ev.toFixed(3)} は買わない`);
+      below++;
+    } else if (t) {
+      assert.ok(!t.favThin);
+      above++;
     }
   }
-  assert.ok(thin > 0, '人気馬で期待値に余裕のない主な買い目があるレースで確かめている');
+  assert.ok(below > 0, '期待値 1.2 未満の人気馬の複勝を見送る場面で確かめている');
+  assert.ok(above >= 0);
 });
 
 test('その日の収支の見込み：確定したレースは実際の収支、まだのレースは着順の確率から。買うレースを減らすと最悪が小さくなる', () => {

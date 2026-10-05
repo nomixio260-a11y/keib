@@ -196,7 +196,8 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
     const items = [];
     for (let j = from; j < ordered.length && ordered[j].date === date; j++) {
       const r = ordered[j];
-      const p = predictRace(r, { ...settings, sims });
+      // settings.statsFor(race)：日ごとの統計（過去の日の再現では、その日より前のデータだけで作った騎手・厩舎の成績）
+      const p = predictRace(r, { ...settings, stats: settings.statsFor ? settings.statsFor(r) : settings.stats, sims });
       preds.set(r, p);
       // 朝の時点では結果はわからないので、結果のまだないレースも1日の買い目に入れる（画面の買い目と同じ）
       if (!p.empty) items.push({ race: r, pred: p, rec: aiRec(p, settings) });

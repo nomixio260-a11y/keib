@@ -25,10 +25,18 @@ export async function loadHistory(dir = HISTORY_DIR) {
   return records;
 }
 
-/** レース記録を1件保存（すでにあれば上書きしない） */
+/** レース記録を1件保存（すでにあれば上書きしない。ただし前の記録が途中まで＝頭数が少ないときは、全頭そろった記録で上書きする） */
 export async function saveRecord(record, dir = HISTORY_DIR) {
   const file = path.join(dir, record.date.slice(0, 4), `${record.id}.json`);
-  if (existsSync(file)) return false;
+  if (existsSync(file)) {
+    let prev = null;
+    try {
+      prev = JSON.parse(await readFile(file, 'utf8'));
+    } catch {
+      prev = null;
+    }
+    if (prev && (prev.runners || []).length >= (record.runners || []).length) return false;
+  }
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(record));
   return true;

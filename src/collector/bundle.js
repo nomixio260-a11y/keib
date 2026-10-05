@@ -2,7 +2,7 @@
 //   過去：結果の確定したレース（レース前時点の出馬表＋着順＋払戻）
 //   当日・これから：JRAの出馬表（前4走・単勝オッズ）。発走後は結果を取りにいく
 
-import { listCardMeetings, listRecentResultMeetings, listRaces, fetchCard, fetchResult, fetchOdds, cardToRace, resultToRecord } from './collect.js';
+import { listCardMeetings, listRecentResultMeetings, listRaces, fetchCard, fetchResult, fetchOdds, cardToRace, resultToRecord, recordCoverage } from './collect.js';
 import { raceKeyFromCname, CODE_BY_COURSE, parseOdds, parseOddsLinks, parseExoticOdds } from './jra.js';
 import { preRaceCard, computeDayVariants } from '../data/history.js';
 import { jstParts, startMs } from '../engine/raceTime.js';
@@ -36,6 +36,16 @@ export function sortBundle(bundle) {
     d.races.sort((a, b) => code(a).localeCompare(code(b)) || a.raceNo - b.raceNo);
     d.venues = [...new Set(d.races.map((r) => r.course))];
   }
+}
+
+/** バンドルのレースの結果が全頭そろっているか（出馬表の取消・除外を除いた頭数と比べる） */
+export function resultComplete(race) {
+  if (race.status !== 'result') return false;
+  const rows = race.resultRows || [];
+  if (!rows.length) return true;
+  const have = rows.filter((r) => !(r.finish === 0 && /取消|除外/.test(r.status || ''))).length;
+  const expected = (race.entries || []).filter((e) => !e.scratched).length;
+  return !expected || have >= expected;
 }
 
 /** 結果の記録をバンドルのレースに付ける */
@@ -166,8 +176,8 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
     }
   }
 
-  // 発走から10分以上たったレースの結果
-  const pending = bundle.days.flatMap((d) => d.races).filter((r) => r.status !== 'result' && startMs(r) && now - startMs(r) > 10 * MIN);
+  // 発走から10分以上たったレースの結果。結果が途中まで（速報の上位だけ）のレースも取り直す
+  const pending = bundle.days.flatMap((d) => d.races).filter((r) => (r.status !== 'result' || !resultComplete(r)) && startMs(r) && now - startMs(r) > 10 * MIN);
   if (pending.length) {
     const resultMeetings = await listRecentResultMeetings(client);
     const wanted = new Set(pending.map((r) => r.date));
@@ -182,6 +192,14 @@ export async function refreshLive(client, bundle, { now = Date.now(), log = () =
           if (!result.rows.length || !Object.keys(result.payouts || {}).length) continue;
           const odds = link.oddsCname ? await fetchOdds(client, link.oddsCname, { final: true }) : null;
           const record = resultToRecord(result, odds, raceKeyFromCname(link.resultCname));
+          // 全頭の結果がそろってから取り込む（速報の上位だけの段階では取り込まない。次の回に取り直す）
+          const expected = Math.max(record.expectedRunners || 0, race.entries.filter((e) => !e.scratched).length);
+          const cov = recordCoverage(record, expected);
+          if (!cov.complete) {
+            log(`結果がまだ途中まで ${race.date} ${race.course}${race.raceNo}R（${cov.have}/${expected}頭）`);
+            continue;
+          }
+          record.expectedRunners = expected;
           // オッズのページが取れなかったときは出馬表の最終オッズで補う
           for (const r of record.runners) if (r.odds == null) r.odds = race.entries.find((e) => e.number === r.number)?.odds ?? null;
           attachResult(race, record);

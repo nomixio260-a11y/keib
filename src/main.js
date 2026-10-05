@@ -32,6 +32,8 @@ import { loadState as loadSaved, saveState } from './ui/store.js';
 import { esc } from './ui/format.js';
 import { REAL_BACKTEST } from './data/realBacktest.js';
 import { REAL_STATS } from './engine/realStats.js';
+import { REPLAY_STATS } from './engine/replayStats.js';
+import { summarizePicks } from './engine/picks.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -75,6 +77,9 @@ const REMOTE_DATA_URL = (() => {
 // 過去の開催日のアーカイブ（data ブランチの days/：開催日ごとのファイルと index.json）。github.io 以外では公開先の days/
 const ARCHIVE_BASE = REMOTE_DATA_URL ? REMOTE_DATA_URL.replace(/data\.json$/, 'days/') : 'days/';
 const archive = { index: null, loaded: new Map(), loading: '', error: '', allLoading: false };
+// 発走前に記録した買い目（data ブランチの picks/。Race day が発走前に記録したもの）
+const PICKS_BASE = REMOTE_DATA_URL ? REMOTE_DATA_URL.replace(/data\.json$/, 'picks/') : 'picks/';
+const picks = { index: null, docs: new Map(), loaded: false };
 
 const state = {
   tab: 'predict',
@@ -261,6 +266,40 @@ async function fetchLiveInfo() {
   }
 }
 
+/** 発走前に記録した買い目を読む（一覧 → 開催日ごと。今日と、まだ読んでいない日だけ） */
+async function fetchPicks() {
+  try {
+    const res = await fetch(`${PICKS_BASE}index.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error();
+    const j = await res.json();
+    picks.index = Array.isArray(j?.days) ? j.days : [];
+  } catch {
+    picks.index = picks.index || [];
+  }
+  const t = today();
+  for (const date of picks.index) {
+    if (picks.docs.has(date) && date < t) continue;
+    try {
+      const res = await fetch(`${PICKS_BASE}${date}.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) picks.docs.set(date, await res.json());
+    } catch {
+      // 読めなかった日は次の更新で
+    }
+  }
+  picks.loaded = true;
+  // 記録のある日でバンドルにない日は、アーカイブから結果を読む（精算に使う）
+  for (const date of picks.docs.keys()) if (date < t && !days().some((d) => d.date === date) && archive.index?.some((x) => x.date === date)) await loadArchiveDay(date);
+  if (state.tab === 'backtest') renderBacktestView();
+}
+
+/** 記録した買い目の成績（直前・最初） */
+function picksSummary() {
+  if (!picks.loaded) return { loading: true };
+  const docs = [...picks.docs.values()];
+  const byId = (id) => raceIndex.get(id) || null;
+  return { last: summarizePicks(docs, byId, 'last'), first: summarizePicks(docs, byId, 'first') };
+}
+
 /** アーカイブの一覧（index.json）を読む */
 async function fetchArchiveIndex() {
   try {
@@ -387,6 +426,19 @@ function currentStats() {
   return statsCache.stats;
 }
 
+// 過去の日の再現：realStats.js の期間内の日は、その日の結果も騎手・厩舎の成績に入っているので、
+// 検証（evaluate.mjs）と同じく検証の開始日より前だけで作った成績と枠順傾向（replayStats.js）を使う
+let replayCache = { base: null, stats: null };
+function statsFor(date) {
+  const base = currentStats();
+  if (!date || date === 'import' || date > REAL_STATS.to) return base;
+  if (replayCache.base !== base) {
+    const { jockeyRates, jockeyAverage, trainerRates, trainerAverage, draw } = REPLAY_STATS;
+    replayCache = { base, stats: { ...base, jockeyRates, jockeyAverage, trainerRates, trainerAverage, draw, replayAsOf: REPLAY_STATS.asOf } };
+  }
+  return replayCache.stats;
+}
+
 /** 予想のキャッシュに使う、レースの中身の目印 */
 const raceSig = (race) => `${race.id}|${race.oddsAt || ''}|${race.status || ''}|${race.going || ''}|${race.result?.length || 0}`;
 // 一覧の◎と成績のキャッシュ用：1日の予算はその日の全レースの買い目で決まるので、同じ日のどれかのレースが変われば計算し直す
@@ -409,7 +461,7 @@ function getPrediction(race, light = false) {
   const key = `${raceSig(race)}|${JSON.stringify(state.edits[race.id] || null)}|${settingsKey()}|${sims}`;
   const hit = predCache.get(key);
   if (hit) return hit;
-  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi });
+  const pred = predictRace(race, { weights: state.weights, noise: state.noise, sims, stats: statsFor(race.date), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi });
   predCache.set(key, pred);
   if (predCache.size > 60) predCache.delete(predCache.keys().next().value);
   return pred;
@@ -548,7 +600,7 @@ function stdStep() {
     const c = job.cur;
     if (c.i < c.races.length) {
       const race = effectiveRace(c.races[c.i++]);
-      const pred = predictRace(race, { weights: S.weights, noise: S.noise, sims: 0, stats: currentStats(), ml: !!PRESETS[DEFAULT_PRESET]?.ml, mlAi: !!PRESETS[DEFAULT_PRESET]?.mlAi });
+      const pred = predictRace(race, { weights: S.weights, noise: S.noise, sims: 0, stats: statsFor(race.date), ml: !!PRESETS[DEFAULT_PRESET]?.ml, mlAi: !!PRESETS[DEFAULT_PRESET]?.mlAi });
       if (!pred.empty) c.items.push({ race, pred, rec: recommendBets(pred, { budget: state.budget, strategy: DEFAULT_STRATEGY, types: DEFAULT_TYPES, blend: 'auto', keep: 'auto' }) });
       continue;
     }
@@ -666,6 +718,8 @@ const ctx = () => ({
   railStatus: statusHtml(),
   noRaceNote: noRaceNote(),
   stats: currentStats(),
+  statsFor,
+  picks: picksSummary(),
   ...data,
 });
 
@@ -885,7 +939,7 @@ async function runRecentBacktest() {
   try {
     bt.recent.result = await runBacktest(
       races,
-      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi },
+      { weights: state.weights, noise: state.noise, blend: state.blend, stats: currentStats(), statsFor: (r) => statsFor(r.date), ml: !!PRESETS[state.preset]?.ml, mlAi: !!PRESETS[state.preset]?.mlAi },
       {
         sims: 0,
         onProgress: (p) => {
@@ -1040,6 +1094,8 @@ async function poll() {
   const changed = (await fetchBundle()) || liveBefore !== data.liveUrl;
   if (changed) applyDataUpdate();
   else if (state.tab === 'data') renderDataView();
+  // 発走前の買い目の記録（今日の分は取り込みのたびに増える）
+  if (changed) fetchPicks();
   setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
 }
 
@@ -1348,7 +1404,7 @@ function onChange(e) {
   }
   if (t.matches('[data-keep]')) {
     markBeforeChange();
-    state.keep = t.value === 'auto' ? 'auto' : Number(t.value);
+    state.keep = t.value === 'auto' || t.value === 'more' ? t.value : Number(t.value);
     return afterSettingsChange('bets');
   }
   if (t.matches('[data-blend]')) {
@@ -1474,7 +1530,10 @@ async function start() {
   showTab(route.tab, { updateHash: false });
   await Promise.all([fetchBundle(), fetchLiveInfo()]);
   applyRoute(route);
-  fetchArchiveIndex().then(() => renderRailOnly());
+  fetchArchiveIndex().then(() => {
+    renderRailOnly();
+    return fetchPicks();
+  });
   setInterval(tickClock, 30 * 1000);
   setTimeout(poll, data.live ? 60 * 1000 : 5 * 60 * 1000);
 }

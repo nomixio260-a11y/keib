@@ -104,7 +104,10 @@ export function statsForEngine(records, variantRecords = records) {
 }
 
 /** 学習・検証に使えるレース（平地・5頭以上・結果あり） */
-export const usable = (rec) => !rec.jump && rec.surface !== '障' && rec.runners.filter((r) => r.finish > 0).length >= 5;
+// 結果が全頭そろっていない記録（速報の上位だけ）は使わない：出走頭数（取消・除外を除く）が最終オッズの頭数より少ないものを外す
+// （2026-10-04 京都 4・6・8・9R は上位5頭だけが記録され、検証で「上位5頭の中から当てる」形になっていた）
+export const complete = (rec) => !rec.expectedRunners || rec.runners.filter((r) => !(r.finish === 0 && /取消|除外/.test(r.status || ''))).length >= rec.expectedRunners;
+export const usable = (rec) => !rec.jump && rec.surface !== '障' && rec.runners.filter((r) => r.finish > 0).length >= 5 && complete(rec);
 
 function solve(A, b) {
   const n = b.length;

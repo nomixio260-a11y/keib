@@ -45,9 +45,20 @@ export async function fetchCard(client, cname, ttlMs = 2 * MIN) {
   return parseRaceCard(await client.page(cname, { cache: 'ttl', ttlMs }));
 }
 
-/** レース結果。live：当日の結果は確定直後に変わることがあるので、しばらくは取り直せるようにする */
-export async function fetchResult(client, cname, { live = false } = {}) {
-  return parseRaceResult(await client.page(cname, live ? { cache: 'ttl', ttlMs: 5 * MIN } : { cache: 'forever' }));
+/** レース結果。live：当日の結果は確定直後に変わることがあるので、しばらくは取り直せるようにする。refresh：キャッシュを使わない */
+export async function fetchResult(client, cname, { live = false, refresh = false } = {}) {
+  return parseRaceResult(await client.page(cname, refresh ? { cache: 'none' } : live ? { cache: 'ttl', ttlMs: 5 * MIN } : { cache: 'forever' }));
+}
+
+/**
+ * 結果の記録が出走馬を全部含んでいるか。速報の段階では上位の数頭しか載らないことがあり（2026-10-04 京都 4・6・8・9R は
+ * 上位5頭だけが記録された）、そのまま使うと検証で「上位5頭の中から当てる」形になってしまう。
+ * expected … 取消・除外を除いた出走頭数（出馬表・最終オッズ・確定オッズの組み合わせから）。わからなければ 0
+ */
+export function recordCoverage(record, expected = 0) {
+  const runners = record?.runners || [];
+  const have = runners.filter((r) => !(r.finish === 0 && /取消|除外/.test(r.status || ''))).length;
+  return { have, expected, complete: have > 0 && (!expected || have >= expected) };
 }
 
 export async function fetchOdds(client, cname, { final = false, ttlMs = MIN } = {}) {
@@ -145,6 +156,8 @@ export function resultToRecord(result, odds, key) {
   // 上がり3Fの順位（同タイムは同順位）
   const l3 = runners.filter((r) => r.last3f > 0).map((r) => r.last3f).sort((a, b) => a - b);
   for (const r of runners) r.last3fRank = r.last3f > 0 ? l3.indexOf(r.last3f) + 1 : null;
+  // 最終オッズに載っている馬（取消・除外を除く）の数：結果が全頭そろっているかの確かめに使う
+  const expectedRunners = (odds?.odds || []).filter((o) => o.odds > 1).length || null;
   return {
     id: key.raceId,
     source: 'JRA',
@@ -154,6 +167,7 @@ export function resultToRecord(result, odds, key) {
     kai: key.kai,
     day: key.day,
     raceNo: key.raceNo,
+    expectedRunners,
     startTime: result.startTime,
     name: result.name,
     grade: result.grade,

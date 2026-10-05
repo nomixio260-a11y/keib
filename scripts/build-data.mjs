@@ -9,6 +9,7 @@
 //   最後に「NEXT=秒」を出す：次の取り込みまでの目安（発走が近いと 300、前日発売中は 1200、それ以外は 3600。Race day ワークフローが読む）
 //   オプション：--past 4（過去の開催日の数） --out data/bundle.json --copy-dist（dist/data.json にもコピー）
 //             --snapshots <dir>（オッズの推移を保存。データベースがない GitHub Actions 用） --records <dir>（結果の記録を保存）
+//             --picks <dir>（発走前の買い目の記録。発走1分前を過ぎたレースは書き換えない）
 //             --history <dir>（結果の記録を読む場所。既定は data/history。GitHub Actions では data ブランチの history/）
 //             --exotic <dir>（馬連・ワイド・三連複・馬単の確定オッズの置き場。既定は data/odds-final。確定したレースのライブのオッズもここに残す）
 //             --days-dir <dir>（過去の開催日のアーカイブ。結果の出そろった日を <dir>/<日付>.json に書き、直近の期間に足りない日はここから補う）
@@ -29,6 +30,7 @@ import { REAL_STATS } from '../src/engine/realStats.js';
 import { loadHistory, saveRecord, appendOddsSnapshot, attachFinalExoticOdds, loadHorseSnapshots, readJson, writeJson, BUNDLE_FILE, CACHE_DIR, FINAL_ODDS_DIR, ROOT } from '../src/collector/store.js';
 import { indexHistory, attachCareer } from '../src/data/history.js';
 import { writeArchiveDay, rebuildArchiveIndex, archiveDates, readArchiveDay } from '../src/collector/archive.js';
+import { recordPicks } from '../src/collector/picksRecorder.js';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => {
@@ -183,6 +185,15 @@ attachDayVariants(bundle, records, REAL_STATS, { today });
   log(`通算要約を付けた馬：${n}（${index ? 'データベース' : `horses.json ${snaps.asOf || '—'} 時点`}）`);
 }
 compactBundle(bundle);
+// 発走前の買い目の記録（--picks <dir>）：まだ発走していないレースの標準の設定の買い目を picks/YYYY-MM-DD.json に足す
+// （発走1分前を過ぎたレースは書き換えない。画面が実際の払戻で精算して「ごまかしのない成績」として見せる）
+if (opt('picks', null)) {
+  try {
+    await recordPicks(bundle, path.resolve(opt('picks', null)), { log });
+  } catch (e) {
+    log(`買い目の記録に失敗：${e.message}`);
+  }
+}
 await writeJson(out, bundle);
 // 結果の出そろった日をアーカイブに書く（変わっていなければ書かない）
 if (daysDir) {

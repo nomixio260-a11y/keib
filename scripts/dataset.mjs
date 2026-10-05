@@ -105,6 +105,17 @@ if (MODE.endsWith('novariant')) BASE_STATS = { ...BASE_STATS, dayVariant: {} };
 log(`統計：${MODE}（基準タイム ${Object.keys(BASE_STATS.baseTimes).length}条件・馬場差 ${Object.keys(BASE_STATS.dayVariant || {}).length}日）`);
 log(`${all.length}レース。${START} 以降を特徴量に`);
 
+let PERTURB = null;
+const PERTURB_SEED = process.env.DATASET_PERTURB_SEED || '1';
+if (process.env.DATASET_PERTURB) {
+  const { loadDrift } = await import('./lib/drift.mjs');
+  const { makePerturber } = await import('../src/engine/oddsDrift.js');
+  const minutes = Number(String(process.env.DATASET_PERTURB).replace(/^m/, '')) || 10;
+  const d = await loadDrift(all, index, minutes);
+  PERTURB = makePerturber(d.samples);
+  log(`発走${minutes}分前のオッズ（推定）で特徴量を作ります：ずれの標本 ${d.samples.length}頭（${d.races}レース）`);
+}
+
 // 騎手・厩舎の成績は「その日より前」の分だけ（同じ日のレースの結果は混ぜない）。条件つき（騎手×競馬場など）も同じ
 const jAcc = {};
 const tAcc = {};
@@ -150,7 +161,9 @@ for (const [date, recs] of [...byDate].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       const cardX = hideBw ? { ...card, entries: card.entries.map((e) => ({ ...e, bodyWeight: null, bodyWeightDiff: null })) } : card;
       // 別の投票市場のオッズ（INCLUDE_EXOTIC のとき）。発売前の予想にも対応できるよう、2割のレースでは隠して特徴量を作る
       if (INCLUDE_EXOTIC) cardX.exoticOdds = hash(`${rec.id}x`) % 10 < 2 ? null : exoticDocs.get(rec.id) || null;
-      const fx = raceFeatures(cardX, { stats, careerOf, jockeys: jr.rates, trainers: tr.rates });
+      // 発走前のオッズで学ぶ（DATASET_PERTURB=m10 など。実験用）：確定オッズに、記録した推移のずれを足したカードで特徴量を作る
+      const cardF = PERTURB ? PERTURB(cardX, `${rec.id}|train${PERTURB_SEED}`) : cardX;
+      const fx = raceFeatures(cardF, { stats, careerOf, jockeys: jr.rates, trainers: tr.rates });
       const finishOf = Object.fromEntries(rec.runners.map((r) => [r.number, r.finish]));
       // 実験用の追加列（DATASET_EXTRA=1）：馬・騎手・厩舎の履歴の集計（上の EXTRA_NAMES）
       let extra = null;
