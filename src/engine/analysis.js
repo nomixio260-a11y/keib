@@ -24,19 +24,18 @@ function verdictOf(pred, rec) {
   const race = pred.race;
   if (race.provisional) return { kind: 'wait', title: '出馬表待ち', text: '特別登録の段階です。枠順・騎手・単勝オッズが出てから、期待値と当たる確率で買い目を決めます。' };
   if (pred.noOdds || rec?.noOdds) return { kind: 'wait', title: 'オッズ待ち', text: '単勝オッズが出たら、期待値と当たる確率で買い目を決めます。' };
-  // 的中重視の自動：自信に応じて金額まで決めた買い目（買う順：馬連・三連複の追加 → 主な買い目 → 複勝の追加）
+  // 的中重視の自動：強い買い目か、このレースの条件で見込む回収率（R̂）に応じた金額の1点
   if (rec?.auto && rec.tickets?.length) {
     const part = (x) => {
+      const r = x.r != null ? `・このレースの回収見込み ${pc(x.r)}` : '';
       const head =
-        x.auto === 'extra'
-          ? `期待値の高い追加の買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}）`
-          : `${x.auto === 'classic' ? 'これまでの的中重視の条件' : `当たる確率 ${pc(x.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 超`}を満たす買い目（当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}）`;
+        x.auto === 'strong'
+          ? `当たる確率 ${pc(x.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP)} 以上・期待値 ${AUTO_STAKE.minEv.toFixed(1)} 以上の強い買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}${r}）`
+          : `このレースの条件で見込む回収率に合わせた買い目（${BET_LABEL[x.type]}・当たる確率 ${pc(x.pHit)}・期待値 ${x.ev.toFixed(2)}${r}）`;
       return `${head}に予算の ${Math.round((x.share ?? 1) * 100)}%（${x.stake.toLocaleString('ja-JP')}円）。当たれば少なくとも +${Math.round(x.stake * (x.odds - 1)).toLocaleString('ja-JP')}円`;
     };
-    const hasMain = rec.tickets.some((x) => x.auto !== 'extra');
-    const firstNote = hasMain && rec.tickets[0].auto === 'extra' ? '馬連・三連複は学習期間で回収率がいちばん高いので先に予算を入れ、主な買い目は残りの予算で買います。' : '';
     const cutNote = rec.day?.over && rec.tickets.some((x) => x.dayCut) ? 'この日は買い目が多く1日の予算を超えるので、このレースは予算の残りの分だけ買います。' : '';
-    return { kind: 'buy', title: hasMain ? '買い' : '買い（期待値重視）', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${firstNote}${cutNote}`, tickets: rec.tickets };
+    return { kind: 'buy', title: '買い', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${cutNote}`, tickets: rec.tickets };
   }
   if (rec?.auto && rec.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason, dropped: rec.dropped };
   if (rec?.tickets?.length) {

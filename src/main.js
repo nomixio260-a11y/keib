@@ -57,7 +57,7 @@ const sameCal = saved.calId === CALIBRATION_ID;
 const NOISE_VERSION = 2;
 const BLEND_VERSION = 2;
 // 当たる確率の絞り込みの標準を変えた（バランス 30%・高配当 20%、2026-10-05 に的中重視の自動）ので、前に保存した選択は一度「自動」に戻す
-const KEEP_VERSION = 3;
+const KEEP_VERSION = 4;
 const TYPES_VERSION = 2;
 const TABS = ['predict', 'settings', 'backtest', 'data', 'logic'];
 const DATA_URL = 'data.json';
@@ -94,7 +94,7 @@ const state = {
   sims: [20000, 50000, 100000].includes(saved.sims) ? saved.sims : 50000,
   budget: Number(saved.budget) >= 100 ? Number(saved.budget) : 3000,
   strategy: sameCal && STRATEGIES[saved.strategy] ? saved.strategy : DEFAULT_STRATEGY,
-  // 券種：以前の既定（ワイド以外）のまま変えていなければ、新しい既定（ワイドも。的中重視の自動の3段目に使う）に置き換える（typesVersion 2）
+  // 券種：以前の既定（ワイド以外）のまま変えていなければ、新しい既定（すべて）に置き換える（typesVersion 2）
   betTypes:
     sameCal && Array.isArray(saved.betTypes)
       ? saved.typesVersion !== TYPES_VERSION && [...saved.betTypes].sort().join(',') === [...OLD_DEFAULT_TYPES].sort().join(',')
@@ -104,7 +104,7 @@ const state = {
   sort: ['ai', 'finish'].includes(saved.sort) ? saved.sort : 'number',
   // 期待値に混ぜる割合：買い方ごとの標準（'auto'）を入れたとき（blendVersion 2）に、保存してある値（旧既定の 50%）を一度だけ標準に戻す
   blend: saved.blendVersion === BLEND_VERSION && BLEND_OPTIONS.some((o) => o.value === saved.blend) ? saved.blend : 'auto',
-  // 2段目の絞り込み（当たる確率の下限）。既定は自動（的中重視は毎レース買い目と金額まで自動、控えめは 50% 以上）
+  // 当たる確率で絞る：選択肢は「自動」だけ（keepVersion 4 で、以前の「自動・多め」「自動・絞る」・数値は自動に戻す）
   keep: saved.keepVersion === KEEP_VERSION && KEEP_OPTIONS.some((o) => o.value === saved.keep) ? saved.keep : 'auto',
   // 1日の予算（的中重視の自動）：朝にまとめて買う前提で、その日の買い目の合計を 1レースの予算×倍数 までに（リスクに対する期待値の高い順）
   dayBudget: DAY_BUDGET_OPTIONS.some((o) => o.value === saved.dayBudget) ? saved.dayBudget : 'auto',
@@ -1407,11 +1407,6 @@ function onChange(e) {
     if (t.checked) set.add(t.dataset.bettype);
     else set.delete(t.dataset.bettype);
     state.betTypes = BET_TYPES.filter((x) => set.has(x));
-    return afterSettingsChange('bets');
-  }
-  if (t.matches('[data-keep]')) {
-    markBeforeChange();
-    state.keep = t.value === 'auto' || t.value === 'more' || t.value === 'strict' ? t.value : Number(t.value);
     return afterSettingsChange('bets');
   }
   if (t.matches('[data-blend]')) {

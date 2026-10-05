@@ -2,6 +2,8 @@
 
 import { PRESETS } from '../engine/model.js';
 import { REAL_BACKTEST } from '../data/realBacktest.js';
+import { STAKE_MODEL } from '../engine/stakeModel.js';
+import { AUTO_STAKE } from '../engine/bets.js';
 import { calibrationChart, lineChart, dayBars } from './charts.js';
 import { esc, pct, yen } from './format.js';
 import { renderReviewSection } from './reviewView.js';
@@ -140,6 +142,48 @@ export function realisticSection(real) {
     </section>`;
 }
 
+/**
+ * 負けたレースの原因と、レースごとの調整の確かめ（scripts/stake-model.mjs が src/engine/stakeModel.js に書いたもの）：
+ * 発走10分前・5分前のオッズの推定（6通り）で、前進検証（R̂ の関係もその時点より前の買い目だけで推定）
+ */
+export function adjustSection(model = STAKE_MODEL) {
+  const ch = model?.check;
+  if (!ch?.summary?.new) return '';
+  const rules = ['new', 'old', 'strong'].filter((k) => ch.summary[k]);
+  const rows = ch.periods
+    .map((P) =>
+      rules
+        .map((k, i) => {
+          const x = ch.summary[k][P.key];
+          return `<tr${k === 'new' ? ' class="is-cur"' : ''}>${i === 0 ? `<th scope="rowgroup" rowspan="${rules.length}">${esc(P.label)}<small>${x.days}日</small></th>` : ''}<td>${esc(ch.labels[k])}</td><td class="num">${x.races.toLocaleString('ja-JP')}</td><td class="num">${pct(x.hitRate)}</td><td class="num">${pct(x.roi)}</td><td class="num ${x.profit >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(x.profit)}</td><td class="num">${x.loseDays}<small>/${x.betDays}日</small></td></tr>`;
+        })
+        .join(''),
+    )
+    .join('');
+  const causes = (ch.causes?.old || [])
+    .map((c) => `<tr><th scope="row">${esc(c.label)}</th><td class="num">${c.bets.toLocaleString('ja-JP')}</td><td class="num">${pct(c.pExp)} → ${pct(c.pAct)}</td><td class="num">${c.payExp.toFixed(2)} → ${c.payAct.toFixed(2)}倍<small>（${pct(c.payAct / c.payExp, 0)}）</small></td><td class="num ${c.roi >= 1 ? 'tx-good' : 'tx-bad'}">${pct(c.roi)}</td></tr>`)
+    .join('');
+  const [L1, L2] = AUTO_STAKE.adjust;
+  const sum = (k, keys) => keys.reduce((a, key) => a + ch.summary[k][key].profit, 0);
+  const longKeys = ch.periods.filter((P) => P.key !== 'hold').map((P) => P.key);
+  const mult = sum('old', longKeys) > 0 ? sum('new', longKeys) / sum('old', longKeys) : null;
+  return `<section class="bt-section bt-adjust">
+      <h2 class="section-title">負けたレースの原因と、レースごとの調整 <small>発走前のオッズで選んだ場合・1R ${ch.budget.toLocaleString('ja-JP')}円・6通りの推定の平均</small></h2>
+      <p class="panel-note">以前の自動（2段目・3段目つき）の買い目を、学習に使っていない 2024年4月〜2026年6月（前進検証）で、当たる確率と、当たったときの払戻の「見込み → 実際」に分けました。</p>
+      <div class="table-scroll"><table class="bt-table">
+        <thead><tr><th>以前の自動の買い目</th><th>点数</th><th>当たる確率<small>見込み → 実際</small></th><th>当たったときの払戻<small>見込み → 実際</small></th><th>回収率</th></tr></thead>
+        <tbody>${causes}</tbody>
+      </table></div>
+      <p class="panel-note">負けの原因は2つでした。(1) <b>いま高く見えるオッズほど確定までに下がる</b>：選んだ買い目の払戻は見込みの 85〜93%（発走前のオッズのずれで、たまたま高く見えている買い目を選びやすい）。(2) <b>AI と市場（単勝オッズ）の見立ての差が大きいほど、当たる確率を高く見すぎる</b>（見込みより 3〜4ポイント低い）。この2つで、2段目は回収率 96%・3段目のワイドは 91% と、長い期間で損でした。</p>
+      <p class="panel-note">そこで、買い目ごとに<b>そのレースの条件（AI の期待値・市場の期待値・オッズ・頭数）で見込む回収率 R̂</b> を出し、2段目・3段目をやめて、R̂ に応じて金額を決めるようにしました（R̂ ${pct(L1.minR, 0)} で予算の ${pct(L1.share, 0)}、1ポイントごとに ${L1.slope}%。複勝は当たる確率 ${pct(L2.minP, 0)} 以上・R̂ ${pct(L2.minR, 0)} から）。R̂ の関係は、確かめる期間より前の買い目だけで推定しています（${esc(model.rows ? `単勝 ${model.rows.win.toLocaleString('ja-JP')}・複勝 ${model.rows.place.toLocaleString('ja-JP')}点` : '')}）。</p>
+      <div class="table-scroll"><table class="bt-table bt-adjust-table">
+        <thead><tr><th>期間</th><th>買い方</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="panel-note">${mult ? `学習に使っていない 2024年4月〜2026年6月の収支は 以前の約${mult.toFixed(1)}倍、` : ''}検証期間の30日は ${signedYen(ch.summary.old.hold.profit)} → ${signedYen(ch.summary.new.hold.profit)}。買うレースは増え、的中率も上がりました。負けた日の数はあまり変わりません（利益の出る買い方でも、買った日の4〜5割は負けます）。オッズの推移の記録（${model.drift ? `${model.drift.races}レース・${model.drift.days}日` : '—'}）がまだ少ないので、推定には幅があります。本当の成績は、上の「発走前に記録した買い目の成績」で確かめてください。</p>
+    </section>`;
+}
+
 export function renderBacktest(ctx) {
   const { bt, state } = ctx;
   const saved = REAL_BACKTEST;
@@ -175,6 +219,7 @@ export function renderBacktest(ctx) {
     </section>
     ${aiDailySection(res)}
     ${bt.source === 'saved' ? realisticSection(saved?.realistic) : ''}
+    ${bt.source === 'saved' ? adjustSection() : ''}
     <div class="bt-charts">
       <section class="panel">
         <header class="panel-head"><h2>累積収支の推移</h2></header>

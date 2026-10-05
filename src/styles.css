@@ -1886,6 +1886,15 @@ table.pp {
   color: var(--ink-2);
 }
 
+/* 選択肢が1つの設定（当たる確率で絞る＝自動）は、選ぶ欄ではなく値だけ */
+.field-fixed {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--turf-wash);
+  color: var(--ink);
+}
+
 #budget {
   width: 110px;
 }
@@ -2220,6 +2229,31 @@ table.bt-table {
 
 .bt-table tr.is-baseline td:first-child {
   color: var(--muted);
+}
+
+/* 負けたレースの原因と、レースごとの調整（バックテスト画面） */
+.bt-adjust .bt-table tbody tr {
+  cursor: default;
+}
+
+.bt-adjust-table th:nth-child(2) {
+  text-align: left;
+}
+
+.bt-adjust-table tbody th[scope='rowgroup'] {
+  vertical-align: top;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.bt-adjust-table tbody th small {
+  display: block;
+  font-weight: 400;
+}
+
+.bt-adjust-table tr.is-cur td {
+  background: var(--turf-wash);
+  font-weight: 700;
 }
 
 .c-roi {

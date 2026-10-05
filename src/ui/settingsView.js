@@ -7,9 +7,9 @@ import { STRATEGIES, BLEND_OPTIONS, KEEP_OPTIONS, DAY_BUDGET_OPTIONS, DEFAULT_ST
 import { esc, pct, yen } from './format.js';
 import { dayBars } from './charts.js';
 
-/** 1日の予算の説明（倍数ごと）。発走前のオッズで選ぶ検証（scratchpad/ml8/grid-j）では、1日に買うのは平均1〜2レースなので上限にはほとんど届かない */
+/** 1日の予算の説明（倍数ごと）。発走前のオッズで選ぶ推定（scripts/stake-model.mjs と同じ流れ）では、レースごとの調整で1日に平均6〜8レース買い、3割ほどの日に上限に届く。10倍にすると 2025年〜の収支は減った */
 export const DAY_BUDGET_NOTE = {
-  7: 'その日の買い目の合計が1レースの予算の7倍を超えたら、発走の早いレースから順に予算まで買い、入らないレースは見送ります（前のレースを買う時点では、後のレースのオッズはわからないため）。いまの的中重視の自動は1日に平均1〜2レースしか買わないので、上限に届く日はほとんどありません。1日の負けは最大でも1日の予算までです。',
+  7: 'その日の買い目の合計が1レースの予算の7倍を超えたら、発走の早いレースから順に予算まで買い、入らないレースは見送ります（前のレースを買う時点では、後のレースのオッズはわからないため）。いまの的中重視の自動は1日に平均6〜8レース買い、買い目の多い日（3割ほど）は上限に届きます。上限を10倍にすると買うレースは増えますが、発走前のオッズの推定では長い期間の収支が減りました（買い目の多い日の弱い買い目が増えるため）。1日の負けは最大でも1日の予算までです。',
   5: '1日の予算を1レースの予算の5倍までにします（発走の早いレースから順に）。1日の負けの上限が小さくなります。',
   10: '1日の予算を1レースの予算の10倍までにします（発走の早いレースから順に）。',
 };
@@ -28,7 +28,6 @@ export function settingsChips(state) {
     chips.push(m > 0 ? `1日の予算 ${m}倍（${yen(m * state.budget)}）` : '1日の予算なし');
   }
   chips.push(`券種：${typesLabel(state.betTypes)}`);
-  if (String(state.keep) !== 'auto') chips.push(`当たる確率で絞る ${KEEP_OPTIONS.find((o) => String(o.value) === String(state.keep))?.label || state.keep}`);
   if (String(state.blend) !== 'auto') chips.push(`オッズを混ぜる ${Math.round(Number(state.blend) * 100)}%`);
   return chips;
 }
@@ -196,13 +195,16 @@ function renderBetSection(ctx) {
         : ''
     }
     <div class="chips-row" role="group" aria-label="券種">${types}</div>
-    <p class="panel-note">標準はワイド以外のすべて。馬単・三連単は推定オッズなので、的中重視（自動）では買いません（自動で買うのは単勝・複勝と、JRA の実際のオッズのある馬連・三連複）。</p>
+    <p class="panel-note">標準はすべての券種。的中重視（自動）で買うのは単勝・複勝だけです（組み合わせの券種は、発走前のオッズで選ぶと長い期間で損でした）。ほかの買い方は選んだ券種から選びます。</p>
     <div class="field-row">
-      <label class="field" for="keep">当たる確率で絞る</label>
-      <select id="keep" data-keep>
-        ${KEEP_OPTIONS.map((o) => `<option value="${o.value}" ${String(state.keep ?? 'auto') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select>
+      <span class="field">当たる確率で絞る</span>
+      <span class="field-fixed">${esc(KEEP_OPTIONS[0].label)}</span>
     </div>
+    <p class="panel-note">${
+      auto
+        ? 'レースごとに、当たる確率・期待値と、そのレースの条件（AI と市場の見立て・オッズ・頭数）から見込む回収率（R̂）で、買うかどうかと金額を自動で決めます。選択肢は1つです。'
+        : 'この買い方の標準（控えめ 50%・バランス 40%・高配当 20% 以上）で絞ります。'
+    }</p>
     <div class="field-row">
       <label class="field" for="blend">期待値にオッズを混ぜる</label>
       <select id="blend" data-blend>
