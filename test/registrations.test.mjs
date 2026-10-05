@@ -322,7 +322,11 @@ test('的中重視の自動：自信（当たる確率×払戻の見込み）に
       assert.ok(t.auto === 'kelly' || t.auto === 'classic', t.auto);
       if (t.auto === 'kelly') assert.ok(t.pHit >= (t.odds >= MIN_ODDS ? AUTO_STAKE.minP : AUTO_STAKE.lowP) && t.ev > AUTO_STAKE.minEv, `${t.pHit} ${t.ev}`);
       else assert.ok(oldKeys.has(key(t)), 'これまでの的中重視が選んだ買い目');
-      assert.equal(t.stake, Math.min(shareOf((t.ev - 1) / (t.oddsExp - 1)), Math.floor((3000 - firstStake) / 100) * 100));
+      // 人気馬（当たる確率 70% 以上）で期待値 1.02 未満は金額を半分に
+      const fk = (t.ev - 1) / (t.oddsExp - 1);
+      const want = t.favThin ? Math.floor((3000 * Math.min(1, fk / AUTO_STAKE.fullAt) * AUTO_STAKE.hiCut) / 100) * 100 : shareOf(fk);
+      assert.equal(!!t.favThin, t.pHit >= AUTO_STAKE.hiP && t.ev < AUTO_STAKE.hiEv);
+      assert.equal(t.stake, Math.min(want, Math.floor((3000 - firstStake) / 100) * 100));
       // 当たっても利益が 100円に届かない買い目は買わない（+10〜30円の的中をなくす）
       assert.ok(t.stake * (t.odds - 1) >= AUTO_STAKE.minProfit - 1e-9);
       main++;

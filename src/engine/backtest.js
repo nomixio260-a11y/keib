@@ -72,9 +72,9 @@ export const BT_STRATEGIES = [
   },
   {
     key: 'ai',
-    label: 'AI推奨（的中重視の自動・既定の券種・1R上限千円）',
+    label: 'AI推奨（的中重視の自動・既定の券種・1R上限千円・1日の損失の上限つき）',
     // 既定の券種（ワイド以外）：自動では期待値の高い馬連・三連複を追加の買い目にする（2026-10-05）。AI単独は以前の買い方なので単複のまま
-    build: (pred, m, settings) => recommendBets(pred, { budget: 1000, types: pred.mlAi ? TANPUKU : DEFAULT_TYPES, blend: settings?.blend }).tickets,
+    build: (pred, m, settings, day) => recommendBets(pred, { budget: 1000, types: pred.mlAi ? TANPUKU : DEFAULT_TYPES, blend: settings?.blend, dayPnl: day?.pnl ?? null }).tickets,
   },
   {
     key: 'aiCareful',
@@ -183,8 +183,12 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
   const byVolatility = Object.fromEntries(VOLATILITY_LABELS.map((g) => [g, { n: 0, predUpset: 0, upset: 0, favWin: 0, win: 0, top3: 0, winRet: 0, placeRet: 0, winnerPay: 0 }]));
   const log = [];
 
-  for (let ri = 0; ri < races.length; ri++) {
-    const race = races[ri];
+  // 日付・発走時刻の順に精算する（AI推奨の「1日の損失の上限」は、その日のそれより前のレースの収支で決まる）
+  const ordered = [...races].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime || '').localeCompare(String(b.startTime || '')) || (a.raceNo ?? 0) - (b.raceNo ?? 0) || String(a.id).localeCompare(String(b.id)));
+  const aiDay = { date: null, pnl: 0 };
+  for (let ri = 0; ri < ordered.length; ri++) {
+    const race = ordered[ri];
+    if (race.date !== aiDay.date) Object.assign(aiDay, { date: race.date, pnl: 0 });
     const pred = predictRace(race, { ...settings, sims });
     if (pred.empty || !race.result?.length) continue;
     const finishOf = new Map(race.result.map((num, k) => [num, k + 1]));
@@ -244,7 +248,7 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
     const raceLog = { id: race.id, label: `${race.course}${race.raceNo}R ${race.name}`, honmei: honmei?.entry.number, grade: pred.confidence.grade, finish: finishOf.get(honmei?.entry.number) ?? null, profit: {} };
     for (const s of BT_STRATEGIES) {
       const a = acc[s.key];
-      const tickets = s.build(pred, m, settings).filter((t) => t.idx.every((i) => i >= 0) && t.stake > 0);
+      const tickets = s.build(pred, m, settings, aiDay).filter((t) => t.idx.every((i) => i >= 0) && t.stake > 0);
       let stake = 0;
       let ret = 0;
       for (const t of tickets) {
@@ -263,12 +267,13 @@ export async function runBacktest(races, settings = {}, { onProgress, sims = 300
       a.ret += ret;
       a.curve.push(a.ret - a.stake);
       raceLog.profit[s.key] = ret - stake;
+      if (s.key === 'ai') aiDay.pnl += ret - stake;
       if (s.key === 'ai') raceLog.aiTickets = tickets.map((t) => `${t.type}:${ticketLabel({ ...t, nums: nums(pred, t.idx) })}`);
     }
     log.push(raceLog);
 
     if (onProgress && ri % yieldEvery === yieldEvery - 1) {
-      onProgress((ri + 1) / races.length);
+      onProgress((ri + 1) / ordered.length);
       await new Promise((r) => setTimeout(r, 0));
     }
   }

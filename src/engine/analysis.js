@@ -35,7 +35,8 @@ function verdictOf(pred, rec) {
     };
     const hasMain = rec.tickets.some((x) => x.auto !== 'extra');
     const firstNote = hasMain && rec.tickets[0].auto === 'extra' ? '馬連・三連複は学習期間で回収率がいちばん高いので先に予算を入れ、主な買い目は残りの予算で買います。' : '';
-    return { kind: 'buy', title: hasMain ? '買い' : '買い（期待値重視）', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${firstNote}`, tickets: rec.tickets };
+    const cutNote = rec.dayCut ? `この日はここまでの確定した収支が ${rec.dayPnl >= 0 ? '+' : '−'}${Math.abs(Math.round(rec.dayPnl)).toLocaleString('ja-JP')}円で、1日の損失の上限に達したので金額を半分にしています。` : '';
+    return { kind: 'buy', title: hasMain ? '買い' : '買い（期待値重視）', text: `利益の見込める買い目があります。${rec.tickets.map(part).join('。')}。${firstNote}${cutNote}`, tickets: rec.tickets };
   }
   if (rec?.auto && rec.skipped) return { kind: 'skip', title: '見送り', text: rec.skipReason, dropped: rec.dropped };
   if (rec?.tickets?.length) {

@@ -4,7 +4,8 @@
 import { esc, frameBadge, entryBadge, pct, yen, odds, markClass } from './format.js';
 import { raceStatus, startMs, untilText } from '../engine/raceTime.js';
 import { BET_LABEL } from '../engine/constants.js';
-import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL } from '../engine/bets.js';
+import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveLossLimit } from '../engine/bets.js';
+import { raceOutcomes, simulateDay } from '../engine/daySim.js';
 import { payoutOf } from '../engine/backtest.js';
 import { dayLabel, gradeChip, surfaceChip } from './timeline.js';
 
@@ -56,6 +57,24 @@ export function buildSheet(ctx) {
     const marks = MARKS.map((m, k) => pred.order[k]).filter(Boolean);
     return { race, st, pred, rec, marks, settle: settleTickets(race, pred, rec.tickets) };
   });
+  // その日の収支の見込み（シミュレーション）：的中重視の自動のとき（1日の損失の上限つき）
+  let sim = null;
+  if (ctx.recCutFor && ctx.recNoLimitFor && rows.some((r) => r.rec?.auto)) {
+    const items = [];
+    for (const r of rows) {
+      if (!r.rec || r.rec.noOdds) continue;
+      if (r.settle || r.race.result?.length) {
+        const noLim = ctx.recNoLimitFor(r.pred);
+        const s2 = settleTickets(r.race, r.pred, noLim.tickets);
+        items.push({ settled: true, pnl: r.settle ? r.settle.pay - r.settle.stake : 0, pnlNoLimit: s2 ? s2.pay - s2.stake : 0 });
+        continue;
+      }
+      const full = ctx.recNoLimitFor(r.pred).tickets;
+      if (!full.length) continue;
+      items.push({ settled: false, out: raceOutcomes(r.pred, full, ctx.recCutFor(r.pred).tickets) });
+    }
+    if (items.some((x) => !x.settled)) sim = simulateDay(items, { sims: state.sims || 20000, seed: `${state.day}|${state.budget}`, limit: resolveLossLimit(state.lossLimit) * state.budget });
+  }
   const withBets = rows.filter((r) => r.rec?.tickets.length);
   const settled = rows.filter((r) => r.settle);
   const sum = {
@@ -67,7 +86,7 @@ export function buildSheet(ctx) {
     settledPay: settled.reduce((a, r) => a + r.settle.pay, 0),
     hitRaces: settled.filter((r) => r.settle.hits > 0).length,
   };
-  return { rows, sum };
+  return { rows, sum, sim };
 }
 
 function nameOf(race, number) {
@@ -107,7 +126,7 @@ function marksCell(row) {
 
 export function renderBetSheet(ctx) {
   const { state, now, venuesOf } = ctx;
-  const { rows, sum } = buildSheet(ctx);
+  const { rows, sum, sim } = buildSheet(ctx);
   const strat = STRATEGIES[state.strategy] || STRATEGIES.hit;
   const budgets = [1000, 3000, 5000, 10000];
   const stratBtns = Object.entries(STRATEGIES)
@@ -147,6 +166,7 @@ export function renderBetSheet(ctx) {
       <div><dt>合計金額</dt><dd class="num">${yen(sum.total)}</dd></div>
       ${settledNote}
     </dl>
+    ${sim ? renderDaySim(sim, state) : ''}
     <div class="panel-actions">
       <button type="button" class="btn" data-action="copy-sheet">表をコピー</button>
       <button type="button" class="ghost-btn" data-action="print-sheet">印刷</button>
@@ -160,6 +180,29 @@ export function renderBetSheet(ctx) {
     <p class="panel-note">自信度は S・A・B・C の順に当たりやすく、検証では S の◎が約6割勝っています。「控えめ」は S・A のレースだけ買い、ほかは見送ります。どの買い方でも長期的な回収率は 100% を下回っています（バックテストを参照）。</p>
     <textarea class="copy-fallback" id="copy-fallback-sheet" readonly hidden aria-label="コピー用の買い目表"></textarea>
   </section>`;
+}
+
+const signedYen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('ja-JP')}円`;
+
+/** その日の収支の見込み（シミュレーション）の表示 */
+function renderDaySim(sim, state) {
+  const w = sim.withLimit;
+  const n = sim.noLimit;
+  const limit = resolveLossLimit(state.lossLimit);
+  return `<div class="panel day-sim">
+      <h2 class="d-h">この日の収支の見込み <small>まだのレース ${sim.races}R を AI の着順の確率で ${sim.sims.toLocaleString('ja-JP')}回シミュレーション（確定したレースは実際の収支）</small></h2>
+      <dl class="ds-grid">
+        <div><dt>平均</dt><dd class="num ${w.mean >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(w.mean)}</dd></div>
+        <div><dt>プラスになる確率</dt><dd class="num">${pct(w.plusRate, 0)}</dd></div>
+        <div><dt>悪いほうから10%</dt><dd class="num">${signedYen(w.q10)}</dd></div>
+        <div><dt>悪いほうから5%</dt><dd class="num">${signedYen(w.q05)}</dd></div>
+      </dl>
+      <p class="panel-note">${
+        limit > 0
+          ? `1日の損失の上限（予算の${limit}倍＝${yen(limit * state.budget)}で残りを半分）込み。上限に達する確率 ${pct(w.reachRate, 0)}。上限なしなら悪いほうから5%は ${signedYen(n.q05)}、最悪 ${signedYen(n.worst)}（上限ありは ${signedYen(w.worst)}）。`
+          : `1日の損失の上限はなし。最悪 ${signedYen(n.worst)}。`
+      }払戻は買い目表と同じ見込み（複勝は下限〜上限の幅から）。オッズが動くと変わります。回数は「予想のモデル」のシミュレーション回数で変えられます（多いほど見込みが安定）。</p>
+    </div>`;
 }
 
 /** コピー用のテキスト */
