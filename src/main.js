@@ -1313,7 +1313,9 @@ function onClick(e) {
   }
   if (act === 'copy-bets' && current.rec) {
     const race = current.pred.race;
-    const text = ticketsToText(`${race.name}（${race.date} ${race.course}${race.raceNo}R）KEIB AI推奨・${STRATEGIES[state.strategy].label}`, current.rec.tickets);
+    const title = `${race.name}（${race.date} ${race.course}${race.raceNo}R）KEIB AI推奨・${STRATEGIES[state.strategy].label}`;
+    // オッズが古い（直前に決定）：金額はまだないので、仮の買い目だけ
+    const text = current.rec.pending ? [title, current.rec.pendingReason].join('\n') : ticketsToText(title, current.rec.tickets);
     copyText(text, $('#panel-bets .copy-status'), $('#copy-fallback-bets'));
     return;
   }

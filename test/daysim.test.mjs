@@ -214,6 +214,42 @@ test('オッズの新しさ：発走の freshMin 分前より後に取ったオ�
   assert.ok(!oddsFresh({ ...race, result: [1, 2, 3], oddsBefore: 10 }));
 });
 
+test('古いオッズ（発走の freshMin 分前より前）では買い目と金額を出さない：仮の買い目は新しいオッズなら買うものと同じ', () => {
+  const at = (min) => new Date(Date.parse('2026-10-10T15:40:00+09:00') - min * 60000).toISOString();
+  let checked = 0;
+  for (let seed = 1; seed <= 30 && checked < 3; seed++) {
+    const race = withPlace(makeRace({ seed }));
+    const fav = race.entries.find((e) => e.popularity === 1);
+    if (seed % 2) for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
+    Object.assign(race, { date: '2026-10-10', startTime: '15:40' });
+    const freshPred = predictRace({ ...race, oddsAt: at(3) }, { sims: 0 });
+    const fresh = recommendBets(freshPred, { budget: 3000 });
+    if (!fresh.tickets.length) continue;
+    checked++;
+    assert.ok(!fresh.pending);
+    const stalePred = predictRace({ ...race, oddsAt: at(60) }, { sims: 0 });
+    const stale = recommendBets(stalePred, { budget: 3000 });
+    // 金額のある買い目はなく、「直前に決定」と仮の買い目（新しいオッズなら買うもの）だけ
+    assert.equal(stale.tickets.length, 0);
+    assert.equal(stale.pending, true);
+    assert.equal(stale.skipped, false);
+    assert.match(stale.pendingReason, /発走の60分前/);
+    assert.deepEqual(stale.provisional.map(key), fresh.tickets.map(key));
+    assert.ok(stale.provisional.every((t) => t.provisional));
+    // 1日の予算にも入らない（買わないので）
+    const day = planDay([{ pred: stalePred, rec: stale }], { budget: 3000, dayBudget: 'auto' });
+    assert.equal(day[0].tickets.length, 0);
+    // 規則で freshOnly を外すと、古いオッズでも金額を出す（検証で「古いオッズでも買った場合」を出すとき）
+    const anyway = recommendBets(stalePred, { budget: 3000, rule: { ...AUTO_STAKE, freshOnly: false } });
+    assert.ok(!anyway.pending);
+    assert.ok(anyway.tickets.length <= 1);
+    // 結果の出たレースは確定オッズなので新しい扱い（過去の日の画面・検証は変わらない）
+    const done = recommendBets(predictRace({ ...race, oddsAt: at(60), result: [1, 2, 3] }, { sims: 0 }), { budget: 3000 });
+    assert.ok(!done.pending);
+  }
+  assert.ok(checked > 0, '買い目のある場面で確かめている');
+});
+
 test('1日の予算：参加の買い目・最低額へ上げた買い目は、最後の reserve 倍を使わない（発走順に先着、その時点までに使った額だけで決まる）', () => {
   const base = predictRace(makeRace({ seed: 3 }), { sims: 0 });
   const mk = (i, t) => ({ pred: { ...base, race: { ...base.race, id: `R${i}`, date: '2026-10-10', startTime: `1${i}:00`, raceNo: i } }, rec: { auto: true, budget: 1000, tickets: [t] } });

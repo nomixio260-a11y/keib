@@ -189,7 +189,7 @@ function renderBetSection(ctx) {
     </div>
     <p class="panel-note">${
       mult > 0
-        ? `朝や前日にまとめて買っても効くように、レースの結果を見ずに決めます（1日の予算 ${yen(mult * state.budget)}）。${DAY_BUDGET_NOTE[mult] || ''}`
+        ? `レースの結果を見ずに、発走の早いレースから順に決めます（1日の予算 ${yen(mult * state.budget)}）。${DAY_BUDGET_NOTE[mult] || ''}`
         : DAY_BUDGET_NONE_NOTE
     }</p>`
         : ''

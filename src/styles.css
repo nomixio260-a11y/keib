@@ -2015,6 +2015,15 @@ table.bets {
   line-height: 1.6;
 }
 
+/* 仮の買い目（オッズが古いので、金額は直前の新しいオッズで決める） */
+.bets tr.is-prov td {
+  color: var(--muted);
+}
+
+.bets tr.is-prov td:first-child small.bt-sub {
+  color: var(--amber);
+}
+
 .bet-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

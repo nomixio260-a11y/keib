@@ -132,7 +132,8 @@ export function realisticSection(real, byTime = REAL_BACKTEST?.realisticByTime) 
     `<tr><th scope="row">${esc(label)}${note}</th><td class="num">${Math.round(x.races).toLocaleString('ja-JP')}</td><td class="num">${pct(x.hitRate)}</td><td class="num">${pct(x.roi)}</td><td class="num ${x.profit >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(x.profit)}</td><td class="num">${Number(x.loseDays).toFixed(Number.isInteger(x.loseDays) ? 0 : 1)}<small>/${Math.round(x.betDays)}日</small></td></tr>`;
   const times = byTime?.length ? byTime : [real];
   const label = (t) => t.label || `発走${t.minutes}分前`;
-  const rows = times.map((t) => r(`${label(t)}（推定・平均）`, t.estimate)).join('');
+  // 発走 freshMin 分前より古いオッズの行：画面はその時刻には買い目（金額）を出さないので、古いオッズでも買った場合の推定
+  const rows = times.map((t) => r(`${label(t)}（推定・平均）`, t.estimate, t.stale ? '<small class="bt-prev">古いオッズでも買った場合（画面は金額を出さない）</small>' : '')).join('');
   const d = real.drift || {};
   const runs = (real.runs || []).map((x, i) => r(`${label(real)}（乱数${i + 1}）`, x)).join('');
   const favDrift = (t) => (t.drift?.favMedianAbs != null ? `${Math.round((Math.exp(t.drift.favMedianAbs) - 1) * 100)}%` : '—');
@@ -142,13 +143,21 @@ export function realisticSection(real, byTime = REAL_BACKTEST?.realisticByTime) 
         <thead><tr><th>買う時刻（オッズの時点）</th><th>買ったレース</th><th>的中率</th><th>回収率</th><th>収支</th><th>負けた日</th></tr></thead>
         <tbody>${r('確定オッズ（上の検証）', real.final)}${rows}${runs}</tbody>
       </table></div>
-      <p class="panel-note"><strong>上の検証は、発走後に決まる確定オッズで買い目を選んでいます。</strong>実際に買う時点のオッズは確定オッズからずれます（締切の直前に多くの票が入るため。記録したオッズの推移 ${d.races ?? '—'}レース・${d.days ?? '—'}日では、5倍未満の馬で確定との差の中央値が ${times.map((t) => `${label(t)} ${favDrift(t)}`).join('・')}）。そのずれを確定オッズに足して予想し直し、実際の払戻で精算したのがこの推定です。<strong>買う時刻が発走に近いほど、確定オッズに近く、収支が良くなります。</strong>画面の買い目と「発走前に記録した買い目」は、発走前の最後の更新（直前）のオッズで選んでいます。直前は締切（即PAT は発走1分前）までの最後の記録のオッズで、10/4 の記録では発走の1〜7分前（中央値4分前）でした。記録したオッズの推移はまだ少ないので、推定には幅があります（乱数ごとの差を見てください）。</p>
+      <p class="panel-note"><strong>上の検証は、発走後に決まる確定オッズで買い目を選んでいます。</strong>実際に買う時点のオッズは確定オッズからずれます（締切の直前に多くの票が入るため。記録したオッズの推移 ${d.races ?? '—'}レース・${d.days ?? '—'}日では、5倍未満の馬で確定との差の中央値が ${times.map((t) => `${label(t)} ${favDrift(t)}`).join('・')}）。そのずれを確定オッズに足して予想し直し、実際の払戻で精算したのがこの推定です。<strong>買う時刻が発走に近いほど、確定オッズに近く、収支が良くなります。</strong>そこで画面は、発走の${AUTO_STAKE.freshMin}分前より古いオッズでは買い目と金額を出さず（「直前に決定」）、画面の買い目と「発走前に記録した買い目」は、発走前の最後の更新（直前）のオッズで選んでいます。直前は締切（即PAT は発走1分前）までの最後の記録のオッズで、10/4 の記録では発走の1〜7分前（中央値4分前）でした。記録したオッズの推移はまだ少ないので、推定には幅があります（乱数ごとの差を見てください）。</p>
     </section>`;
 }
 
 /** 買う時刻ごとの収支（いまの規則・発走前のオッズの推定・前進検証。stakeModel.js の check.timing） */
 function timingTable(ch) {
   if (!ch?.timing?.length) return '';
+  // 直前は10分前の何倍か（2024年4月〜検証の前の合計）
+  const longOf = (prefix) => {
+    const t = ch.timing.find((x) => x.prefix === prefix);
+    return t ? Object.entries(t.summary).filter(([k]) => k !== 'hold').reduce((a, [, x]) => a + x.profit, 0) : null;
+  };
+  const m1 = longOf('m1');
+  const m10 = longOf('m10');
+  const times = m1 != null && m10 > 0 ? `発走10分前の約${Math.round(m1 / m10)}倍` : '発走10分前より多く';
   const rows = ch.timing
     .map((t) => `<tr><th scope="row">${esc(t.label)}</th>${ch.periods.map((P) => { const x = t.summary[P.key]; const y = t.prev?.[P.key]; return `<td class="num ${x.profit >= 0 ? 'tx-good' : 'tx-bad'}">${signedYen(x.profit)}<small>・${pct(x.roi, 0)}・負け ${Math.round((100 * x.loseDays) / Math.max(1, x.betDays))}%</small>${y ? `<small class="bt-prev">前の規則 ${signedYen(y.profit)}</small>` : ''}</td>`; }).join('')}</tr>`)
     .join('');
@@ -157,7 +166,7 @@ function timingTable(ch) {
         <thead><tr><th>買う時刻</th>${ch.periods.map((P) => `<th>${esc(P.label)}</th>`).join('')}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <p class="panel-note">同じ規則でも、<b>買う時刻で収支が大きく変わります</b>。発走前の最後の更新（直前。締切は発走1分前）で買うと、発走10分前の約2倍、発走60分前（朝などに早めに買う）では長い期間で損でした。いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど、選んだ買い目の払戻が見込みに近くなります。負けた日の割合も、直前がいちばん小さくなりました。</p>`;
+      <p class="panel-note">同じ規則でも、<b>買う時刻で収支が大きく変わります</b>。発走前の最後の更新（直前。締切は発走1分前）で買うと、${times}、発走60分前・2時間前（複勝のオッズが出たころ。朝や前日はまだ複勝のオッズがない）に買うと長い期間で損でした。いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど、選んだ買い目の払戻が見込みに近くなります。負けた日の割合も、直前がいちばん小さくなりました。そこで画面は、<b>発走の${AUTO_STAKE.freshMin}分前より後の新しいオッズでだけ買い目と金額を出します</b>（それより前は「直前に決定」：いまのオッズなら何を買うかの仮の買い目だけ。この表の10分前より前の行は、古いオッズでも買った場合の推定）。</p>`;
 }
 
 /**

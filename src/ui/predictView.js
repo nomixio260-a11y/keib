@@ -348,8 +348,8 @@ function buyTimeNote(race) {
   const t = STAKE_MODEL?.check?.timing || [];
   const long = (row) => (row ? Object.entries(row.summary).filter(([k]) => k !== 'hold').reduce((s, [, x]) => s + x.profit, 0) : null);
   const signedK = (v) => `${v >= 0 ? '+' : '−'}${(Math.abs(v) / 10000).toFixed(1)}万円`;
-  const parts = t.filter((row) => ['m1', 'm5', 'm10', 'm60'].includes(row.prefix)).map((row) => `${row.prefix === 'm1' ? '直前' : row.label.replace('発走', '')} ${signedK(long(row))}`);
-  return `<p class="panel-note bt-buytime">${before != null ? `オッズは ${esc(timeOf(race.oddsAt))} 時点${before >= 0 ? `（発走の${before}分前）` : ''}。` : ''}<b>買うのは発走直前の最後の更新で</b>（即PAT の締切は発走1分前）：いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど有利です${parts.length ? `（同じ規則で、2024年4月〜2026年6月の収支の推定：${parts.join('・')}、1R 1,000円）` : ''}。</p>`;
+  const parts = t.filter((row) => ['m1', 'm5', 'm10', 'm60', 'm120'].includes(row.prefix)).map((row) => `${row.prefix === 'm1' ? '直前' : row.label.replace('発走', '')} ${signedK(long(row))}`);
+  return `<p class="panel-note bt-buytime">${before != null ? `オッズは ${esc(timeOf(race.oddsAt))} 時点${before >= 0 ? `（発走の${before}分前）` : ''}。` : ''}<b>買うのは発走直前の最後の更新で</b>（即PAT の締切は発走1分前。発走の${AUTO_STAKE.freshMin}分前より古いオッズでは金額を出しません）：いま高く見えるオッズほど確定までに下がるので、オッズが確定に近いほど有利です${parts.length ? `（同じ規則で、2024年4月〜2026年6月の収支の推定：${parts.join('・')}、1R 1,000円）` : ''}。</p>`;
 }
 
 export function renderBetsPanel(pred, rec, ctx) {
@@ -359,6 +359,19 @@ export function renderBetsPanel(pred, rec, ctx) {
     ? '<tr><td colspan="6" class="muted bt-empty">特別登録の段階です。出馬表（枠順・騎手）と単勝オッズが出てから、期待値で買い目を選びます。</td></tr>'
     : rec.noOdds
     ? '<tr><td colspan="6" class="muted bt-empty">単勝オッズの発表前です。オッズが出ると、期待値から買い目を選びます（土曜のレースは金曜、日曜のレースは土曜に前日発売が始まります）。</td></tr>'
+    : rec.pending
+    ? `${(rec.provisional || [])
+        .map(
+          (t) => `<tr class="is-prov">
+          <td>${esc(BET_LABEL[t.type])}<small class="bt-sub" title="オッズが古いので、まだ買いません。発走の${AUTO_STAKE.freshMin}分前より後の新しいオッズで買い目と金額を決めます">仮</small></td>
+          <td class="num bt-combo">${esc(ticketLabel(t))}</td>
+          <td class="num">${pct(t.pHit ?? t.pEv ?? t.p)}</td>
+          <td class="num">${odds(t.odds)}${t.oddsMax ? `<small title="複勝オッズの範囲（下限で計算）">〜${odds(t.oddsMax)}</small>` : ''}</td>
+          <td class="num ${evClass(t.ev)}">${t.ev.toFixed(2)}${t.r != null ? `<small class="bt-sub" title="このレースの条件で見込む回収率（R̂）">回収見込み${pct(t.r, 0)}</small>` : ''}</td>
+          <td class="num"><small class="muted">直前に決定</small></td>
+        </tr>`,
+        )
+        .join('')}<tr><td colspan="6" class="muted bt-empty">${esc(rec.pendingReason)}</td></tr>`
     : rec.tickets.length
     ? rec.tickets
         .map(
@@ -421,6 +434,7 @@ export function renderBetsPanel(pred, rec, ctx) {
         parts.push(`・参加の買い目（「参加」。見送りを減らす）：どちらもないレースでも、当たる確率 ${pct(AUTO_STAKE.join.minP, 0)} 以上・R̂ ${pct(AUTO_STAKE.join.minR, 0)} 以上の複勝があれば、当たる確率のいちばん高い1点を、当たって +${AUTO_STAKE.minProfit}円になる最低額（予算の ${pct(AUTO_STAKE.join.maxShare, 0)} まで。当たる確率 ${pct(AUTO_STAKE.join.high.minP, 0)} 以上・R̂ ${pct(AUTO_STAKE.join.high.minR, 0)} 以上なら ${pct(AUTO_STAKE.join.high.maxShare, 0)} まで）で買います。直前のオッズでは回収率 約99%・的中率 約68% で、ほぼ損をせずに買うレースを増やします。発走の${AUTO_STAKE.freshMin}分前より後のオッズのときだけで（10分前のオッズでは回収率 92% と損）、1日の予算の最後の ${AUTO_STAKE.dayBudget.reserve}レース分は使いません（後のレースの強い買い目のため）`);
         parts.push('・R̂ は、AI の期待値・単勝オッズから見た市場の期待値・オッズ・頭数から、学習期間に発走前のオッズで選んだ同じような買い目が実際にいくら戻ったかで出します。負けたレースを分析すると、いま高く見えるオッズは確定までに下がりやすく（選んだ複勝の払戻は見込みの 8〜9割）、AI と市場の見立ての差が大きいほど当たる確率を高く見すぎていたので、レースごとにその分を割り引きます');
         parts.push(`・当たっても利益が ${AUTO_STAKE.minProfit}円に届かない金額のときは、届く最低額まで上げます（予算の ${pct(AUTO_STAKE.minStakeUp, 0)} まで。それより多く要るなら買いません）。どれもなければ見送り`);
+        if (AUTO_STAKE.freshOnly) parts.push(`・買う時刻：買い目と金額は、<b>発走の${AUTO_STAKE.freshMin}分前より後の新しいオッズ</b>（約1分ごとに更新）でだけ決めます。それより古いオッズでは「直前に決定」として、いまのオッズなら何を買うか（仮）だけ示します。同じ規則でも、古いオッズで選ぶほど損になるためです（いま高く見えるオッズほど確定までに下がる。2024年4月〜2026年6月の推定は上の案内）`);
         if (exotic) parts.push('馬連・ワイド・三連複などの組み合わせの券種は、発走前のオッズで選ぶと長い期間で損だったので、自動では買いません。');
       } else if (flat) parts.push(`買い目は、勝率を少し平らにして（荒れ度の${BET_TEMP}倍）、オッズを混ぜない AI の確率で期待値 ${STRATEGIES[state.strategy].minEv.toFixed(1)} 以上のものだけを選びます。単勝/複勝の的中重視で、学習期間の分割外 約1.2万レース（186週）の回収率 94.6% → 107.5%（週平均 −2,115円 → +601円）、直近14週 99.3% → 129.2%（−256円 → +1,961円）。的中率・期待値の欄はこの値です。`);
       if (exotic && !rec.auto) parts.push('的中重視は当たる確率 50% 以上の買い目だけを買うので、馬連・馬単・三連複・三連単はほとんど選ばれません（学習期間 385日で馬連 1点）。単勝・複勝だけとほぼ同じ成績です。');
@@ -441,12 +455,16 @@ export function renderBetsPanel(pred, rec, ctx) {
             .join('')}</ul><p class="muted">期待値の条件は満たしていますが、当たりにくいので買いません。学習に使っていない約1.2万レースで、こうして絞ると的中率が 52% → 76% に上がり、損が続いたときの落ち込みが約3分の1になりました（回収率は 107.5% → 105.4%）。</p></details>`
         : ''
     }
-    <dl class="bet-stats">
+    ${
+      rec.pending
+        ? ''
+        : `<dl class="bet-stats">
       <div><dt>合計</dt><dd class="num">${yen(total)}</dd></div>
       <div><dt>どれかが当たる確率</dt><dd class="num">${pct(rec.stats.hitRate)}</dd></div>
       <div><dt>AI想定の回収率</dt><dd class="num">${pct(rec.stats.roi, 0)}</dd></div>
       <div><dt>収支がプラスになる確率</dt><dd class="num">${pct(rec.stats.profitRate)}</dd></div>
-    </dl>
+    </dl>`
+    }
     <p class="panel-note">AIとオッズの見立てがずれた馬券ほど期待値が高く見えます（勝者の呪い）。オッズの確率を混ぜるほど見込みは控えめで現実に近くなります。的中率はAIのシミュレーション、回収率は混ぜた確率で計算した見込みなので、実際の成績はバックテストで確かめてください。</p>
     <div class="panel-actions">
       <button type="button" class="btn" data-action="copy-bets" ${rec.tickets.length ? '' : 'disabled'}>買い目をコピー</button>

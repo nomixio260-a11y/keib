@@ -38,7 +38,7 @@ export function dayPicks(races, doc, { now = Date.now(), stats = REAL_STATS, bud
       const tickets = recorded.tickets
         .map((t) => ({ type: t.type, idx: t.nums.map((n) => byNum.get(n) ?? -1), stake: t.stake, odds: t.odds, oddsExp: t.odds, pHit: t.p, p: t.p }))
         .filter((t) => t.idx.every((i) => i >= 0));
-      rec = { ...rec, auto: true, tickets };
+      rec = { ...rec, auto: true, tickets, pending: false };
     }
     items.push({ race, pred, rec, open });
   }
@@ -50,8 +50,8 @@ export function dayPicks(races, doc, { now = Date.now(), stats = REAL_STATS, bud
   items.forEach((it, k) => {
     if (!it.open) return;
     const rec = planned[k];
-    // オッズの発売前・複勝のオッズ待ち（発走2時間前より前）は、まだ決めていないので記録しない
-    if (rec?.noOdds) return;
+    // オッズの発売前・複勝のオッズ待ち（発走2時間前より前）・オッズが発走 freshMin 分前より古い（仮）は、まだ決めていないので記録しない
+    if (rec?.noOdds || rec?.pending) return;
     const placeWaiting = !rec?.tickets?.length && /複勝の実際のオッズ/.test(rec?.skipReason || '');
     if (placeWaiting) return;
     entries[it.race.id] = pickEntry(it.pred, rec, { at: new Date(now).toISOString(), oddsAt: it.race.oddsAt || null });

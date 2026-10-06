@@ -4,7 +4,7 @@
 import { esc, frameBadge, entryBadge, pct, yen, odds, markClass } from './format.js';
 import { raceStatus, startMs, untilText } from '../engine/raceTime.js';
 import { BET_LABEL } from '../engine/constants.js';
-import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveDayBudget } from '../engine/bets.js';
+import { ticketLabel, STRATEGIES, LOW_ODDS_LABEL, resolveDayBudget, AUTO_STAKE } from '../engine/bets.js';
 import { settingsLine } from './settingsView.js';
 import { raceOutcomes, simulateDay } from '../engine/daySim.js';
 import { payoutOf } from '../engine/backtest.js';
@@ -91,6 +91,8 @@ export function buildSheet(ctx) {
     settledStake: settled.reduce((a, r) => a + r.settle.stake, 0),
     settledPay: settled.reduce((a, r) => a + r.settle.pay, 0),
     hitRaces: settled.filter((r) => r.settle.hits > 0).length,
+    // 直前に決めるレース（オッズが発走の数分前より古い・的中重視の自動）
+    pending: rows.filter((r) => r.rec?.pending).length,
     // 1日の予算（的中重視の自動）：その日の買い目の合計と、予算の範囲に割り振った結果
     day: rows.find((r) => r.rec?.day)?.rec.day || null,
     dayOut: rows.filter((r) => r.rec?.day?.over && !r.rec.tickets.length && r.rec.dropped?.some((t) => t.why === 'day')).length,
@@ -125,6 +127,8 @@ function betsCell(row) {
   const { rec, settle } = row;
   if (rec.noOdds && row.race.provisional) return '<span class="muted">出馬表待ち<br><small>枠順・騎手・オッズが出たら計算します</small></span>';
   if (rec.noOdds) return '<span class="muted">オッズ待ち<br><small>単勝オッズが出たら計算します</small></span>';
+  // 的中重視の自動で、オッズが発走の数分前より古い：仮の買い目だけ（金額は直前の新しいオッズで決める）
+  if (rec.pending) return `<span class="muted">直前に決定${rec.provisional?.length ? `<br><small>いまのオッズなら ${rec.provisional.map((t) => `${esc(BET_LABEL[t.type])} <b class="num">${esc(ticketLabel(t))}</b>`).join('・')}（仮）</small>` : '<br><small>いまのオッズでは買い目なし</small>'}<br><small>金額は発走${AUTO_STAKE.freshMin}分前からのオッズで</small></span>`;
   if (!rec.tickets.length) return `<span class="muted">見送り${rec.skipped ? `<br><small>${esc(rec.skipReason || '自信度の条件に合わないレース')}</small>` : rec.dropped?.length ? `<br><small>当たる確率 ${pct(rec.keepMinP, 0)} 以上の買い目なし</small>` : rec.lowOdds ? `<br><small>オッズ ${LOW_ODDS_LABEL}の買い目だけ</small>` : '<br><small>期待値の条件に合う買い目なし</small>'}</span>`;
   const lines = rec.tickets.map((t, i) => {
     const hit = settle?.detail?.[i]?.pay > 0;
@@ -167,7 +171,7 @@ export function renderBetSheet(ctx) {
   return `<section class="bet-sheet" aria-label="買い目表">
     <div class="view-intro">
       <h1 class="view-title">買い目表 <small>${esc(dayLabel(state.day))}・${esc((venuesOf(state.day) || []).join('・'))}</small></h1>
-      <p>この日の全レースの印（◎○▲＝機械学習の勝率順）と、今の買い方で選んだ買い目です。買い目は発売中の単勝オッズと複勝オッズで計算し、オッズが動けば変わります（画面は1分ごと、データは開催日に数分ごとに更新）。確定したレースは実際の払戻で精算しています。</p>
+      <p>この日の全レースの印（◎○▲＝機械学習の勝率順）と、今の買い方で選んだ買い目です。買い目は発売中の単勝オッズと複勝オッズで計算し、オッズが動けば変わります（画面は1分ごと、データは開催日に数分ごと・発走8分前からは約1分ごとに更新）。的中重視の自動は、<b>発走の${AUTO_STAKE.freshMin}分前より後の新しいオッズで買い目と金額を決めます</b>（それより前は「直前に決定」で、いまのオッズならの仮の買い目だけ。古いオッズで選ぶほど損になるため）。確定したレースは実際の払戻で精算しています。</p>
     </div>
     <div class="sheet-controls">
       ${settingsLine(state)}
@@ -176,10 +180,11 @@ export function renderBetSheet(ctx) {
       <div><dt>レース</dt><dd class="num">${sum.races}</dd></div>
       <div><dt>買い目あり</dt><dd class="num">${sum.bets}<small>R</small></dd></div>
       <div><dt>合計金額</dt><dd class="num">${yen(sum.total)}</dd></div>
+      ${sum.pending ? `<div><dt>直前に決定</dt><dd class="num">${sum.pending}<small>R</small></dd></div>` : ''}
       ${settledNote}
     </dl>
-    ${sum.day ? `<p class="panel-note sheet-day">${esc(dayBudgetText(sum))}。${sum.day.limit != null ? '朝や前日にまとめて買っても、1日の負けは最大でも1日の予算までです' : 'その日の買い目をすべて買います'}（設定はレースごとの画面の買い目の欄）。</p>` : ''}
-    ${sim ? renderDaySim(sim, state) : ''}
+    ${sum.day ? `<p class="panel-note sheet-day">${esc(dayBudgetText(sum))}。${sum.day.limit != null ? '1日の負けは最大でも1日の予算までです' : 'その日の買い目をすべて買います'}（設定はレースごとの画面の買い目の欄）。</p>` : ''}
+    ${sim ? renderDaySim(sim, state, sum.pending) : ''}
     <div class="panel-actions">
       <button type="button" class="btn" data-action="copy-sheet">表をコピー</button>
       <button type="button" class="ghost-btn" data-action="print-sheet">印刷</button>
@@ -198,7 +203,7 @@ export function renderBetSheet(ctx) {
 const signedYen = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('ja-JP')}円`;
 
 /** その日の収支の見込み（シミュレーション）の表示 */
-function renderDaySim(sim, state) {
+function renderDaySim(sim, state, pending = 0) {
   const w = sim.plan;
   const n = sim.raw;
   const mult = resolveDayBudget(state.dayBudget);
@@ -217,7 +222,7 @@ function renderDaySim(sim, state) {
           : mult > 0
           ? `この日の買い目の合計（${yen(d?.total || 0)}）は1日の予算（${yen(mult * state.budget)}）の範囲内です。最悪 ${signedYen(w.worst)}。`
           : `1日の予算はなし。最悪 ${signedYen(w.worst)}。`
-      }払戻は買い目表と同じ見込み（複勝は下限〜上限の幅から）。オッズが動くと変わります。回数は「予想のモデル」のシミュレーション回数で変えられます（多いほど見込みが安定）。</p>
+      }${pending ? `直前に決めるレース（${pending}R・まだ金額のない仮の買い目）は入れていません。` : ''}払戻は買い目表と同じ見込み（複勝は下限〜上限の幅から）。オッズが動くと変わります。回数は「予想のモデル」のシミュレーション回数で変えられます（多いほど見込みが安定）。</p>
     </div>`;
 }
 
@@ -238,7 +243,13 @@ export function sheetText(ctx) {
       continue;
     }
     const marks = row.marks.map((h, k) => `${MARKS[k]}${h.entry.number}${h.entry.name}`).join(' ');
-    const bets = row.rec.noOdds ? 'オッズ待ち' : row.rec.tickets.length ? row.rec.tickets.map((t) => `${BET_LABEL[t.type]} ${ticketLabel(t)} ${t.stake}円`).join(' / ') : '見送り';
+    const bets = row.rec.noOdds
+      ? 'オッズ待ち'
+      : row.rec.pending
+      ? `直前に決定${row.rec.provisional?.length ? `（仮：${row.rec.provisional.map((t) => `${BET_LABEL[t.type]} ${ticketLabel(t)}`).join(' / ')}）` : ''}`
+      : row.rec.tickets.length
+      ? row.rec.tickets.map((t) => `${BET_LABEL[t.type]} ${ticketLabel(t)} ${t.stake}円`).join(' / ')
+      : '見送り';
     const res = race.result?.length ? ` 結果 ${race.result.slice(0, 3).join('-')}${row.settle ? ` 払戻${Math.round(row.settle.pay)}円` : ''}` : '';
     lines.push(`${head} [${row.pred.confidence.grade}] ${marks} ｜ ${bets}${res}`);
   }

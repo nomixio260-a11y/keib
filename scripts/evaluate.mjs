@@ -15,6 +15,7 @@ import { indexHistory, preRaceCard, attachCareer } from '../src/data/history.js'
 import { GBDT_READY } from '../src/engine/gbdt.js';
 import { runBacktest } from '../src/engine/backtest.js';
 import { PRESETS } from '../src/engine/model.js';
+import { AUTO_STAKE } from '../src/engine/bets.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pct = (v) => `${(v * 100).toFixed(1)}%`;
@@ -72,7 +73,8 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
 // 発走前のオッズで選んだ場合（推定）：上の検証は確定オッズ（発走後に決まる）で買い目を選んでいる。実際に買う時点のオッズは
 // 確定オッズからずれるので、記録したオッズの推移（data/odds）から取った「その時点 → 確定」のずれを確定オッズに足して予想し直し、
 // 乱数を変えて EVAL_DRIFT_SEEDS 回。精算は実際の払戻（払戻は確定オッズで決まる）。買う時刻ごとに（EVAL_DRIFT_TIMES、分）：
-// 1 = 発走1分前より前の最後の更新（「直前」。画面の買い目と発走前の記録はこの時点）、10 = 発走10分前、60 = 発走60分前（早めに買う場合）
+// 1 = 発走1分前より前の最後の更新（「直前」。画面の買い目と発走前の記録はこの時点）、10 = 発走10分前、60 = 発走60分前（早めに買う場合）。
+// 10・60 は画面では買い目を出さない時刻（発走 freshMin 分前より古いオッズ）なので、古いオッズでも買った場合の推定
 {
   const { loadDrift } = await import('./lib/drift.mjs');
   const { makePerturber, driftSummary } = await import('../src/engine/oddsDrift.js');
@@ -101,15 +103,18 @@ for (const key of GBDT_READY ? ['ml', 'balance', 'ai'] : ['balance', 'ai']) {
     const preset = PRESETS[key];
     const runs = [];
     for (let k = 1; k <= seeds; k++) {
-      // oddsBefore：発走の何分前のオッズか（参加の買い目は、発走 freshMin 分前より後のオッズのときだけ。bets.js の oddsFresh）
+      // oddsBefore：発走の何分前のオッズか（参加の買い目は、発走 freshMin 分前より後のオッズのときだけ。bets.js の oddsFresh）。
+      // 画面は発走 freshMin 分前より古いオッズでは買い目を「仮」にして金額を出さない（AUTO_STAKE.freshOnly）。その時刻の行は、
+      // 古いオッズでも買った場合（freshOnly なし）の推定（古いオッズで買わない理由を示すため）
       const cards = test.map((c) => ({ ...perturb(c, `${c.id}|${k}`), oddsBefore: minutes }));
-      const res = await runBacktest(cards, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml, mlAi: !!preset.mlAi }, { sims: 0 });
+      const stale = minutes > AUTO_STAKE.freshMin;
+      const res = await runBacktest(cards, { weights: preset.weights, noise: preset.noise, stats, ml: !!preset.ml, mlAi: !!preset.mlAi, ...(stale ? { rule: { ...AUTO_STAKE, freshOnly: false } } : {}) }, { sims: 0 });
       const ai = res.strategies.find((x) => x.key === 'ai');
       runs.push(sumDaily(ai.daily || []));
     }
     const avg = (f) => runs.reduce((a, r) => a + f(r), 0) / runs.length;
     const est = pack({ races: avg((r) => r.races), hits: avg((r) => r.hits), stake: avg((r) => r.stake), pay: avg((r) => r.pay), days: runs[0].days, betDays: avg((r) => r.betDays), loseDays: avg((r) => r.loseDays), worst: avg((r) => r.worst) });
-    byTime.push({ minutes, label: label(minutes), seeds, drift: { ...driftSummary(drift.samples), races: drift.races, days: drift.days }, final: fin, estimate: est, runs: runs.map(pack) });
+    byTime.push({ minutes, label: label(minutes), stale: minutes > AUTO_STAKE.freshMin, seeds, drift: { ...driftSummary(drift.samples), races: drift.races, days: drift.days }, final: fin, estimate: est, runs: runs.map(pack) });
     console.log(`\n■ ${label(minutes)}のオッズで選んだ場合（推定。オッズの推移 ${drift.races}レース・${drift.days}日・${drift.samples.length}頭のずれ、乱数 ${seeds}通り）`);
     if (fin) console.log(line('確定オッズ（上の検証）', fin));
     for (const [k, r] of runs.entries()) console.log(line(`${label(minutes)}（乱数${k + 1}）`, pack(r)));

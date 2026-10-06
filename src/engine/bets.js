@@ -95,6 +95,11 @@ export const AUTO_STAKE = {
   // 参加の買い目と最低額へ上げる買い目は、オッズが発走の freshMin 分前より後に取ったものだけ（直前のオッズなら回収率 約97%、
   // 発走10分前のオッズでは 92% と損だった。2026-10-06）。結果の出たレース・オッズの時刻がわからない過去のレースは対象
   freshMin: 8,
+  // 買い目（金額）は、オッズが発走の freshMin 分前より後に取ったものでだけ決める。それより古いオッズでは「仮」（いまのオッズなら
+  // 何を買うかだけ示し、金額は出さない）。同じ規則でも、古いオッズで選ぶほど損になる（いま高く見えるオッズほど確定までに下がる）：
+  // 発走前のオッズの推定（2024年4月〜2026年6月・1R 1,000円）で 直前 +4.4万円・5分前 +3.8万・10分前 +1.9万・60分前 −3.8万・
+  // 2時間前 −9.9万円（2026-10-06。朝や前日にまとめて買うと、発走2時間前までは複勝のオッズもない）
+  freshOnly: true,
   // 1日の予算：1レースの予算の mult 倍まで（発走の早いレースから順に）。参加の買い目と最低額へ上げる買い目には、
   // 最後の reserve 倍を使わない（後のレースの強い買い目のために残す。その時点までに使った額だけで決まる）
   dayBudget: { mult: 7, reserve: 2 },
@@ -666,6 +671,20 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
     .slice(0, 5)
     .map((t) => ({ ...t, stake: 0 }));
   const placeWaiting = types.includes('place') && pred.placeCount > 0 && !pred.rows.some((r) => r.entry.placeMin > 1);
+  // 古いオッズ（発走 freshMin 分前より前に取った）では買わない（A.freshOnly）：いまのオッズが新しければ買う買い目（参加の買い目・
+  // 最低額へ上げる買い目も含む）を「仮」として示すだけで、金額は発走 freshMin 分前より後の新しいオッズで決める。
+  // 同じ規則でも、古いオッズで選ぶほど損になるため。結果の出たレース・オッズの時刻がわからないレースは新しい扱い（oddsFresh）
+  if (A.freshOnly && !fresh) {
+    const provisional = placeWaiting ? [] : pickAuto(scored, budget, A, { fresh: true }).picked.map((t) => ({ ...t, share: t.stake / budget, provisional: true }));
+    const st = startMs(pred.race);
+    const at = pred.race?.oddsAt ? Date.parse(pred.race.oddsAt) : NaN;
+    const before = st && Number.isFinite(at) ? Math.round((st - at) / 60000) : null;
+    const now = provisional.length ? `いまのオッズなら ${provisional.map((t) => `${BET_LABEL[t.type]} ${ticketLabel(t)}`).join('・')}（仮）` : 'いまのオッズでは買い目なし（見送りの見込み）';
+    const pendingReason = placeWaiting
+      ? `まだ決めません：複勝の実際のオッズ（発走の2時間ほど前から）が出て、発走の${A.freshMin}分前を過ぎたら、新しいオッズで買い目と金額を決めます`
+      : `まだ買いません：オッズが${before != null && before > 0 ? `発走の${before}分前のもの` : '古いもの'}なので、発走の${A.freshMin}分前より後の新しいオッズ（約1分ごとに更新）で買い目と金額を決めます。${now}`;
+    return { strategy, budget, tickets: [], provisional, pending: true, pendingReason, dropped: [], auto: true, used: 0, keepMinP: null, candidates: cands.length, skipped: false, skipReason: pendingReason, stats: evaluateTickets([], pred), fresh };
+  }
   const thinT = ranked.find((t) => t.why === 'thin');
   const thin = !!thinT;
   // オッズが古くて最低額へ上げなかった（新しいオッズなら上げて買える）
@@ -689,7 +708,7 @@ function autoStakeBets(pred, { budget, strategy, types, blend, rule = AUTO_STAKE
   return { strategy, budget, tickets, dropped, auto: true, used, keepMinP: null, candidates: cands.length, skipped: !tickets.length, skipReason: skipReason && skipNote ? skipReason + skipNote : skipReason, stats, fresh };
 }
 
-export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto' } = {}) {
+export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY, types = DEFAULT_TYPES, blend: blendIn = 'auto', betTemp = null, keep = 'auto', rule = AUTO_STAKE } = {}) {
   const st = STRATEGIES[strategy] || STRATEGIES.balance;
   const blend = resolveBlend(blendIn, strategy);
   // オッズの下限（MIN_ODDS）。オッズを使わない予想（AI単独）では、1.1 倍以下を外すと検証期間の的中率が下がり回収率は変わらなかったので以前のまま
@@ -728,7 +747,8 @@ export function recommendBets(pred, { budget = 3000, strategy = DEFAULT_STRATEGY
   }
   if (st.onlyTypes) types = types.filter((t) => st.onlyTypes.includes(t));
   // 的中重視の自動（既定）：毎レース、当たる確率と払戻の見込みから自信に応じて金額まで決める。AI単独（オッズを使わない予想）は以前のまま
-  if (st.autoStake && isAutoKeep(keep) && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn });
+  // rule：的中重視の自動の規則（既定は AUTO_STAKE。検証で「古いオッズでも買った場合」を出すときだけ替える）
+  if (st.autoStake && isAutoKeep(keep) && betTemp == null && !pred.mlAi) return autoStakeBets(pred, { budget, strategy, types, blend: blendIn, rule });
   const minP = MIN_P[strategy] || MIN_P.balance;
   const score = SCORE[strategy] || SCORE.balance;
   // 候補は少し平らにした勝率で評価する（betTemp。的中率・期待値の表示もこの値。どれかが当たる確率は元の予想で計算）

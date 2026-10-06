@@ -32,7 +32,8 @@ const nums = (pred, idx) => idx.map((i) => pred.rows[i].entry.number);
 const TANPUKU = ['win', 'place'];
 // AI推奨：既定の券種（ワイド以外）。自動では期待値の高い馬連・三連複を追加の買い目にする（2026-10-05）。AI単独は以前の買い方なので単複のまま
 const AI_BUDGET = 1000;
-const aiRec = (pred, settings) => recommendBets(pred, { budget: AI_BUDGET, types: pred.mlAi ? TANPUKU : DEFAULT_TYPES, blend: settings?.blend });
+// settings.rule：的中重視の自動の規則（検証で「古いオッズでも買った場合」を出すときだけ。scripts/evaluate.mjs）
+const aiRec = (pred, settings) => recommendBets(pred, { budget: AI_BUDGET, types: pred.mlAi ? TANPUKU : DEFAULT_TYPES, blend: settings?.blend, ...(settings?.rule ? { rule: settings.rule } : {}) });
 
 export const BT_STRATEGIES = [
   { key: 'win', label: '単勝 ◎', build: (pred, m) => [{ type: 'win', idx: [m['◎']], stake: 100 }] },

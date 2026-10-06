@@ -232,8 +232,9 @@ for (const [key, rs] of Object.entries(results)) {
     };
   }
 }
-// 買う時刻ごと（いまの規則と前の規則）：直前（発走前の最後の更新）・5分前・10分前・60分前の候補（あれば）。R̂ は上と同じ（SETS で前進検証）
-const TIMINGS = (process.env.STAKE_TIMINGS || 'm1:直前（最後の更新）,m5:発走5分前,m10:発走10分前,m60:発走60分前').split(',').map((x) => {
+// 買う時刻ごと（いまの規則と前の規則）：直前（発走前の最後の更新）・5分前・10分前・60分前・2時間前（複勝のオッズが出るころ）の候補（あれば）。
+// R̂ は上と同じ（SETS で前進検証）。画面は発走 freshMin 分前より古いオッズでは買い目を出さない（仮）ので、10分前より前の行は古いオッズでも買った場合
+const TIMINGS = (process.env.STAKE_TIMINGS || 'm1:直前（最後の更新）,m5:発走5分前,m10:発走10分前,m60:発走60分前,m120:発走2時間前').split(',').map((x) => {
   const [prefix, label] = x.split(':');
   return { prefix, label };
 });

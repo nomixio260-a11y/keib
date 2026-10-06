@@ -24,6 +24,8 @@ function verdictOf(pred, rec) {
   const race = pred.race;
   if (race.provisional) return { kind: 'wait', title: '出馬表待ち', text: '特別登録の段階です。枠順・騎手・単勝オッズが出てから、期待値と当たる確率で買い目を決めます。' };
   if (pred.noOdds || rec?.noOdds) return { kind: 'wait', title: 'オッズ待ち', text: '単勝オッズが出たら、期待値と当たる確率で買い目を決めます。' };
+  // 的中重視の自動で、オッズが発走の数分前より古い：仮の買い目（金額なし）だけ示し、直前の新しいオッズで決める（AUTO_STAKE.freshOnly）
+  if (rec?.auto && rec.pending) return { kind: 'wait', title: '直前に決定', text: rec.pendingReason, tickets: (rec.provisional || []).map((t) => ({ ...t, stake: 0 })) };
   // 的中重視の自動：強い買い目か、このレースの条件で見込む回収率（R̂）に応じた金額の1点
   if (rec?.auto && rec.tickets?.length) {
     const part = (x) => {

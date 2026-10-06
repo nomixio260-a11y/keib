@@ -112,3 +112,24 @@ test('1日分の記録：発走1分前を過ぎたレースは記録しない。
   assert.deepEqual(Object.keys(after2).sort(), Object.keys(after).sort());
   for (const e of Object.values(after2)) assert.equal(e.used, 0);
 });
+
+test('1日分の記録：オッズが発走の freshMin 分前より古いレースは「直前に決定」なので記録しない（新しいオッズになってから記録する）', () => {
+  const races = [];
+  for (let seed = 1; seed <= 12; seed++) {
+    const race = makeRace({ seed, id: `s${seed}`, date: '2026-10-10' });
+    for (const e of race.entries) Object.assign(e, { placeMin: Math.round((1.2 + e.popularity * 0.3) * 10) / 10, placeMax: Math.round((1.7 + e.popularity * 0.6) * 10) / 10 });
+    const fav = race.entries.find((e) => e.popularity === 1);
+    for (const p of fav.past) Object.assign(p, { finish: 1, popularity: 1, margin: -0.8, time: Math.round((p.time - 1.5) * 10) / 10 });
+    const m = 10 * 60 + seed * 30;
+    Object.assign(race, { raceNo: seed, startTime: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` });
+    races.push(race);
+  }
+  const oddsAt = (race, min) => new Date(Date.parse(`${race.date}T${race.startTime}:00+09:00`) - min * 60000).toISOString();
+  // どのレースもオッズが発走60分前のもの → 記録しない
+  const stale = dayPicks(races.map((r) => ({ ...r, oddsAt: oddsAt(r, 60) })), null, { now: T0 });
+  assert.equal(Object.keys(stale).length, 0);
+  // 新しいオッズ（発走3分前）なら記録する
+  const fresh = dayPicks(races.map((r) => ({ ...r, oddsAt: oddsAt(r, 3) })), null, { now: T0 });
+  assert.ok(Object.keys(fresh).length >= 6, `${Object.keys(fresh).length}`);
+  assert.ok(Object.values(fresh).some((e) => e.used > 0), '買い目のあるレースがある');
+});
